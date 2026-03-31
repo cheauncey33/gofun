@@ -9,7 +9,7 @@ import (
 )
 
 // 用户提交的form表单，在user数据库中插入记录。
-func RegisterUser(username, password string, dormID int64) error {
+func Register(username, password string, dormID int64) error {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), 12)
 	if err != nil {
 		return err
@@ -29,9 +29,14 @@ func Login(username, password string) (string, error) {
 	if err := common.DB.Where("username =? ", username).First(&user).Error; err != nil {
 		return "", fmt.Errorf("用户不存在")
 	}
-	err := bcrypt.CompareHashAndPassword([]byte(password), []byte(user.Password))
+	err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
 	if err != nil {
 		return "", fmt.Errorf("密码错误")
 	}
 	return common.GenerateToken(user.ID)
+}
+func GetUserInfo(userID int64) (models.User, error) {
+	var user models.User
+	err := common.DB.Debug().Select("id", "username", "balance", "dorm_id").Where("id=?", userID).First(&user).Error
+	return user, err
 }

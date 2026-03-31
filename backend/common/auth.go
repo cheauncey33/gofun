@@ -1,7 +1,6 @@
 package common
 
 import (
-	"WHU_Snack_GO/common"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -19,7 +18,7 @@ func AuthMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		claims, err := common.ParseToken(tokenString)
+		claims, err := ParseToken(tokenString)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"code": 401,

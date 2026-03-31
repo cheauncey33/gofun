@@ -19,10 +19,10 @@ type Dormitory struct {
 }
 type User struct {
 	Base
-	Username string  `gorm:"unique;column:username;not null"`
-	Password string  `gorm:"column:password;not null"`
-	Balance  float64 `gorm:"type:decimal(10,2)"`
-	DormID   int64
+	Username string    `gorm:"unique;column:username;not null" json:"username"`
+	Password string    `gorm:"column:password;not null" json:"password"`
+	Balance  float64   `gorm:"type:decimal(10,2)" json:"balance"`
+	DormID   int64     `json:"dorm_id"`
 	Dorm     Dormitory `gorm:"foreignKey:DormID"`
 }
 type Product struct {
