@@ -25,7 +25,7 @@ func GetProductHandler(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{
-		"code":  20,
+		"code":  200,
 		"data":  products,
 		"total": total,
 	})

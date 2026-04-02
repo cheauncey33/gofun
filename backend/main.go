@@ -3,6 +3,7 @@ package main
 import (
 	"WHU_Snack_GO/common"
 	"WHU_Snack_GO/controller"
+	"WHU_Snack_GO/service"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -11,9 +12,13 @@ import (
 
 func main() {
 	common.InitDB()
+	common.InitRedis()
 	// common.SeedData()
 	r := gin.Default()
+	err := service.InitProductStockToRedis()
+	if err != nil {
 
+	}
 	//可以替换为
 	//r.Use(cors.Default())
 	r.Use(cors.New(cors.Config{
@@ -32,6 +37,8 @@ func main() {
 		{
 			auth.POST("/orders", controller.CreateOrderHandler)
 			auth.GET("/user/info", controller.GetUserInfoHandler)
+			auth.GET("/products", controller.GetProductHandler)
+
 		}
 	}
 	r.Run("127.0.0.1:8080")

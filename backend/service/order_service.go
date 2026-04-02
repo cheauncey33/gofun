@@ -8,13 +8,11 @@ import (
 	"gorm.io/gorm"
 )
 
-type OrderItemInput struct {
-	ProductID int64 `json:"product_id" binding:"required"`
-	Num       int   `json:"num" binding:"required,gt=0"`
-}
 type CreateOrderInput struct {
-	UserID int64            `json:"user_id" binding:"required"`
-	Items  []OrderItemInput `json:"items" binding:"required,dive"`
+	Items []struct {
+		ProductID int64 `json:"product_id" binding:"required"`
+		Num       int   `json:"num" binding:"required"`
+	} `json:"items" binding:"required,dive"`
 }
 
 //一种范式
@@ -25,13 +23,25 @@ type CreateOrderInput struct {
 // 1、学生表（记录余额、地址）需要动balance (update)
 // 2、产品表（记录产品的信息、库存）需要更新（update）
 // 3、订单主表和订单细节表需要增加记录（create）
-func CreateOrder(input CreateOrderInput) error {
+func CreateOrder(user_id int64, input CreateOrderInput) error {
+	for _, item := range input.Items {
+		redisKey := fmt.Sprintf("snack:stock:%d", item.ProductID)
+
+		newStock, err := common.RDB.DecrBy(common.Ctx, redisKey, int64(item.Num)).Result()
+		if err != nil {
+			return fmt.Errorf("系统繁忙")
+		}
+		if newStock < 0 {
+			common.RDB.IncrBy(common.Ctx, redisKey, int64(item.Num))
+			return fmt.Errorf("商品被抢完了！")
+		}
+	}
 	return common.DB.Transaction(func(tx *gorm.DB) error {
 		var totalAmount float64
 		var user models.User
 		//1、查询学生存到user中并上锁
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").First(&user, input.UserID).Error; err != nil {
-			return fmt.Errorf("用户ID %d 不存在", input.UserID)
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").First(&user, user_id).Error; err != nil {
+			return fmt.Errorf("用户ID %d 不存在", user_id)
 		}
 		//2、先检查每种目标商品的库存够不够，同时给商品加锁。够则直接Expr扣除
 		for _, item := range input.Items {
@@ -68,7 +78,7 @@ func CreateOrder(input CreateOrderInput) error {
 		//学生、库存的Update操作完成 开始完成Create操作
 		//将要插入的记录Order 和OrderItem存为结构体然后Create
 		newOrder := models.Order{
-			UserID:     input.UserID,
+			UserID:     user_id,
 			TotalPrice: totalAmount,
 			Status:     1,
 		}

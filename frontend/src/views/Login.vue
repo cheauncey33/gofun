@@ -82,7 +82,7 @@ async function handleLogin() {
     localStorage.setItem('token',res.data.token)
     localStorage.setItem('username',form.username)
     ElMessage.success('登录 成功')
-    emit('login success')
+    emit('login-success')
   }catch(e){
     ElMessage.error(e.response?.data?.msg||'登陆失败')
   }finally{

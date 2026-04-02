@@ -9,7 +9,15 @@ import (
 func CreateOrderHandler(c *gin.Context) {
 	//存放网页发来的订单请求
 	var req service.CreateOrderInput
-
+	uid, ok := c.Get("user_id")
+	if !ok {
+		c.JSON(401, gin.H{
+			"code": 401,
+			"msg":  "用户未授权",
+		})
+		return
+	}
+	user_id := uid.(int64)
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{
 			"code": 400,
@@ -17,7 +25,7 @@ func CreateOrderHandler(c *gin.Context) {
 		})
 		return
 	}
-	err := service.CreateOrder(service.CreateOrderInput(req))
+	err := service.CreateOrder(user_id, service.CreateOrderInput(req))
 	if err != nil {
 		c.JSON(500, gin.H{
 			"code": 500,

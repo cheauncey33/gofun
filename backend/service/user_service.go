@@ -23,7 +23,7 @@ func Register(username, password string, dormID int64) error {
 	return common.DB.Create(&user).Error
 }
 
-// 用户提交form表单，查询是否存在，存在则跳转
+// 用户提交form表单，查询账号谜面是否正确，存在则发送token
 func Login(username, password string) (string, error) {
 	var user models.User
 	if err := common.DB.Where("username =? ", username).First(&user).Error; err != nil {
@@ -33,6 +33,7 @@ func Login(username, password string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("密码错误")
 	}
+	//查到的user.id怎么存下来？
 	return common.GenerateToken(user.ID)
 }
 func GetUserInfo(userID int64) (models.User, error) {

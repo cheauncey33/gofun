@@ -4,6 +4,7 @@ import (
 	"WHU_Snack_GO/models"
 	"fmt"
 	"math/rand"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func SeedData() {
@@ -27,10 +28,12 @@ func SeedData() {
 		DB.FirstOrCreate(&dorms[i], models.Dormitory{BuildingName: dorms[i].BuildingName, RoomNumber: dorms[i].RoomNumber})
 	}
 
-	// 3. 生成测试用户 (Seed Users)
+	// 3. 生成测试用户 (Seed Users)，统一设置默认密码为 123456
+	hashedPwd, _ := bcrypt.GenerateFromPassword([]byte("123456"), bcrypt.DefaultCost)
+
 	users := []models.User{
-		{Username: "test_user_1", Password: "hashed_password", Balance: 500.00, DormID: dorms[0].ID},
-		{Username: "test_user_2", Password: "hashed_password", Balance: 50.00, DormID: dorms[1].ID},
+		{Username: "test_user_1", Password: string(hashedPwd), Balance: 500.00, DormID: dorms[0].ID},
+		{Username: "test_user_2", Password: string(hashedPwd), Balance: 50.00, DormID: dorms[1].ID},
 	}
 	for i := range users {
 		DB.FirstOrCreate(&users[i], models.User{Username: users[i].Username})
