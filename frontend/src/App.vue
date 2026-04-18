@@ -29,7 +29,7 @@ import Login from './views/Login.vue'
 import Register from './views/Register.vue'
 import Product from './views/Product.vue'
 
-// 设置 axios 全局请求拦截器
+// 设置 axios 全局【请求】拦截器
 axios.interceptors.request.use(config => {
   const token = localStorage.getItem('token')
   if (token) {
@@ -39,6 +39,20 @@ axios.interceptors.request.use(config => {
 }, error => {
   return Promise.reject(error)
 })
+//【响应】拦截器
+axios.interceptors.response.use(
+  (response)=>{
+    return response
+  },
+  (error)=>{
+    if(error.response&&error.response.status===401){
+      localStorage.removeItem('token')
+      localStorage.removeItem('username')
+      currentView.value='login'
+    }
+    return Promise.reject(error)
+  }
+)
 
 const currentView = ref('login')
 

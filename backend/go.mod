@@ -3,11 +3,15 @@ module WHU_Snack_GO
 go 1.25.6
 
 require (
+	github.com/bwmarrin/snowflake v0.3.0
 	github.com/gin-contrib/cors v1.7.7
 	github.com/gin-gonic/gin v1.12.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
+	github.com/patrickmn/go-cache v2.1.0+incompatible
+	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/redis/go-redis/v9 v9.18.0
 	golang.org/x/crypto v0.49.0
+	golang.org/x/time v0.15.0
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/gorm v1.31.1
 )
