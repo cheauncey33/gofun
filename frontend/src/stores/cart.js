@@ -1,4 +1,5 @@
 import { reactive, computed } from 'vue'
+import { imageUrl, productName } from '../utils/display.js'
 
 const state = reactive({ items: [] })
 
@@ -11,10 +12,10 @@ export function useCart() {
     } else {
       state.items.push({
         id: pid,
-        name: product.name,
+        name: productName(product),
         price: product.price,
         stock: product.stock,
-        image_url: product.image_url,
+        image_url: imageUrl(product.image_url),
         quantity: Math.min(quantity, product.stock),
       })
     }

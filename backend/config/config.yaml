@@ -40,8 +40,8 @@ ratelimit:
   ip_burst: 100000
 
 order_consumer:
-  worker_count: 4
-  prefetch_count: 5
+  worker_count: 12
+  prefetch_count: 10
 
 cors:
   allow_origins:

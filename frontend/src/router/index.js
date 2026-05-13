@@ -15,7 +15,6 @@ const routes = [
       { path: 'profile', name: 'UserCenter', component: () => import('../views/UserCenter.vue'), meta: { title: '个人中心' } },
       { path: 'seckill', name: 'SeckillList', component: () => import('../views/SeckillList.vue'), meta: { title: '秒杀活动' } },
       { path: 'seckill/:id', name: 'SeckillDetail', component: () => import('../views/SeckillDetail.vue'), meta: { title: '秒杀详情' } },
-      // Admin routes with guard
       { path: 'admin/dashboard', name: 'AdminDashboard', component: () => import('../views/admin/Dashboard.vue'), meta: { title: '数据看板', requiresAdmin: true } },
       { path: 'admin/products', name: 'AdminProducts', component: () => import('../views/admin/ProductAdmin.vue'), meta: { title: '商品管理', requiresAdmin: true } },
       { path: 'admin/orders', name: 'AdminOrders', component: () => import('../views/admin/OrderAdmin.vue'), meta: { title: '订单管理', requiresAdmin: true } },
@@ -33,9 +32,18 @@ router.beforeEach((to, from, next) => {
   const role = localStorage.getItem('role')
   const isAuthPage = to.path === '/login' || to.path === '/register'
 
-  if (!token && !isAuthPage) { next('/login'); return }
-  if (token && isAuthPage) { next('/'); return }
-  if (to.meta.requiresAdmin && role !== 'admin') { next('/'); return }
+  if (!token && !isAuthPage) {
+    next('/login')
+    return
+  }
+  if (token && isAuthPage) {
+    next('/')
+    return
+  }
+  if (to.meta.requiresAdmin && role !== 'admin') {
+    next('/')
+    return
+  }
   next()
 })
 
