@@ -1,0 +1,49 @@
+server:
+  host: "127.0.0.1"
+  port: 8080
+  mode: "release"
+
+mysql:
+  dsn: "root:root@tcp(127.0.0.1:3306)/whu_snack_go?charset=utf8mb4&parseTime=True&loc=Local"
+  max_idle_conns: 10
+  max_open_conns: 100
+  conn_max_lifetime: 300
+
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+  pool_size: 100
+
+rabbitmq:
+  url: "amqp://guest:guest@localhost:5672/"
+  queue_name: "order_queue"
+
+jwt:
+  secret: "replace-with-a-strong-secret-in-production"
+  expire_secs: 500
+
+snowflake:
+  node_id: 1
+
+log:
+  level: "info"
+  file_path: ""
+  max_size: 100
+  max_backups: 7
+  max_age: 30
+
+ratelimit:
+  global_rate: 100000
+  global_burst: 100000
+  ip_rate: 100000
+  ip_burst: 100000
+
+order_consumer:
+  worker_count: 4
+  prefetch_count: 5
+
+cors:
+  allow_origins:
+    - "http://127.0.0.1:5173"
+    - "http://localhost:5173"

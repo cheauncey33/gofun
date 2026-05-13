@@ -1,87 +1,98 @@
 package controller
 
 import (
+	"WHU_Snack_GO/common"
+	"WHU_Snack_GO/pkg/response"
 	"WHU_Snack_GO/service"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
 type LoginReq struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	Username string `json:"username" binding:"required,username"`
+	Password string `json:"password" binding:"required,password"`
 }
 
 type RegisterReq struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
-	DormID   int64  `json:"dorm_id" binding:"required"`
+	Username string `json:"username" binding:"required,username"`
+	Password string `json:"password" binding:"required,password"`
+	DormID   int64  `json:"dorm_id" binding:"required,gt=0"`
 }
 
 func RegisterHandler(c *gin.Context) {
 	var req RegisterReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{
-			"code": 400,
-			"msg":  "参数错误",
-		})
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
 		return
 	}
 	if err := service.Register(req.Username, req.Password, req.DormID); err != nil {
-		c.JSON(400, gin.H{
-			"code": 400,
-			"msg":  err.Error(),
-		})
+		response.Error(c, http.StatusBadRequest, response.CodeUserExists, err.Error())
 		return
 	}
-	c.JSON(200, gin.H{
-		"code": 200,
-		"msg":  "注册成功",
-	})
-
+	response.Success(c, nil)
 }
-func LoginHandler(c *gin.Context) {
 
+func LoginHandler(c *gin.Context) {
 	var req LoginReq
-	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
-		c.JSON(400, gin.H{
-			"code": 400,
-			"msg":  "参数错误",
-		})
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
 		return
 	}
 	token, err := service.Login(req.Username, req.Password)
 	if err != nil {
-		c.JSON(401, gin.H{
-			"code": 401,
-			"msg":  err.Error(),
-		})
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, err.Error())
 		return
 	}
-	c.JSON(200, gin.H{
-		"token": token,
-	})
+	response.Success(c, gin.H{"token": token})
 }
-func GetUserInfoHandler(c *gin.Context) {
-	uid, ok := c.Get("user_id")
-	if !ok {
-		c.JSON(401, gin.H{
-			"code": 401,
-			"msg":  "用户信息获取失败",
-		})
-		return
-	}
-	user, err := service.GetUserInfo(uid.(int64))
-	if err != nil {
-		c.JSON(404, gin.H{
-			"code": 404,
-			"msg":  "用户不存在",
-		})
-		return
-	}
-	c.JSON(200, gin.H{
-		"code": 200,
-		"msg":  "获取成功",
-		"data": user,
-	})
 
+func GetUserInfoHandler(c *gin.Context) {
+	userID, ok := common.GetUserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "用户信息获取失败")
+		return
+	}
+	user, err := service.GetUserInfo(userID)
+	if err != nil {
+		response.Error(c, http.StatusNotFound, response.CodeUserNotFound, "用户不存在")
+		return
+	}
+	response.Success(c, user)
+}
+
+func UpdateUserInfoHandler(c *gin.Context) {
+	userID, ok := common.GetUserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "用户信息获取失败")
+		return
+	}
+	var req service.UpdateUserInfoReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		return
+	}
+	if err := service.UpdateUserInfo(userID, req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, err.Error())
+		return
+	}
+	response.Success(c, nil)
+}
+
+func ChangePasswordHandler(c *gin.Context) {
+	userID, ok := common.GetUserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "用户信息获取失败")
+		return
+	}
+	var req service.ChangePasswordReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		return
+	}
+	if err := service.ChangePassword(userID, req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, err.Error())
+		return
+	}
+	response.Success(c, nil)
 }

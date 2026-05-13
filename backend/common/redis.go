@@ -1,6 +1,7 @@
 package common
 
 import (
+	"WHU_Snack_GO/config"
 	"context"
 	"fmt"
 
@@ -10,11 +11,12 @@ import (
 var RDB *redis.Client
 var Ctx = context.Background()
 
-func InitRedis() {
+func InitRedis(cfg config.RedisConfig) {
 	RDB = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       0,
+		Addr:     cfg.Addr,
+		Password: cfg.Password,
+		DB:       cfg.DB,
+		PoolSize: cfg.PoolSize,
 	})
 	pong, err := RDB.Ping(Ctx).Result()
 	if err != nil {

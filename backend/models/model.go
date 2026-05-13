@@ -7,7 +7,7 @@ import (
 )
 
 type Base struct {
-	ID         int64          `gorm:"primaryKey;column:id" json:"id"`
+	ID         int64          `gorm:"primaryKey;column:id" json:"id,string"`
 	UpdateTime time.Time      `gorm:"autoUpdateTime;column:update_time"`
 	CreateTime time.Time      `gorm:"autoCreateTime;column:create_time"`
 	DeleteTime gorm.DeletedAt `gorm:"index;column:delete_time"`
@@ -17,30 +17,102 @@ type Dormitory struct {
 	BuildingName string `gorm:"size:64;column:building_name;not null"`
 	RoomNumber   string `gorm:"size:32;column:room_number;not null"`
 }
+// TODO: float64 money fields (Balance, Price, TotalPrice etc.) should be changed
+// to int64 (cents) or use shopspring/decimal to avoid IEEE 754 rounding errors.
 type User struct {
 	Base
-	Username string    `gorm:"unique;column:username;not null" json:"username"`
-	Password string    `gorm:"column:password;not null" json:"password"`
-	Balance  float64   `gorm:"type:decimal(10,2)" json:"balance"`
-	DormID   int64     `json:"dorm_id"`
-	Dorm     Dormitory `gorm:"foreignKey:DormID"`
+	Username    string     `gorm:"unique;column:username;not null" json:"username"`
+	Password    string     `gorm:"column:password;not null" json:"-"`
+	Balance     float64    `gorm:"type:decimal(10,2)" json:"balance"`
+	Phone       *string    `gorm:"size:20" json:"phone"`
+	AvatarURL   string     `gorm:"size:512" json:"avatar_url"`
+	DormID      int64      `json:"dorm_id"`
+	Dorm        Dormitory  `gorm:"foreignKey:DormID" json:"dorm,omitempty"`
+	Role        string     `gorm:"size:16;default:'user'" json:"role"`
+	LastLoginAt *time.Time `json:"last_login_at"`
 }
+type ProductStatus int
+
+const (
+	ProductStatusOffSale ProductStatus = 0
+	ProductStatusOnSale  ProductStatus = 1
+)
+
 type Product struct {
 	Base
-	Name  string  `gorm:"size:128;not null" json:"name"`
-	Price float64 `gorm:"type:decimal(10,2)" json:"price"`
-	Stock int     `gorm:"not null" json:"stock"`
+	Name        string        `gorm:"size:128;not null;index" json:"name"`
+	Description string        `gorm:"type:text" json:"description"`
+	Price       float64       `gorm:"type:decimal(10,2);not null" json:"price"`
+	Stock       int           `gorm:"not null;default:0" json:"stock"`
+	ImageURL    string        `gorm:"size:512" json:"image_url"`
+	CategoryID  *int64        `gorm:"index" json:"category_id"`
+	Category    Category      `gorm:"foreignKey:CategoryID" json:"category,omitempty"`
+	Status      ProductStatus `gorm:"default:1;index" json:"status"`
+	SalesCount  int64         `gorm:"default:0" json:"sales_count"`
 }
+type OrderStatus int
+
+const (
+	OrderStatusPending    OrderStatus = 1
+	OrderStatusPaid       OrderStatus = 2
+	OrderStatusDelivering OrderStatus = 3
+	OrderStatusDelivered  OrderStatus = 4
+	OrderStatusCancelled  OrderStatus = 5
+	OrderStatusRefunding  OrderStatus = 6
+	OrderStatusRefunded   OrderStatus = 7
+)
+
+var orderTransitionMap = map[OrderStatus][]OrderStatus{
+	OrderStatusPending:    {OrderStatusPaid, OrderStatusCancelled},
+	OrderStatusPaid:       {OrderStatusDelivering, OrderStatusCancelled, OrderStatusRefunding},
+	OrderStatusDelivering: {OrderStatusDelivered, OrderStatusCancelled},
+	OrderStatusDelivered:  {OrderStatusRefunding},
+	OrderStatusRefunding:  {OrderStatusRefunded},
+}
+
+func (o OrderStatus) CanTransitionTo(target OrderStatus) bool {
+	allowed, ok := orderTransitionMap[o]
+	if !ok {
+		return false
+	}
+	for _, s := range allowed {
+		if s == target {
+			return true
+		}
+	}
+	return false
+}
+
+func (o OrderStatus) String() string {
+	switch o {
+	case OrderStatusPending:
+		return "pending"
+	case OrderStatusPaid:
+		return "paid"
+	case OrderStatusDelivering:
+		return "delivering"
+	case OrderStatusDelivered:
+		return "delivered"
+	case OrderStatusCancelled:
+		return "cancelled"
+	case OrderStatusRefunding:
+		return "refunding"
+	case OrderStatusRefunded:
+		return "refunded"
+	default:
+		return "unknown"
+	}
+}
+
 type Order struct {
 	Base
-	UserID     int64
-	User       User
-	TotalPrice float64 `gorm:"type:decimal(10,2)"`
-	Status     int     `gorm:"default:1"` //1-to be deliver 2-delivering 3-delivered
-	//和User-Dormitory一样Order-OrderItem同样是多对一 为啥gorm的foreignKey tag一个定义在User（子）中，一个定义在Order（父）
-	//这和实际应用相关：写在谁中说明需要谁preload得到另一方
-	//同样的gormTag 不同的含义
-	OrderItem []OrderItem `gorm:"foreignKey:OrderID"`
+	UserID       int64       `gorm:"index;not null" json:"user_id"`
+	User         User        `json:"user,omitempty"`
+	AddressID    *int64      `json:"address_id"`
+	TotalPrice   float64     `gorm:"type:decimal(10,2)" json:"total_price"`
+	Status       OrderStatus `gorm:"default:1;index" json:"status"`
+	CancelReason string      `gorm:"size:256" json:"cancel_reason"`
+	OrderItem    []OrderItem `gorm:"foreignKey:OrderID" json:"order_items,omitempty"`
 }
 type OrderItem struct {
 	Base

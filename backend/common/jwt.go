@@ -6,30 +6,35 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var MySecret = []byte("whu-snack-go")
+var JWTSecret []byte
+
+// SetJWTSecret 在启动时从config初始化JWT密钥
+func SetJWTSecret(secret string) {
+	JWTSecret = []byte(secret)
+}
 
 type MyClaims struct {
 	UserID int64 `json:"user_id"`
 	jwt.RegisteredClaims
 }
 
-// 用户登录成功后调用 给用户生成返回一个有效期为500s的jwt
-func GenerateToken(userID int64) (string, error) {
+// GenerateToken 用户登录成功后调用，生成有效期为expireSecs秒的jwt
+func GenerateToken(userID int64, expireSecs int) (string, error) {
 	claims := MyClaims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(500 * time.Second)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(expireSecs) * time.Second)),
 			Issuer:    "zyh",
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(MySecret)
+	return token.SignedString(JWTSecret)
 }
 
-// 对传入的jwt鉴伪
+// ParseToken 对传入的jwt鉴伪
 func ParseToken(tokenString string) (*MyClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &MyClaims{}, func(t *jwt.Token) (any, error) {
-		return MySecret, nil
+		return JWTSecret, nil
 	})
 	if err != nil {
 		return nil, err

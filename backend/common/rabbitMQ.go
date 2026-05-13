@@ -1,36 +1,85 @@
 package common
 
 import (
+	"WHU_Snack_GO/config"
+	"context"
 	"fmt"
+	"sync"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 var MQConn *amqp.Connection
 var MQChannel *amqp.Channel
+var MQQueueName string
 
-func InitRabbitMQ() {
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
+var publishMu sync.Mutex
+
+func InitRabbitMQ(cfg config.RabbitMQConfig) {
+	conn, err := amqp.Dial(cfg.URL)
 	if err != nil {
 		panic(fmt.Errorf("rabbitMQ connection error:%w", err))
 	}
 	MQConn = conn
+	MQQueueName = cfg.QueueName
 	ch, err := conn.Channel()
 	if err != nil {
 		panic(fmt.Errorf("rabbit getting channel error:%w", err))
 	}
 	MQChannel = ch
-	// 声明一个名为 "order_queue" 的队列，准备随时接信
 	_, err = MQChannel.QueueDeclare(
-		"order_queue", // 队列组名
-		true,          // 是否持久化
-		false,         // 是否自动删除
-		false,         // 是否排他
-		false,         // 是否不等待
-		nil,           // 额外属性
+		cfg.QueueName,
+		true,
+		false,
+		false,
+		false,
+		nil,
 	)
 	if err != nil {
-		panic(fmt.Errorf("🐰 声明接头暗号队列失败: %w", err))
+		panic(fmt.Errorf("声明队列失败: %w", err))
 	}
 	fmt.Println("Success to init rabbitMQ")
+}
+
+func NewMQChannel() (*amqp.Channel, error) {
+	if MQConn == nil {
+		return nil, fmt.Errorf("rabbitMQ connection is not initialized")
+	}
+	ch, err := MQConn.Channel()
+	if err != nil {
+		return nil, fmt.Errorf("rabbit getting channel error:%w", err)
+	}
+	if _, err := ch.QueueDeclare(
+		MQQueueName,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		_ = ch.Close()
+		return nil, fmt.Errorf("声明队列失败: %w", err)
+	}
+	return ch, nil
+}
+
+func PublishPersistent(ctx context.Context, body []byte) error {
+	if MQChannel == nil {
+		return fmt.Errorf("rabbitMQ publish channel is not initialized")
+	}
+	publishMu.Lock()
+	defer publishMu.Unlock()
+
+	return MQChannel.PublishWithContext(
+		ctx,
+		"",
+		MQQueueName,
+		false,
+		false,
+		amqp.Publishing{
+			ContentType:  "application/json",
+			Body:         body,
+			DeliveryMode: amqp.Persistent,
+		},
+	)
 }

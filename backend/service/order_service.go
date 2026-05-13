@@ -7,31 +7,38 @@ import (
 	"encoding/json"
 	"fmt"
 
-	amqp "github.com/rabbitmq/amqp091-go"
 	"gorm.io/gorm"
 )
 
+type CreateOrderItemInput struct {
+	ProductID int64 `json:"product_id" binding:"required,gt=0"`
+	Num       int   `json:"num" binding:"required,gt=0"`
+}
+
 type CreateOrderInput struct {
-	Items []struct {
-		ProductID int64 `json:"product_id" binding:"required"`
-		Num       int   `json:"num" binding:"required"`
-	} `json:"items" binding:"required,dive"`
+	Items []CreateOrderItemInput `json:"items" binding:"required,min=1,dive"`
 }
 type OrderMessage struct {
-	OrderID int64            `json:"order_id"`
-	UserID  int64            `json:"user_id"`
-	Items   CreateOrderInput `json:"items"`
+	OrderID           int64            `json:"order_id"`
+	UserID            int64            `json:"user_id"`
+	SeckillActivityID int64            `json:"seckill_activity_id,omitempty"`
+	SeckillPrice      float64          `json:"seckill_price"` // 0=use product.Price
+	Items             CreateOrderInput `json:"items"`
 }
 
 var deductStockLua = `
 local keys = KEYS
-local args=ARGS
+local args=ARGV
 
 for i=1, #keys do
 	local stock = tonumber(redis.call('GET',keys[i]))
 	local reqNum =tonumber(args[i])
 
-	if stock ==nil or stock < reqNum then 
+	if reqNum == nil or reqNum <= 0 then
+		return -1000
+	end
+
+	if stock ==nil or stock < reqNum then
 		return -i
 	end
 end
@@ -44,10 +51,15 @@ return 1
 `
 
 func CreateOrder(user_id int64, input CreateOrderInput) error {
+	normalizedInput, err := normalizeCreateOrderInput(input)
+	if err != nil {
+		return err
+	}
+
 	var keys []string
 	var args []any
 
-	for _, item := range input.Items {
+	for _, item := range normalizedInput.Items {
 		keys = append(keys, fmt.Sprintf("snack:stock:%d", item.ProductID))
 		args = append(args, item.Num)
 	}
@@ -63,24 +75,12 @@ func CreateOrder(user_id int64, input CreateOrderInput) error {
 	msg := OrderMessage{
 		OrderID: orderID,
 		UserID:  user_id,
-		Items:   input,
+		Items:   normalizedInput,
 	}
 	body, _ := json.Marshal(msg)
-	//这个err记录的是这条消息有没有成功发送到rabbitMQ中 而不是异步的或者阻塞的等待这条消息的成功执行
-	err = common.MQChannel.PublishWithContext(
-		context.Background(),
-		"",
-		"order_queue",
-		false,
-		false,
-		amqp.Publishing{
-			ContentType:  "text/plain",
-			Body:         body,
-			DeliveryMode: amqp.Persistent,
-		},
-	)
+	err = common.PublishPersistent(context.Background(), body)
 	if err != nil {
-		for _, item := range input.Items {
+		for _, item := range normalizedInput.Items {
 			redisKey := fmt.Sprintf("snack:stock:%d", item.ProductID)
 			common.RDB.IncrBy(common.Ctx, redisKey, int64(item.Num))
 		}
@@ -89,203 +89,286 @@ func CreateOrder(user_id int64, input CreateOrderInput) error {
 	return nil
 }
 
-//一种范式
-//围绕curd，分析每一动作具体需要修改哪些东西 涉及到哪些crud
+func validateCreateOrderInput(input CreateOrderInput) error {
+	_, err := normalizeCreateOrderInput(input)
+	return err
+}
 
-// 传入input-用户UserID，用户买的各种商品——【】OrderItem。  每个OrderItem定义为ProductID、Num(购买数量)
-// 想一下需要修改哪些东西?要检查哪些表：
-// 1、学生表（记录余额、地址）需要动balance (update)
-// 2、产品表（记录产品的信息、库存）需要更新（update）
-// 3、订单主表和订单细节表需要增加记录（create）
-// func CreateOrder(user_id int64, input CreateOrderInput) error {
-// 	for _, item := range input.Items {
-// 		redisKey := fmt.Sprintf("snack:stock:%d", item.ProductID)
+func normalizeCreateOrderInput(input CreateOrderInput) (CreateOrderInput, error) {
+	if len(input.Items) == 0 {
+		return CreateOrderInput{}, fmt.Errorf("订单商品不能为空")
+	}
 
-// 		newStock, err := common.RDB.DecrBy(common.Ctx, redisKey, int64(item.Num)).Result()
-// 		if err != nil {
-// 			return fmt.Errorf("系统繁忙")
-// 		}
-// 		if newStock < 0 {
-// 			common.RDB.IncrBy(common.Ctx, redisKey, int64(item.Num))
-// 			return fmt.Errorf("商品被抢完了！")
-// 		}
-// 	}
-// 	msg := OrderMessage{
-// 		UserID: user_id,
-// 		Items:  input,
-// 	}
-// 	body, _ := json.Marshal(msg)
-// 	err := common.MQChannel.PublishWithContext(
-// 		context.Background(),
-// 		"",
-// 		"order_queue",
-// 		false,
-// 		false,
-// 		amqp.Publishing{
-// 			ContentType:  "text/plain",
-// 			Body:         body,
-// 			DeliveryMode: amqp.Persistent,
-// 		},
-// 	)
-// 	if err != nil {
-// 		return fmt.Errorf("发信失败")
-// 	}
-// 	return nil
+	quantities := make(map[int64]int, len(input.Items))
+	productIDs := make([]int64, 0, len(input.Items))
+	for _, item := range input.Items {
+		if item.ProductID <= 0 {
+			return CreateOrderInput{}, fmt.Errorf("商品ID无效")
+		}
+		if item.Num <= 0 {
+			return CreateOrderInput{}, fmt.Errorf("商品数量必须大于0")
+		}
+		if _, exists := quantities[item.ProductID]; !exists {
+			productIDs = append(productIDs, item.ProductID)
+		}
+		quantities[item.ProductID] += item.Num
+	}
 
-// 	// txErr := common.DB.Transaction(func(tx *gorm.DB) error {
-// 	// 	var totalAmount float64
-// 	// 	var user models.User
-// 	// 	//1、查询学生存到user中并上锁
-// 	// 	if err := tx.Set("gorm:query_option", "FOR UPDATE").First(&user, user_id).Error; err != nil {
-// 	// 		return fmt.Errorf("用户ID %d 不存在", user_id)
-// 	// 	}
-// 	// 	//2、先检查每种目标商品的库存够不够，同时给商品加锁。够则直接Expr扣除
-// 	// 	for _, item := range input.Items {
-// 	// 		var product models.Product
-// 	// 		fmt.Println(item.ProductID, item.Num)
-// 	// 		//锁住并检查目标商品库存
-// 	// 		if err := tx.Set("gorm:query_option", "FOR UPDATE").First(&product, item.ProductID).Error; err != nil {
-// 	// 			return fmt.Errorf("商品ID %d 不存在", item.ProductID)
-// 	// 		}
-// 	// 		if product.Stock < item.Num {
-// 	// 			return fmt.Errorf("商品%s库存不足 Asked for %d which is %d left", product.Name, item.Num, product.Stock)
-// 	// 		}
+	normalized := CreateOrderInput{Items: make([]CreateOrderItemInput, 0, len(productIDs))}
+	for _, productID := range productIDs {
+		normalized.Items = append(normalized.Items, CreateOrderItemInput{
+			ProductID: productID,
+			Num:       quantities[productID],
+		})
+	}
+	return normalized, nil
+}
 
-// 	// 		//库存足够则原子扣除
-// 	// 		res := tx.Model(&product).
-// 	// 			Where("id=? AND stock >=?", item.ProductID, item.Num).
-// 	// 			Update("stock", gorm.Expr("stock-?", item.Num))
-
-// 	// 		if res.Error != nil || res.RowsAffected == 0 {
-// 	// 			return fmt.Errorf("商品 %s 库存扣减失败，可能已经被抢光", product.Name)
-// 	// 		}
-// 	// 		totalAmount += product.Price * float64(item.Num)
-
-// 	// 	}
-
-// 	// 	//3、库存够检查user的余额够不够
-// 	// 	if user.Balance < totalAmount {
-// 	// 		return fmt.Errorf("余额不足，总价 %.2f，当前余额%.2f", totalAmount, user.Balance)
-// 	// 	}
-// 	// 	if err := tx.Model(&user).Update("balance", gorm.Expr("balance-?", totalAmount)).Error; err != nil {
-// 	// 		return fmt.Errorf("余额扣减失败")
-// 	// 	}
-
-// 	// 	//学生、库存的Update操作完成 开始完成Create操作
-// 	// 	//将要插入的记录Order 和OrderItem存为结构体然后Create
-// 	// 	newOrder := models.Order{
-// 	// 		UserID:     user_id,
-// 	// 		TotalPrice: totalAmount,
-// 	// 		Status:     1,
-// 	// 	}
-// 	// 	if err := tx.Create(&newOrder).Error; err != nil {
-// 	// 		return err
-// 	// 	}
-
-// 	// 	//创建order_item{OrderID,ProductID,Product,Quantity,SnapshotPrice} 所以要遍历输入的每一个item
-// 	// 	for _, item := range input.Items {
-// 	// 		var p models.Product
-// 	// 		tx.First(&p, item.ProductID)
-
-// 	// 		detail := models.OrderItem{
-// 	// 			OrderID:       newOrder.ID,
-// 	// 			ProductID:     item.ProductID,
-// 	// 			Quantity:      item.Num,
-// 	// 			SnapshotPrice: p.Price,
-// 	// 		}
-// 	// 		if err := tx.Create(&detail).Error; err != nil {
-// 	// 			return err
-// 	// 		}
-// 	// 	}
-
-//		// 	// 函数返回 nil，事务自动 Commit；返回 error，事务自动 Rollback
-//		// 	return nil
-//		// })
-//		// if txErr != nil {
-//		// 	for _, item := range input.Items {
-//		// 		redisKey := fmt.Sprintf("snack:stock:%d", item.ProductID)
-//		// 		common.RDB.IncrBy(common.Ctx, redisKey, int64(item.Num)).Result()
-//		// 	}
-//		// 	return txErr
-//		// }
-//	}
 func ProcessOrderTask(msg OrderMessage) error {
+	if msg.OrderID <= 0 {
+		return fmt.Errorf("订单ID无效")
+	}
+	if msg.UserID <= 0 {
+		return fmt.Errorf("用户ID无效")
+	}
+	normalizedInput, err := normalizeCreateOrderInput(msg.Items)
+	if err != nil {
+		return err
+	}
+	msg.Items = normalizedInput
+
+	var existing int64
+	if err := common.DB.Model(&models.Order{}).Where("id = ?", msg.OrderID).Count(&existing).Error; err != nil {
+		return err
+	}
+	if existing > 0 {
+		return nil
+	}
+
 	txErr := common.DB.Transaction(func(tx *gorm.DB) error {
 		var totalAmount float64
-		var user models.User
-		//1、查询学生存到user中并上锁
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").First(&user, msg.UserID).Error; err != nil {
-			return fmt.Errorf("用户ID %d 不存在", msg.UserID)
-		}
-		//2、先检查每种目标商品的库存够不够，同时给商品加锁。够则直接Expr扣除
+
+		productIDs := make([]int64, 0, len(msg.Items.Items))
 		for _, item := range msg.Items.Items {
-			var product models.Product
-			fmt.Println(item.ProductID, item.Num)
-			//锁住并检查目标商品库存
-			if err := tx.Set("gorm:query_option", "FOR UPDATE").First(&product, item.ProductID).Error; err != nil {
+			productIDs = append(productIDs, item.ProductID)
+		}
+
+		var products []models.Product
+		if err := tx.Where("id IN ?", productIDs).Find(&products).Error; err != nil {
+			return err
+		}
+		if len(products) != len(productIDs) {
+			return fmt.Errorf("部分商品不存在")
+		}
+
+		productMap := make(map[int64]models.Product, len(products))
+		for _, product := range products {
+			productMap[product.ID] = product
+		}
+
+		orderItems := make([]models.OrderItem, 0, len(msg.Items.Items))
+		for _, item := range msg.Items.Items {
+			product, ok := productMap[item.ProductID]
+			if !ok {
 				return fmt.Errorf("商品ID %d 不存在", item.ProductID)
 			}
-			if product.Stock < item.Num {
-				return fmt.Errorf("商品%s库存不足 Asked for %d which is %d left", product.Name, item.Num, product.Stock)
+			if product.Status != models.ProductStatusOnSale {
+				return fmt.Errorf("商品%s已下架", product.Name)
 			}
 
-			//库存足够则原子扣除
-			res := tx.Model(&product).
-				Where("id=? AND stock >=?", item.ProductID, item.Num).
-				Update("stock", gorm.Expr("stock-?", item.Num))
-
+			res := tx.Model(&models.Product{}).
+				Where("id = ? AND stock >= ?", item.ProductID, item.Num).
+				Update("stock", gorm.Expr("stock - ?", item.Num))
 			if res.Error != nil || res.RowsAffected == 0 {
 				return fmt.Errorf("商品 %s 库存扣减失败，可能已经被抢光", product.Name)
 			}
-			totalAmount += product.Price * float64(item.Num)
 
+			price := product.Price
+			if msg.SeckillPrice > 0 {
+				price = msg.SeckillPrice
+			}
+			totalAmount += price * float64(item.Num)
+
+			orderItems = append(orderItems, models.OrderItem{
+				OrderID:       msg.OrderID,
+				ProductID:     item.ProductID,
+				Quantity:      item.Num,
+				SnapshotPrice: price,
+			})
 		}
 
-		//3、库存够检查user的余额够不够
-		if user.Balance < totalAmount {
-			return fmt.Errorf("余额不足，总价 %.2f，当前余额%.2f", totalAmount, user.Balance)
-		}
-		if err := tx.Model(&user).Update("balance", gorm.Expr("balance-?", totalAmount)).Error; err != nil {
+		balanceResult := tx.Model(&models.User{}).
+			Where("id = ? AND balance >= ?", msg.UserID, totalAmount).
+			Update("balance", gorm.Expr("balance - ?", totalAmount))
+		if balanceResult.Error != nil {
 			return fmt.Errorf("余额扣减失败")
 		}
+		if balanceResult.RowsAffected == 0 {
+			return fmt.Errorf("余额不足或用户不存在，总价 %.2f", totalAmount)
+		}
 
-		//学生、库存的Update操作完成 开始完成Create操作
-		//将要插入的记录Order 和OrderItem存为结构体然后Create
 		newOrder := models.Order{
 			Base:       models.Base{ID: msg.OrderID},
 			UserID:     msg.UserID,
 			TotalPrice: totalAmount,
-			Status:     1,
+			Status:     models.OrderStatusPaid,
 		}
 		if err := tx.Create(&newOrder).Error; err != nil {
 			return err
 		}
 
-		//创建order_item{OrderID,ProductID,Product,Quantity,SnapshotPrice} 所以要遍历输入的每一个item
-		for _, item := range msg.Items.Items {
-			var p models.Product
-			tx.First(&p, item.ProductID)
+		if err := tx.Create(&orderItems).Error; err != nil {
+			return err
+		}
 
-			detail := models.OrderItem{
-				OrderID:       newOrder.ID,
-				ProductID:     item.ProductID,
-				Quantity:      item.Num,
-				SnapshotPrice: p.Price,
-			}
-			if err := tx.Create(&detail).Error; err != nil {
+		for _, item := range msg.Items.Items {
+			if err := tx.Model(&models.Product{}).Where("id = ?", item.ProductID).
+				Update("sales_count", gorm.Expr("sales_count + ?", item.Num)).Error; err != nil {
 				return err
 			}
 		}
 
-		// 函数返回 nil，事务自动 Commit；返回 error，事务自动 Rollback
+		if msg.SeckillActivityID > 0 {
+			seckillOrder := models.SeckillOrder{
+				UserID:     msg.UserID,
+				ActivityID: msg.SeckillActivityID,
+				OrderID:    newOrder.ID,
+				Amount:     totalAmount,
+			}
+			if err := tx.Create(&seckillOrder).Error; err != nil {
+				return err
+			}
+		}
+
 		return nil
 	})
-	if txErr != nil {
+	return txErr
+}
+
+func RollbackReservedStock(msg OrderMessage) {
+	if msg.SeckillActivityID > 0 {
+		stockKey := fmt.Sprintf("seckill:stock:%d", msg.SeckillActivityID)
+		userKey := fmt.Sprintf("seckill:user_count:%d", msg.SeckillActivityID)
 		for _, item := range msg.Items.Items {
-			redisKey := fmt.Sprintf("snack:stock:%d", item.ProductID)
-			common.RDB.IncrBy(common.Ctx, redisKey, int64(item.Num)).Result()
+			common.RDB.IncrBy(common.Ctx, stockKey, int64(item.Num))
+			common.RDB.HIncrBy(common.Ctx, userKey, fmt.Sprintf("%d", msg.UserID), int64(-item.Num))
 		}
-		return txErr
+		return
 	}
-	return nil
+
+	for _, item := range msg.Items.Items {
+		redisKey := fmt.Sprintf("snack:stock:%d", item.ProductID)
+		common.RDB.IncrBy(common.Ctx, redisKey, int64(item.Num))
+	}
+}
+
+// GetOrderList 用户订单列表
+func GetOrderList(userID int64, page, pageSize int, status *int) ([]models.Order, int64, error) {
+	var orders []models.Order
+	var total int64
+
+	query := common.DB.Model(&models.Order{}).Where("user_id = ?", userID)
+	if status != nil {
+		query = query.Where("status = ?", *status)
+	}
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * pageSize
+	err := query.Preload("OrderItem.Product").
+		Order("create_time DESC").
+		Limit(pageSize).Offset(offset).
+		Find(&orders).Error
+
+	return orders, total, err
+}
+
+// GetOrderDetail 订单详情
+func GetOrderDetail(orderID, userID int64) (*models.Order, error) {
+	var order models.Order
+	err := common.DB.Preload("OrderItem.Product").
+		Where("id = ? AND user_id = ?", orderID, userID).
+		First(&order).Error
+	if err != nil {
+		return nil, err
+	}
+	return &order, nil
+}
+
+// CancelOrder 取消订单
+func CancelOrder(orderID, userID int64, reason string) error {
+	var order models.Order
+	if err := common.DB.Where("id = ? AND user_id = ?", orderID, userID).First(&order).Error; err != nil {
+		return fmt.Errorf("订单不存在")
+	}
+
+	if !order.Status.CanTransitionTo(models.OrderStatusCancelled) {
+		return fmt.Errorf("当前订单状态不允许取消")
+	}
+
+	return common.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&order).Updates(map[string]interface{}{
+			"status":        models.OrderStatusCancelled,
+			"cancel_reason": reason,
+		}).Error; err != nil {
+			return err
+		}
+
+		var items []models.OrderItem
+		if err := tx.Where("order_id = ?", orderID).Find(&items).Error; err != nil {
+			return err
+		}
+		for _, item := range items {
+			tx.Model(&models.Product{}).Where("id = ?", item.ProductID).
+				Update("stock", gorm.Expr("stock + ?", item.Quantity))
+			redisKey := fmt.Sprintf("snack:stock:%d", item.ProductID)
+			common.RDB.IncrBy(common.Ctx, redisKey, int64(item.Quantity))
+		}
+
+		tx.Model(&models.User{}).Where("id = ?", order.UserID).
+			Update("balance", gorm.Expr("balance + ?", order.TotalPrice))
+
+		return nil
+	})
+}
+
+// RequestRefund 退款申请
+func RequestRefund(orderID, userID int64, reason string) error {
+	var order models.Order
+	if err := common.DB.Where("id = ? AND user_id = ?", orderID, userID).First(&order).Error; err != nil {
+		return fmt.Errorf("订单不存在")
+	}
+
+	if !order.Status.CanTransitionTo(models.OrderStatusRefunding) {
+		return fmt.Errorf("当前订单状态不允许退款")
+	}
+
+	return common.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&order).Update("status", models.OrderStatusRefunding).Error; err != nil {
+			return err
+		}
+
+		var items []models.OrderItem
+		if err := tx.Where("order_id = ?", orderID).Find(&items).Error; err != nil {
+			return err
+		}
+		for _, item := range items {
+			tx.Model(&models.Product{}).Where("id = ?", item.ProductID).
+				Update("stock", gorm.Expr("stock + ?", item.Quantity))
+			redisKey := fmt.Sprintf("snack:stock:%d", item.ProductID)
+			common.RDB.IncrBy(common.Ctx, redisKey, int64(item.Quantity))
+		}
+
+		tx.Model(&models.User{}).Where("id = ?", order.UserID).
+			Update("balance", gorm.Expr("balance + ?", order.TotalPrice))
+
+		tx.Model(&order).Updates(map[string]interface{}{
+			"status":        models.OrderStatusRefunded,
+			"cancel_reason": reason,
+		})
+
+		return nil
+	})
 }

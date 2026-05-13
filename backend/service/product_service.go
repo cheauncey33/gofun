@@ -14,62 +14,100 @@ type ProductListCache struct {
 }
 
 type ProductListQuery struct {
-	Page     int `form:"page,default=1"`
-	PageSize int `form:"page_size,default=10"`
+	Page       int    `form:"page,default=1"`
+	PageSize   int    `form:"page_size,default=10"`
+	CategoryID *int64 `form:"category_id"`
+	Keyword    string `form:"keyword"`
+	SortBy     string `form:"sort_by"` // price_asc, price_desc, sales, newest
 }
 
-// service 完成什么？对数据库的crud
-// GetPRoductList完成什么？按照传来的ProductListQuery查询目标页的商品记录，存储到返回值中
-// 所以要read product表
-func GetProductList(query ProductListQuery) ([]models.Product, int64, error) {
-	cacheKey := fmt.Sprintf("product:list:page=%d:size=%d", query.Page, query.PageSize)
+func (q *ProductListQuery) Normalize() {
+	if q.Page < 1 {
+		q.Page = 1
+	}
+	if q.PageSize < 1 || q.PageSize > 100 {
+		q.PageSize = 10
+	}
+}
 
-	//========  一级缓存——查本地内存缓存（听说是纳秒级）  ===========
+func GetProductList(query ProductListQuery) ([]models.Product, int64, error) {
+	query.Normalize()
+	cacheKey := fmt.Sprintf("product:list:page=%d:size=%d:cat=%v:kw=%s:sort=%s",
+		query.Page, query.PageSize, query.CategoryID, query.Keyword, query.SortBy)
+
+	// L1: 本地缓存
 	if val, found := common.LocalCache.Get(cacheKey); found {
 		cached := val.(ProductListCache)
 		return cached.Products, cached.Total, nil
 	}
 
-	//========  二级缓存——查redis缓存（微秒级）  ==========
-	//Redis 和本地缓存不同，Redis 里只能存字符串（或二进制），不能直接存 Go 的结构体。
-	//写入时：把 ProductListCache 序列化成 JSON 字符串再存
-	//读取时：从 Redis 取出 JSON 字符串再反序列化回来----unmarshal
+	// L2: Redis
 	redisVal, err := common.RDB.Get(common.Ctx, cacheKey).Result()
 	if err == nil {
-		//说明查redis查到了
 		var cached ProductListCache
 		if json.Unmarshal([]byte(redisVal), &cached) == nil {
 			common.LocalCache.Set(cacheKey, cached, 0)
 			return cached.Products, cached.Total, nil
 		}
 	}
-	//========  三级缓存——查mysql硬盘缓存（毫秒级）  ==========
+
+	// L3: MySQL — 构建查询
 	var products []models.Product
 	var total int64
 
-	//先统计一共有多少商品 便于展示一共多少页
-	common.DB.Model(&models.Product{}).Count(&total)
+	db := common.DB.Model(&models.Product{}).Preload("Category").Where("status = ?", models.ProductStatusOnSale)
+
+	if query.CategoryID != nil {
+		db = db.Where("category_id = ?", *query.CategoryID)
+	}
+	if query.Keyword != "" {
+		db = db.Where("name LIKE ? OR description LIKE ?", "%"+query.Keyword+"%", "%"+query.Keyword+"%")
+	}
+
+	// 排序
+	switch query.SortBy {
+	case "price_asc":
+		db = db.Order("price ASC")
+	case "price_desc":
+		db = db.Order("price DESC")
+	case "sales":
+		db = db.Order("sales_count DESC")
+	case "newest":
+		db = db.Order("create_time DESC")
+	default:
+		db = db.Order("id DESC")
+	}
+
+	db.Count(&total)
 
 	offset := (query.Page - 1) * query.PageSize
-	err = common.DB.Limit(query.PageSize).Offset(offset).Find(&products).Error
+	err = db.Limit(query.PageSize).Offset(offset).Find(&products).Error
 	if err != nil {
 		return nil, 0, err
 	}
-	//查完mysql写入一二级缓存
-	//写入本地一级缓存
-	common.LocalCache.Set(cacheKey, ProductListCache{
-		Products: products,
-		Total:    total,
-	}, 0)
-	//写入redis二级缓存 有效期设为5分钟
-	jsonBytes, _ := json.Marshal(ProductListCache{
-		Products: products,
-		Total:    total,
-	})
-	common.RDB.Set(common.Ctx, cacheKey, string(jsonBytes), 5*time.Minute)
-	return products, total, err
 
-	// }
+	// 回填缓存
+	cached := ProductListCache{Products: products, Total: total}
+	common.LocalCache.Set(cacheKey, cached, 0)
+	jsonBytes, _ := json.Marshal(cached)
+	common.RDB.Set(common.Ctx, cacheKey, string(jsonBytes), 5*time.Minute)
+
+	return products, total, nil
+}
+
+func GetProductDetail(productID int64) (*models.Product, error) {
+	var product models.Product
+	err := common.DB.Preload("Category").First(&product, productID).Error
+	if err != nil {
+		return nil, err
+	}
+	return &product, nil
+}
+
+func GetCategoryList() ([]models.Category, error) {
+	var categories []models.Category
+	err := common.DB.Order("sort ASC, id ASC").Find(&categories).Error
+	return categories, err
 }
 
 func InitProductStockToRedis() error {

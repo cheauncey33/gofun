@@ -1,0 +1,49 @@
+server:
+  host: "127.0.0.1"
+  port: 8080
+  mode: "debug"  # debug | release | test
+
+mysql:
+  dsn: "root:root@tcp(127.0.0.1:3306)/whu_snack_go?charset=utf8mb4&parseTime=True&loc=Local"
+  max_idle_conns: 10
+  max_open_conns: 100
+  conn_max_lifetime: 300
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+  pool_size: 100
+
+rabbitmq:
+  url: "amqp://guest:guest@localhost:5672/"
+  queue_name: "order_queue"
+
+jwt:
+  secret: "change-me-to-a-random-string"
+  expire_secs: 500
+
+snowflake:
+  node_id: 1
+
+log:
+  level: "debug"  # debug | info | warn | error
+  file_path: ""   # 留空只输出到控制台；填路径则同时写文件
+  max_size: 100   # MB, 日志轮转大小
+  max_backups: 7
+  max_age: 30     # days
+
+ratelimit:
+  global_rate: 1000
+  global_burst: 1200
+  ip_rate: 10
+  ip_burst: 20
+
+order_consumer:
+  worker_count: 4
+  prefetch_count: 5
+
+cors:
+  allow_origins:
+    - "http://127.0.0.1:5173"
+    - "http://localhost:5173"

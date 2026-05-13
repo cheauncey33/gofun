@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go get:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go mod:*)",
+      "Bash(docker pull rabbitmq:management:*)",
+      "Bash(docker pull redis:latest:*)",
+      "Bash(docker rm:*)",
+      "Bash(docker run:*)",
+      "Bash(go run:*)",
+      "Bash(curl -s -X POST http://127.0.0.1:8080/api/v1/register -H 'Content-Type: application/json' -d '{\"username\":\"test\",\"password\":\"123456\",\"dorm_id\":1}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8080/api/v1/login -H 'Content-Type: application/json' -d '{\"username\":\"test\",\"password\":\"123456\"}')",
+      "Bash(curl -s \"http://127.0.0.1:8080/api/v1/products?page=1&page_size=3\")",
+      "Bash(curl -s http://127.0.0.1:8080/metrics)",
+      "Bash(curl -s -X POST http://127.0.0.1:8080/api/v1/register -H 'Content-Type: application/json' -d '{\"username\":\"bob\",\"password\":\"123456\",\"dorm_id\":1}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8080/api/v1/login -H 'Content-Type: application/json' -d '{\"username\":\"bob\",\"password\":\"123456\"}')",
+      "Bash(curl -s http://127.0.0.1:8080/api/v1/user/info -H 'Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjozLCJpc3MiOiJ6eWgiLCJleHAiOjE3Nzg2NTE5MTd9.otH0tC2zfszsYMsn4SQV3F6DCFza0EyOtE1xDzije_s')",
+      "Bash(curl -s 'http://127.0.0.1:8080/api/v1/products?page=1&page_size=3' -H 'Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjozLCJpc3MiOiJ6eWgiLCJleHAiOjE3Nzg2NTE5MTd9.otH0tC2zfszsYMsn4SQV3F6DCFza0EyOtE1xDzije_s')",
+      "Bash(curl -s http://127.0.0.1:8080/api/v1/products/1 -H 'Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjozLCJpc3MiOiJ6eWgiLCJleHAiOjE3Nzg2NTE5MTd9.otH0tC2zfszsYMsn4SQV3F6DCFza0EyOtE1xDzije_s')",
+      "Bash(curl -s http://127.0.0.1:8080/api/v1/categories -H 'Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjozLCJpc3MiOiJ6eWgiLCJleHAiOjE3Nzg2NTE5MTd9.otH0tC2zfszsYMsn4SQV3F6DCFza0EyOtE1xDzije_s')",
+      "Bash(curl -s -X POST http://127.0.0.1:8080/api/v1/orders -H 'Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjozLCJpc3MiOiJ6eWgiLCJleHAiOjE3Nzg2NTE5MTd9.otH0tC2zfszsYMsn4SQV3F6DCFza0EyOtE1xDzije_s' -H 'Content-Type: application/json' -d '{\"items\":[{\"product_id\":1,\"num\":2}]}')",
+      "Bash(docker exec:*)",
+      "Bash(curl:*)",
+      "Bash(npm run:*)",
+      "Bash(npm install:*)"
+    ]
+  }
+}

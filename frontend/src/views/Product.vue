@@ -83,8 +83,9 @@ async function fetchProducts() {
     const res = await axios.get('/api/v1/products', {
       params: { page: currentPage.value, page_size: pageSize.value },
     })
-    products.value = res.data.data ?? res.data
-    totalProducts.value = res.data.total ?? 0
+    const body = res.data
+    products.value = body.data?.list ?? body.data ?? []
+    totalProducts.value = body.data?.total ?? 0
   } catch (e) {
     ElMessage.error('获取商品列表失败：' + (e.response?.data?.msg ?? e.message))
   } finally {
