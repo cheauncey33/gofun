@@ -70,3 +70,24 @@ func TestOrderStatus_String(t *testing.T) {
 		}
 	}
 }
+
+func TestOrderStatus_HasBeenPaid(t *testing.T) {
+	tests := []struct {
+		status OrderStatus
+		paid   bool
+	}{
+		{OrderStatusPending, false},   // 待支付:从未扣款,取消不退钱
+		{OrderStatusCancelled, false}, // 已取消:未付款即取消
+		{OrderStatusPaid, true},
+		{OrderStatusDelivering, true},
+		{OrderStatusDelivered, true},
+		{OrderStatusRefunding, true},
+		{OrderStatusRefunded, true},
+	}
+
+	for _, tt := range tests {
+		if got := tt.status.HasBeenPaid(); got != tt.paid {
+			t.Errorf("OrderStatus(%s).HasBeenPaid() = %v, want %v", tt.status.String(), got, tt.paid)
+		}
+	}
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"WHU_Snack_GO/common"
 	"WHU_Snack_GO/config"
+	"WHU_Snack_GO/container"
 	"WHU_Snack_GO/controller"
 	"WHU_Snack_GO/metrics"
 	"WHU_Snack_GO/pkg/logger"
@@ -28,13 +29,11 @@ func main() {
 	configPath := flag.String("config", "", "配置文件路径")
 	flag.Parse()
 
-	// 加载配置
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		panic(fmt.Errorf("加载配置失败: %v", err))
 	}
 
-	// 初始化日志
 	if err := logger.Init(logger.Config{
 		Level:      cfg.Log.Level,
 		FilePath:   cfg.Log.FilePath,
@@ -47,30 +46,62 @@ func main() {
 	defer logger.Sync()
 
 	logger.Log.Info("WHU_Snack_GO 启动中...")
-
-	// 设置 Gin 模式
 	gin.SetMode(cfg.Server.Mode)
 
-	// 初始化基础设施
-	common.SetJWTSecret(cfg.JWT.Secret)
-	common.InitDB(cfg.MySQL)
-	common.InitRedis(cfg.Redis)
-	common.InitRabbitMQ(cfg.RabbitMQ)
-	common.InitSnowFlake(cfg.Snowflake.NodeID)
-	common.InitLocalCache()
+	// 创建 DI 容器（内部同时设置 common 全局变量兼容 middleware）
+	cont, err := container.NewContainer(cfg)
+	if err != nil {
+		panic(fmt.Errorf("初始化容器失败: %v", err))
+	}
 
-	// 初始化校验器
 	validator.Init()
 
-	// 预热商品库存到 Redis
-	if err := service.InitProductStockToRedis(); err != nil {
+	// 构建 service 层
+	lockTimeoutSec := cfg.DelayedOrder.LockTimeoutSec
+	if lockTimeoutSec <= 0 {
+		lockTimeoutSec = 10
+	}
+	timeoutMinutes := cfg.DelayedOrder.TimeoutMinutes
+	if timeoutMinutes <= 0 {
+		timeoutMinutes = 15
+	}
+
+	orderSvc := service.NewOrderService(cont, lockTimeoutSec)
+	seckillSvc := service.NewSeckillService(cont, lockTimeoutSec)
+	productSvc := service.NewProductService(cont)
+	userSvc := service.NewUserService(cont, cfg.JWT.ExpireSecs, cfg.JWT.RefreshExpireSecs)
+	adminSvc := service.NewAdminService(cont)
+	addressSvc := service.NewAddressService(cont)
+	compSvc := service.NewCompensationService(cont)
+	consumerSvc := service.NewOrderConsumerService(cont.NewMQChannel, cont.MQQueueName, orderSvc)
+	consumerSvc.SetDeadLetterConfig(cont.MQRetryQueueName, cont.MQDLXName, cont.MQDLQName)
+
+	// Phase 3: 延时队列初始化
+	orderTimeoutSvc := service.NewOrderTimeoutService(
+		cont.DB, cont.RDB, cont.MQConn,
+		cont.OrderRepo, cont.ProductRepo,
+		timeoutMinutes,
+	)
+	if err := orderTimeoutSvc.SetupTimeoutInfrastructure(); err != nil {
+		logger.Log.Fatal("订单超时队列初始化失败", zap.Error(err))
+	}
+	orderSvc.SetPublishTimeout(orderTimeoutSvc.PublishDelayedOrderTimeout)
+
+	// 构建 controller 层
+	orderCtrl := controller.NewOrderController(orderSvc)
+	seckillCtrl := controller.NewSeckillController(seckillSvc)
+	productCtrl := controller.NewProductController(productSvc)
+	userCtrl := controller.NewUserController(userSvc)
+	adminCtrl := controller.NewAdminController(adminSvc)
+	addressCtrl := controller.NewAddressController(addressSvc)
+
+	// 预热商品库存
+	if err := productSvc.InitProductStockToRedis(); err != nil {
 		logger.Log.Fatal("商品预热redis失败", zap.Error(err))
 	}
 
-	// 创建 Gin 路由
+	// 创建路由
 	r := gin.Default()
-
-	// 中间件：request_id → metrics → 限流 → CORS
 	r.Use(middleware.RequestIDMiddleware())
 	r.Use(metrics.PrometheusMiddleware())
 	r.Use(common.GlobalRateLimitMiddleware(
@@ -93,70 +124,67 @@ func main() {
 	// 路由注册
 	v1 := r.Group("/api/v1")
 	{
-		v1.POST("/login", controller.LoginHandler)
-		v1.POST("/register", controller.RegisterHandler)
+		v1.POST("/login", userCtrl.Login)
+		v1.POST("/register", userCtrl.Register)
+		v1.POST("/auth/refresh", userCtrl.Refresh)
+		v1.POST("/logout", userCtrl.Logout)
 
 		auth := v1.Group("/")
 		auth.Use(common.AuthMiddleware())
 		{
-			// 订单
-			auth.POST("/orders", controller.CreateOrderHandler)
-			auth.GET("/orders", controller.GetOrderListHandler)
-			auth.GET("/orders/:id", controller.GetOrderDetailHandler)
-			auth.POST("/orders/:id/cancel", controller.CancelOrderHandler)
-			auth.POST("/orders/:id/refund", controller.RequestRefundHandler)
+			auth.POST("/orders", orderCtrl.CreateOrder)
+			auth.GET("/orders", orderCtrl.GetOrderList)
+			auth.GET("/orders/:id", orderCtrl.GetOrderDetail)
+			auth.POST("/orders/:id/cancel", orderCtrl.CancelOrder)
+			auth.POST("/orders/:id/refund", orderCtrl.RequestRefund)
+			auth.POST("/orders/:id/pay", orderCtrl.PayOrder)
 
-			// 用户
-			auth.GET("/user/info", controller.GetUserInfoHandler)
-			auth.PUT("/user/info", controller.UpdateUserInfoHandler)
-			auth.PUT("/user/password", controller.ChangePasswordHandler)
+			auth.GET("/user/info", userCtrl.GetUserInfo)
+			auth.PUT("/user/info", userCtrl.UpdateUserInfo)
+			auth.PUT("/user/password", userCtrl.ChangePassword)
 
-			// 收货地址
-			auth.POST("/addresses", controller.CreateAddressHandler)
-			auth.GET("/addresses", controller.ListAddressHandler)
-			auth.PUT("/addresses/:id", controller.UpdateAddressHandler)
-			auth.DELETE("/addresses/:id", controller.DeleteAddressHandler)
-			auth.PUT("/addresses/:id/default", controller.SetDefaultAddressHandler)
+			auth.POST("/addresses", addressCtrl.CreateAddress)
+			auth.GET("/addresses", addressCtrl.ListAddresses)
+			auth.PUT("/addresses/:id", addressCtrl.UpdateAddress)
+			auth.DELETE("/addresses/:id", addressCtrl.DeleteAddress)
+			auth.PUT("/addresses/:id/default", addressCtrl.SetDefaultAddress)
 
-			// 商品
-			auth.GET("/products", controller.GetProductHandler)
-			auth.GET("/products/:id", controller.GetProductDetailHandler)
-			auth.GET("/categories", controller.GetCategoryListHandler)
-			auth.GET("/categories/:id/products", controller.GetCategoryProductsHandler)
+			auth.GET("/products", productCtrl.GetProducts)
+			auth.GET("/products/:id", productCtrl.GetProductDetail)
+			auth.GET("/categories", productCtrl.GetCategoryList)
+			auth.GET("/categories/:id/products", productCtrl.GetCategoryProducts)
 
-			// 秒杀(用户端)
-			auth.GET("/seckill/activities", controller.GetSeckillListHandler)
-			auth.GET("/seckill/activities/:id", controller.GetSeckillDetailHandler)
-			auth.POST("/seckill/activities/:id/token", controller.GetSeckillTokenHandler)
-			auth.POST("/seckill/activities/:id/execute", controller.ExecuteSeckillHandler)
+			auth.GET("/seckill/activities", seckillCtrl.GetSeckillList)
+			auth.GET("/seckill/activities/:id", seckillCtrl.GetSeckillDetail)
+			auth.POST("/seckill/activities/:id/token", seckillCtrl.GetSeckillToken)
+			auth.POST("/seckill/activities/:id/execute", seckillCtrl.ExecuteSeckill)
 		}
 
-		// 管理员路由
 		admin := v1.Group("/admin")
 		admin.Use(common.AuthMiddleware(), common.AdminAuthMiddleware())
 		{
-			admin.GET("/dashboard", controller.AdminDashboardHandler)
-			admin.POST("/products", controller.AdminCreateProductHandler)
-			admin.PUT("/products/:id", controller.AdminUpdateProductHandler)
-			admin.DELETE("/products/:id", controller.AdminDeleteProductHandler)
-			admin.PUT("/products/:id/status", controller.AdminUpdateProductStatusHandler)
-			admin.GET("/orders", controller.AdminGetAllOrdersHandler)
-			admin.PUT("/orders/:id/status", controller.AdminUpdateOrderStatusHandler)
-			admin.GET("/users", controller.AdminGetUserListHandler)
-			admin.PUT("/users/:id/role", controller.AdminUpdateUserRoleHandler)
-			admin.POST("/seckill", controller.AdminCreateSeckillHandler)
-			admin.PUT("/seckill/:id", controller.AdminUpdateSeckillHandler)
-			admin.DELETE("/seckill/:id", controller.AdminDeleteSeckillHandler)
-			admin.POST("/seckill/:id/warmup", controller.AdminWarmUpSeckillHandler)
+			admin.GET("/dashboard", adminCtrl.Dashboard)
+			admin.POST("/products", adminCtrl.CreateProduct)
+			admin.PUT("/products/:id", adminCtrl.UpdateProduct)
+			admin.DELETE("/products/:id", adminCtrl.DeleteProduct)
+			admin.PUT("/products/:id/status", adminCtrl.UpdateProductStatus)
+			admin.GET("/orders", adminCtrl.GetAllOrders)
+			admin.PUT("/orders/:id/status", adminCtrl.UpdateOrderStatus)
+			admin.GET("/users", adminCtrl.GetUserList)
+			admin.PUT("/users/:id/role", adminCtrl.UpdateUserRole)
+			admin.POST("/seckill", seckillCtrl.AdminCreateSeckill)
+			admin.PUT("/seckill/:id", seckillCtrl.AdminUpdateSeckill)
+			admin.DELETE("/seckill/:id", seckillCtrl.AdminDeleteSeckill)
+			admin.POST("/seckill/:id/warmup", seckillCtrl.AdminWarmUpSeckill)
 		}
 	}
 
-	// Prometheus /metrics endpoint
 	metrics.RegisterHandler(r)
 
 	// 后台 goroutine
 	mainCtx, cancel := context.WithCancel(context.Background())
-	go service.StartOrderConsumer(mainCtx, cfg.OrderConsumer)
+	go consumerSvc.Start(mainCtx, cfg.OrderConsumer)
+	go orderTimeoutSvc.StartTimeoutConsumer(mainCtx, 2)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
@@ -170,7 +198,6 @@ func main() {
 		}
 	}()
 
-	// IP限流器定期清理
 	go func() {
 		ticker := time.NewTicker(30 * time.Minute)
 		defer ticker.Stop()
@@ -184,7 +211,6 @@ func main() {
 		}
 	}()
 
-	// 库存补偿定时任务
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
@@ -194,12 +220,11 @@ func main() {
 				logger.Log.Info("库存补偿定时任务退出")
 				return
 			case <-ticker.C:
-				service.RunStockCompensation()
+				compSvc.RunStockCompensation()
 			}
 		}
 	}()
 
-	// 优雅关闭
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

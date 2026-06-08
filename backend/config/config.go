@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -19,6 +21,7 @@ type Config struct {
 	RateLimit     RateLimitConfig     `mapstructure:"ratelimit"`
 	Cors          CorsConfig          `mapstructure:"cors"`
 	OrderConsumer OrderConsumerConfig `mapstructure:"order_consumer"`
+	DelayedOrder  OrderDelayConfig    `mapstructure:"delayed_order"`
 }
 
 type ServerConfig struct {
@@ -42,13 +45,17 @@ type RedisConfig struct {
 }
 
 type RabbitMQConfig struct {
-	URL       string `mapstructure:"url"`
-	QueueName string `mapstructure:"queue_name"`
+	URL            string `mapstructure:"url"`
+	QueueName      string `mapstructure:"queue_name"`
+	RetryQueueName string `mapstructure:"retry_queue_name"`
+	DLXName        string `mapstructure:"dlx_name"`
+	DLQName        string `mapstructure:"dlq_name"`
 }
 
 type JWTConfig struct {
-	Secret     string `mapstructure:"secret"`
-	ExpireSecs int    `mapstructure:"expire_secs"`
+	Secret            string `mapstructure:"secret"`
+	ExpireSecs        int    `mapstructure:"expire_secs"`
+	RefreshExpireSecs int    `mapstructure:"refresh_expire_secs"`
 }
 
 type SnowflakeConfig struct {
@@ -77,6 +84,12 @@ type CorsConfig struct {
 type OrderConsumerConfig struct {
 	WorkerCount   int `mapstructure:"worker_count"`
 	PrefetchCount int `mapstructure:"prefetch_count"`
+	MaxRetries    int `mapstructure:"max_retries"`
+}
+
+type OrderDelayConfig struct {
+	TimeoutMinutes int `mapstructure:"timeout_minutes"`
+	LockTimeoutSec int `mapstructure:"lock_timeout_sec"`
 }
 
 func Load(configPath string) (*Config, error) {
@@ -91,6 +104,44 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	setDefaults(v)
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+	bindEnvs(v,
+		"server.host",
+		"server.port",
+		"server.mode",
+		"mysql.dsn",
+		"mysql.max_idle_conns",
+		"mysql.max_open_conns",
+		"mysql.conn_max_lifetime",
+		"redis.addr",
+		"redis.password",
+		"redis.db",
+		"redis.pool_size",
+		"rabbitmq.url",
+		"rabbitmq.queue_name",
+		"rabbitmq.retry_queue_name",
+		"rabbitmq.dlx_name",
+		"rabbitmq.dlq_name",
+		"jwt.secret",
+		"jwt.expire_secs",
+		"jwt.refresh_expire_secs",
+		"snowflake.node_id",
+		"log.level",
+		"log.file_path",
+		"log.max_size",
+		"log.max_backups",
+		"log.max_age",
+		"ratelimit.global_rate",
+		"ratelimit.global_burst",
+		"ratelimit.ip_rate",
+		"ratelimit.ip_burst",
+		"order_consumer.worker_count",
+		"order_consumer.prefetch_count",
+		"order_consumer.max_retries",
+		"delayed_order.timeout_minutes",
+		"delayed_order.lock_timeout_sec",
+	)
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("读取配置文件失败: %w", err)
@@ -100,6 +151,9 @@ func Load(configPath string) (*Config, error) {
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("解析配置文件失败: %w", err)
 	}
+	if origins := os.Getenv("CORS_ALLOW_ORIGINS"); origins != "" {
+		cfg.Cors.AllowOrigins = splitCSV(origins)
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("配置校验失败: %w", err)
@@ -107,6 +161,24 @@ func Load(configPath string) (*Config, error) {
 
 	GlobalConfig = &cfg
 	return &cfg, nil
+}
+
+func bindEnvs(v *viper.Viper, keys ...string) {
+	for _, key := range keys {
+		_ = v.BindEnv(key)
+	}
+}
+
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			values = append(values, part)
+		}
+	}
+	return values
 }
 
 func setDefaults(v *viper.Viper) {
@@ -125,8 +197,12 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("rabbitmq.url", "amqp://guest:guest@localhost:5672/")
 	v.SetDefault("rabbitmq.queue_name", "order_queue")
+	v.SetDefault("rabbitmq.retry_queue_name", "order_retry_queue")
+	v.SetDefault("rabbitmq.dlx_name", "order_dlx")
+	v.SetDefault("rabbitmq.dlq_name", "order_dead_letter_queue")
 
 	v.SetDefault("jwt.expire_secs", 500)
+	v.SetDefault("jwt.refresh_expire_secs", 7*24*60*60)
 
 	v.SetDefault("snowflake.node_id", 1)
 
@@ -143,6 +219,10 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("order_consumer.worker_count", 4)
 	v.SetDefault("order_consumer.prefetch_count", 5)
+	v.SetDefault("order_consumer.max_retries", 3)
+
+	v.SetDefault("delayed_order.timeout_minutes", 15)
+	v.SetDefault("delayed_order.lock_timeout_sec", 10)
 }
 
 func (c *Config) Validate() error {
@@ -167,11 +247,17 @@ func (c *Config) Validate() error {
 	if c.OrderConsumer.PrefetchCount == 0 {
 		c.OrderConsumer.PrefetchCount = 5
 	}
+	if c.OrderConsumer.MaxRetries == 0 {
+		c.OrderConsumer.MaxRetries = 3
+	}
 	if c.OrderConsumer.WorkerCount < 0 {
 		return fmt.Errorf("order_consumer.worker_count 必须大于0")
 	}
 	if c.OrderConsumer.PrefetchCount < 0 {
 		return fmt.Errorf("order_consumer.prefetch_count 必须大于0")
+	}
+	if c.OrderConsumer.MaxRetries < 0 {
+		return fmt.Errorf("order_consumer.max_retries 必须大于等于0")
 	}
 	return nil
 }

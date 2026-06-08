@@ -14,14 +14,16 @@ func SetJWTSecret(secret string) {
 }
 
 type MyClaims struct {
-	UserID int64 `json:"user_id"`
+	UserID    int64  `json:"user_id"`
+	TokenType string `json:"token_type"`
 	jwt.RegisteredClaims
 }
 
 // GenerateToken 用户登录成功后调用，生成有效期为expireSecs秒的jwt
 func GenerateToken(userID int64, expireSecs int) (string, error) {
 	claims := MyClaims{
-		UserID: userID,
+		UserID:    userID,
+		TokenType: "access",
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(expireSecs) * time.Second)),
 			Issuer:    "zyh",

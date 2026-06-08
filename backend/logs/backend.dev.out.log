@@ -1,0 +1,80 @@
+2026-05-16T10:47:44.179+0800	[34mINFO[0m	backend/main.go:49	WHU_Snack_GO 启动中...
+
+2026/05/16 10:47:44 [31;1mD:/golangProgram/WHU_Snack_GO/backend/common/databaseInit.go:50 [35;1mError 1091 (42000): Can't DROP 'uni_user_phone'; check that column/key exists
+[0m[33m[1.128ms] [34;1m[rows:0][0m DROP INDEX uni_user_phone ON user
+redis 链接成功 PONG
+Success to init rabbitMQ
+snowflake node started
+成功预热 50 个商品到redis中！
+2026-05-16T10:47:44.518+0800	[34mINFO[0m	backend/main.go:167	HTTP 服务启动	{"addr": "127.0.0.1:8080"}
+[GIN] 2026/05/16 - 10:48:13 | 200 |  189.6ms |       127.0.0.1 | POST     "/api/v1/login"
+[GIN] 2026/05/16 - 10:48:13 | 200 |       0s |       127.0.0.1 | GET      "/api/v1/categories"
+[GIN] 2026/05/16 - 10:48:13 | 200 |   4.64ms |       127.0.0.1 | GET      "/api/v1/products?page=1&page_size=3"
+[GIN] 2026/05/16 - 11:06:16 | 400 |       0s |       127.0.0.1 | POST     "/api/v1/register"
+[GIN] 2026/05/16 - 11:06:16 | 400 |       0s |       127.0.0.1 | POST     "/api/v1/register"
+[GIN] 2026/05/16 - 11:06:16 | 400 |       0s |       127.0.0.1 | POST     "/api/v1/register"
+[GIN] 2026/05/16 - 11:06:16 | 400 |       0s |       127.0.0.1 | POST     "/api/v1/register"
+[GIN] 2026/05/16 - 11:06:56 | 400 |       0s |       127.0.0.1 | POST     "/api/v1/register"
+[GIN] 2026/05/16 - 11:07:43 | 400 |       0s |       127.0.0.1 | POST     "/api/v1/register"
+[GIN] 2026/05/16 - 11:07:43 | 400 |       0s |       127.0.0.1 | POST     "/api/v1/register"
+
+2026/05/16 11:10:16 [31;1mD:/golangProgram/WHU_Snack_GO/backend/service/user_service.go:24 [35;1mError 1062 (23000): Duplicate entry 'admin' for key 'user.uni_user_username'
+[0m[33m[8.379ms] [34;1m[rows:0][0m INSERT INTO `user` (`update_time`,`create_time`,`delete_time`,`username`,`password`,`balance`,`phone`,`avatar_url`,`dorm_id`,`role`,`last_login_at`) VALUES ('2026-05-16 11:10:16.625','2026-05-16 11:10:16.625',NULL,'admin','$2a$12$pkW0jNpE8/wGq0/bkL6XdeVvd5efEfcqMFdiNnxgIaJtYRGyb6PBG',100,NULL,'',1,'user',NULL)
+[GIN] 2026/05/16 - 11:10:16 | 400 | 186.64ms |       127.0.0.1 | POST     "/api/v1/register"
+
+2026/05/16 11:10:38 [31;1mD:/golangProgram/WHU_Snack_GO/backend/service/user_service.go:24 [35;1mError 1062 (23000): Duplicate entry 'admin' for key 'user.uni_user_username'
+[0m[33m[3.019ms] [34;1m[rows:0][0m INSERT INTO `user` (`update_time`,`create_time`,`delete_time`,`username`,`password`,`balance`,`phone`,`avatar_url`,`dorm_id`,`role`,`last_login_at`) VALUES ('2026-05-16 11:10:38.821','2026-05-16 11:10:38.821',NULL,'admin','$2a$12$VvGjYRLWkJbhPjXMo9bzmeTdqXqbG0y/Nbyu/Jy8ZExyXxCGmk3wm',100,NULL,'',1,'user',NULL)
+[GIN] 2026/05/16 - 11:10:38 | 400 | 181.36ms |       127.0.0.1 | POST     "/api/v1/register"
+[GIN] 2026/05/16 - 11:28:21 | 200 | 187.06ms |       127.0.0.1 | POST     "/api/v1/login"
+[GIN] 2026/05/16 - 11:28:22 | 200 |    504µs |       127.0.0.1 | GET      "/api/v1/categories"
+[GIN] 2026/05/16 - 11:28:22 | 200 |   2.11ms |       127.0.0.1 | GET      "/api/v1/user/info"
+[GIN] 2026/05/16 - 11:28:22 | 200 |    5.2ms |       127.0.0.1 | GET      "/api/v1/seckill/activities?page=1&page_size=50"
+[GIN] 2026/05/16 - 11:28:22 | 200 |   9.84ms |       127.0.0.1 | GET      "/api/v1/products?page=1&page_size=8"
+[GIN] 2026/05/16 - 11:31:57 | 200 |   1.03ms |       127.0.0.1 | GET      "/api/v1/seckill/activities?page=1&page_size=20"
+
+2026/05/16 11:32:03 [32mD:/golangProgram/WHU_Snack_GO/backend/service/admin_service.go:48 [33mSLOW SQL >= 200ms
+[0m[31;1m[1333.354ms] [33m[rows:1][35m SELECT COALESCE(SUM(total_price), 0) FROM `order` WHERE `order`.`delete_time` IS NULL[0m
+
+2026/05/16 11:32:04 [32mD:/golangProgram/WHU_Snack_GO/backend/service/admin_service.go:53 [33mSLOW SQL >= 200ms
+[0m[31;1m[968.442ms] [33m[rows:1][35m SELECT count(*) FROM `order` WHERE DATE(create_time) = CURDATE() AND `order`.`delete_time` IS NULL[0m
+
+2026/05/16 11:32:05 [32mD:/golangProgram/WHU_Snack_GO/backend/service/admin_service.go:56 [33mSLOW SQL >= 200ms
+[0m[31;1m[992.675ms] [33m[rows:1][35m SELECT COALESCE(SUM(total_price), 0) FROM `order` WHERE DATE(create_time) = CURDATE() AND `order`.`delete_time` IS NULL[0m
+
+2026/05/16 11:32:07 [32mD:/golangProgram/WHU_Snack_GO/backend/service/admin_service.go:78 [33mSLOW SQL >= 200ms
+[0m[31;1m[2035.839ms] [33m[rows:5][35m SELECT product_id, product.name as product_name, SUM(order_item.quantity) as sales_count, SUM(order_item.snapshot_price * order_item.quantity) as revenue FROM `order_item` JOIN product ON product.id = order_item.product_id WHERE `order_item`.`delete_time` IS NULL GROUP BY product_id, product.name ORDER BY sales_count DESC LIMIT 5[0m
+
+2026/05/16 11:32:08 [32mD:/golangProgram/WHU_Snack_GO/backend/service/admin_service.go:91 [33mSLOW SQL >= 200ms
+[0m[31;1m[447.101ms] [33m[rows:1][35m 
+		SELECT DATE(create_time) as date, COUNT(*) as count, COALESCE(SUM(total_price), 0) as amount
+		FROM `order`
+		WHERE create_time >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+		GROUP BY DATE(create_time)
+		ORDER BY date ASC
+	[0m
+[GIN] 2026/05/16 - 11:32:08 | 200 |    5.96s |       127.0.0.1 | GET      "/api/v1/admin/dashboard"
+[GIN] 2026/05/16 - 11:32:12 | 200 |   4.11ms |       127.0.0.1 | GET      "/api/v1/products?page=1&page_size=200"
+[GIN] 2026/05/16 - 13:27:55 | 401 |       0s |       127.0.0.1 | GET      "/api/v1/seckill/activities?page=1&page_size=20"
+[GIN] 2026/05/16 - 13:28:02 | 200 | 189.24ms |       127.0.0.1 | POST     "/api/v1/login"
+[GIN] 2026/05/16 - 13:28:02 | 200 |   1.87ms |       127.0.0.1 | GET      "/api/v1/categories"
+[GIN] 2026/05/16 - 13:28:02 | 200 |   1.37ms |       127.0.0.1 | GET      "/api/v1/user/info"
+[GIN] 2026/05/16 - 13:28:02 | 200 |    7.2ms |       127.0.0.1 | GET      "/api/v1/products?page=1&page_size=8"
+[GIN] 2026/05/16 - 13:28:02 | 200 |   1.61ms |       127.0.0.1 | GET      "/api/v1/seckill/activities?page=1&page_size=50"
+[GIN] 2026/05/16 - 13:28:03 | 200 |   2.03ms |       127.0.0.1 | GET      "/api/v1/seckill/activities?page=1&page_size=20"
+[GIN] 2026/05/16 - 13:28:04 | 200 |   2.21ms |       127.0.0.1 | GET      "/api/v1/seckill/activities/2"
+[GIN] 2026/05/16 - 13:28:04 | 400 |   1.51ms |       127.0.0.1 | POST     "/api/v1/seckill/activities/2/token"
+[GIN] 2026/05/16 - 13:28:05 | 400 |       0s |       127.0.0.1 | POST     "/api/v1/seckill/activities/2/token"
+[GIN] 2026/05/16 - 13:28:06 | 400 |       0s |       127.0.0.1 | POST     "/api/v1/seckill/activities/2/token"
+[GIN] 2026/05/16 - 13:28:06 | 400 |    1.5ms |       127.0.0.1 | POST     "/api/v1/seckill/activities/2/token"
+[GIN] 2026/05/16 - 13:28:07 | 200 |  518.6µs |       127.0.0.1 | GET      "/api/v1/user/info"
+[GIN] 2026/05/16 - 13:28:07 | 200 |   1.11ms |       127.0.0.1 | GET      "/api/v1/seckill/activities?page=1&page_size=20"
+[GIN] 2026/05/16 - 13:36:10 | 200 |   5.02ms |       127.0.0.1 | GET      "/api/v1/orders?page=1&page_size=10"
+[GIN] 2026/05/16 - 13:36:11 | 200 |    1.9ms |       127.0.0.1 | GET      "/api/v1/categories"
+[GIN] 2026/05/16 - 13:36:11 | 200 |   3.41ms |       127.0.0.1 | GET      "/api/v1/products?page=1&page_size=8"
+[GIN] 2026/05/16 - 13:36:12 | 200 |   1.51ms |       127.0.0.1 | GET      "/api/v1/products/49"
+[GIN] 2026/05/16 - 13:36:13 | 200 |   2.06ms |       127.0.0.1 | GET      "/api/v1/orders?page=1&page_size=10"
+[GIN] 2026/05/16 - 13:36:14 | 200 |       0s |       127.0.0.1 | GET      "/api/v1/categories"
+[GIN] 2026/05/16 - 13:36:14 | 200 |   1.51ms |       127.0.0.1 | GET      "/api/v1/products?page=1&page_size=8"
+2026-05-16T23:41:31.669+0800	[34mINFO[0m	backend/main.go:206	收到关机信号，开始收尾...
+2026-05-16T23:41:31.670+0800	[34mINFO[0m	backend/main.go:194	库存补偿定时任务退出
+2026-05-16T23:41:33.669+0800	[34mINFO[0m	backend/main.go:217	程序退出成功

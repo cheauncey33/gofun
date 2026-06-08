@@ -44,7 +44,9 @@ async function handleLogin() {
   loading.value = true
   try {
     const res = await api.login(form.username, form.password)
-    localStorage.setItem('token', res.data.token)
+    localStorage.setItem('access_token', res.data.access_token)
+    localStorage.setItem('refresh_token', res.data.refresh_token)
+    localStorage.setItem('token', res.data.access_token)
     localStorage.setItem('username', form.username)
     ElMessage.success('登录成功')
     router.push('/')

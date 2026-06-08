@@ -1,10 +1,14 @@
 package service
 
 import (
-	"WHU_Snack_GO/common"
+	"WHU_Snack_GO/container"
 	"WHU_Snack_GO/models"
+	"WHU_Snack_GO/repository"
+	"context"
 	"fmt"
 
+	gocache "github.com/patrickmn/go-cache"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -33,43 +37,53 @@ type OrderTrendDay struct {
 	Amount float64 `json:"amount"`
 }
 
-func GetDashboard() (*DashboardStats, error) {
+type AdminService struct {
+	db          *gorm.DB
+	rdb         *redis.Client
+	localCache  *gocache.Cache
+	productRepo repository.ProductRepository
+}
+
+func NewAdminService(c *container.Container) *AdminService {
+	return &AdminService{
+		db:          c.DB,
+		rdb:         c.RDB,
+		localCache:  c.LocalCache,
+		productRepo: c.ProductRepo,
+	}
+}
+
+func (s *AdminService) GetDashboard() (*DashboardStats, error) {
 	stats := &DashboardStats{}
 
-	// 总用户
-	if err := common.DB.Model(&models.User{}).Count(&stats.TotalUsers).Error; err != nil {
+	if err := s.db.Model(&models.User{}).Count(&stats.TotalUsers).Error; err != nil {
 		return nil, err
 	}
 
-	// 总订单 + 总营收
-	if err := common.DB.Model(&models.Order{}).Count(&stats.TotalOrders).Error; err != nil {
+	if err := s.db.Model(&models.Order{}).Count(&stats.TotalOrders).Error; err != nil {
 		return nil, err
 	}
-	if err := common.DB.Model(&models.Order{}).Select("COALESCE(SUM(total_price), 0)").Scan(&stats.TotalRevenue).Error; err != nil {
-		return nil, err
-	}
-
-	// 今日订单 + 今日营收
-	if err := common.DB.Model(&models.Order{}).Where("DATE(create_time) = CURDATE()").Count(&stats.TodayOrders).Error; err != nil {
-		return nil, err
-	}
-	if err := common.DB.Model(&models.Order{}).Where("DATE(create_time) = CURDATE()").Select("COALESCE(SUM(total_price), 0)").Scan(&stats.TodayRevenue).Error; err != nil {
+	if err := s.db.Model(&models.Order{}).Select("COALESCE(SUM(total_price), 0)").Scan(&stats.TotalRevenue).Error; err != nil {
 		return nil, err
 	}
 
-	// 在售商品数
-	if err := common.DB.Model(&models.Product{}).Where("status = ?", models.ProductStatusOnSale).Count(&stats.ProductsOnSale).Error; err != nil {
+	if err := s.db.Model(&models.Order{}).Where("DATE(create_time) = CURDATE()").Count(&stats.TodayOrders).Error; err != nil {
+		return nil, err
+	}
+	if err := s.db.Model(&models.Order{}).Where("DATE(create_time) = CURDATE()").Select("COALESCE(SUM(total_price), 0)").Scan(&stats.TodayRevenue).Error; err != nil {
 		return nil, err
 	}
 
-	// 活跃秒杀数
-	if err := common.DB.Model(&models.SeckillActivity{}).Where("status = ?", models.SeckillStatusActive).Count(&stats.ActiveSeckills).Error; err != nil {
+	if err := s.db.Model(&models.Product{}).Where("status = ?", models.ProductStatusOnSale).Count(&stats.ProductsOnSale).Error; err != nil {
 		return nil, err
 	}
 
-	// 热门商品 Top 5
+	if err := s.db.Model(&models.SeckillActivity{}).Where("status = ?", models.SeckillStatusActive).Count(&stats.ActiveSeckills).Error; err != nil {
+		return nil, err
+	}
+
 	var topProducts []TopProduct
-	if err := common.DB.Model(&models.OrderItem{}).
+	if err := s.db.Model(&models.OrderItem{}).
 		Select("product_id, product.name as product_name, SUM(order_item.quantity) as sales_count, SUM(order_item.snapshot_price * order_item.quantity) as revenue").
 		Joins("JOIN product ON product.id = order_item.product_id").
 		Group("product_id, product.name").
@@ -80,15 +94,14 @@ func GetDashboard() (*DashboardStats, error) {
 	}
 	stats.TopProducts = topProducts
 
-	// 最近 7 天订单趋势
 	var trend []OrderTrendDay
-	if err := common.DB.Raw(`
-		SELECT DATE(create_time) as date, COUNT(*) as count, COALESCE(SUM(total_price), 0) as amount
-		FROM ` + "`order`" + `
-		WHERE create_time >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-		GROUP BY DATE(create_time)
-		ORDER BY date ASC
-	`).Scan(&trend).Error; err != nil {
+	if err := s.db.Raw(`
+			SELECT DATE(create_time) as date, COUNT(*) as count, COALESCE(SUM(total_price), 0) as amount
+			FROM ` + "`order`" + `
+			WHERE create_time >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+			GROUP BY DATE(create_time)
+			ORDER BY date ASC
+		`).Scan(&trend).Error; err != nil {
 		return nil, err
 	}
 	stats.OrderTrend = trend
@@ -96,100 +109,96 @@ func GetDashboard() (*DashboardStats, error) {
 	return stats, nil
 }
 
-// ===== Admin Product Management =====
-
-func AdminCreateProduct(product *models.Product) error {
-	if err := common.DB.Create(product).Error; err != nil {
+func (s *AdminService) AdminCreateProduct(product *models.Product) error {
+	if err := s.db.Create(product).Error; err != nil {
 		return err
 	}
-	refreshProductCache(product.ID)
+	s.refreshProductCache(product.ID)
 	return nil
 }
 
-func AdminUpdateProduct(id int64, updates map[string]interface{}) error {
-	result := common.DB.Model(&models.Product{}).Where("id = ?", id).Updates(updates)
+func (s *AdminService) AdminUpdateProduct(id int64, updates map[string]interface{}) error {
+	result := s.db.Model(&models.Product{}).Where("id = ?", id).Updates(updates)
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("商品不存在")
 	}
 	if result.Error != nil {
 		return result.Error
 	}
-	refreshProductCache(id)
+	s.refreshProductCache(id)
 	return nil
 }
 
-func AdminDeleteProduct(id int64) error {
-	result := common.DB.Delete(&models.Product{}, id)
+func (s *AdminService) AdminDeleteProduct(id int64) error {
+	result := s.db.Delete(&models.Product{}, id)
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("商品不存在")
 	}
 	if result.Error != nil {
 		return result.Error
 	}
-	clearProductCache()
-	if common.RDB != nil {
-		common.RDB.Del(common.Ctx, fmt.Sprintf("snack:stock:%d", id))
+	s.clearProductCache()
+	if s.rdb != nil {
+		s.rdb.Del(context.Background(), fmt.Sprintf("snack:stock:%d", id))
 	}
 	return nil
 }
 
-func AdminUpdateProductStatus(id int64, status models.ProductStatus) error {
-	result := common.DB.Model(&models.Product{}).Where("id = ?", id).Update("status", status)
+func (s *AdminService) AdminUpdateProductStatus(id int64, status models.ProductStatus) error {
+	result := s.db.Model(&models.Product{}).Where("id = ?", id).Update("status", status)
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("商品不存在")
 	}
 	if result.Error != nil {
 		return result.Error
 	}
-	refreshProductCache(id)
+	s.refreshProductCache(id)
 	return nil
 }
 
-func refreshProductCache(productID int64) {
-	clearProductCache()
-	if common.RDB == nil {
+func (s *AdminService) refreshProductCache(productID int64) {
+	s.clearProductCache()
+	if s.rdb == nil {
 		return
 	}
 
 	var product models.Product
-	if err := common.DB.Unscoped().First(&product, productID).Error; err != nil {
-		common.RDB.Del(common.Ctx, fmt.Sprintf("snack:stock:%d", productID))
+	if err := s.db.Unscoped().First(&product, productID).Error; err != nil {
+		s.rdb.Del(context.Background(), fmt.Sprintf("snack:stock:%d", productID))
 		return
 	}
 
 	stockKey := fmt.Sprintf("snack:stock:%d", productID)
 	if product.DeleteTime.Valid || product.Status != models.ProductStatusOnSale {
-		common.RDB.Set(common.Ctx, stockKey, 0, 0)
+		s.rdb.Set(context.Background(), stockKey, 0, 0)
 		return
 	}
-	common.RDB.Set(common.Ctx, stockKey, product.Stock, 0)
+	s.rdb.Set(context.Background(), stockKey, product.Stock, 0)
 }
 
-func clearProductCache() {
-	if common.LocalCache != nil {
-		common.LocalCache.Flush()
+func (s *AdminService) clearProductCache() {
+	if s.localCache != nil {
+		s.localCache.Flush()
 	}
-	if common.RDB == nil {
+	if s.rdb == nil {
 		return
 	}
 
-	iter := common.RDB.Scan(common.Ctx, 0, "product:list:*", 0).Iterator()
+	iter := s.rdb.Scan(context.Background(), 0, "product:list:*", 0).Iterator()
 	var keys []string
-	for iter.Next(common.Ctx) {
+	for iter.Next(context.Background()) {
 		keys = append(keys, iter.Val())
 	}
 	if len(keys) > 0 {
-		common.RDB.Del(common.Ctx, keys...)
+		s.rdb.Del(context.Background(), keys...)
 	}
 }
 
-// ===== Admin Order Management =====
-
-func AdminGetAllOrders(page, pageSize int, status *models.OrderStatus) ([]models.Order, int64, error) {
+func (s *AdminService) AdminGetAllOrders(page, pageSize int, status *models.OrderStatus) ([]models.Order, int64, error) {
 	var orders []models.Order
 	var total int64
 
-	query := common.DB.Model(&models.Order{}).Preload("OrderItem.Product").Preload("User")
+	query := s.db.Model(&models.Order{}).Preload("OrderItem.Product").Preload("User")
 	if status != nil {
 		query = query.Where("status = ?", *status)
 	}
@@ -201,17 +210,18 @@ func AdminGetAllOrders(page, pageSize int, status *models.OrderStatus) ([]models
 	return orders, total, err
 }
 
-func AdminUpdateOrderStatus(orderID int64, targetStatus models.OrderStatus) error {
+func (s *AdminService) AdminUpdateOrderStatus(orderID int64, targetStatus models.OrderStatus) error {
 	var order models.Order
-	if err := common.DB.First(&order, orderID).Error; err != nil {
+	if err := s.db.First(&order, orderID).Error; err != nil {
 		return fmt.Errorf("订单不存在")
 	}
 	if !order.Status.CanTransitionTo(targetStatus) {
 		return fmt.Errorf("状态转换不允许: %s -> %s", order.Status.String(), targetStatus.String())
 	}
-	// 取消或退款需执行退款退库存
 	if targetStatus == models.OrderStatusCancelled || targetStatus == models.OrderStatusRefunded {
-		return common.DB.Transaction(func(tx *gorm.DB) error {
+		// 只有取消前已扣款的订单才退款;待支付订单被取消只退库存不退钱。
+		refund := order.Status.HasBeenPaid()
+		return s.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Model(&order).Update("status", targetStatus).Error; err != nil {
 				return err
 			}
@@ -223,33 +233,33 @@ func AdminUpdateOrderStatus(orderID int64, targetStatus models.OrderStatus) erro
 				tx.Model(&models.Product{}).Where("id = ?", item.ProductID).
 					Update("stock", gorm.Expr("stock + ?", item.Quantity))
 			}
-			tx.Model(&models.User{}).Where("id = ?", order.UserID).
-				Update("balance", gorm.Expr("balance + ?", order.TotalPrice))
+			if refund {
+				tx.Model(&models.User{}).Where("id = ?", order.UserID).
+					Update("balance", gorm.Expr("balance + ?", order.TotalPrice))
+			}
 			return nil
 		})
 	}
-	return common.DB.Model(&order).Update("status", targetStatus).Error
+	return s.db.Model(&order).Update("status", targetStatus).Error
 }
 
-// ===== Admin User Management =====
-
-func AdminGetUserList(page, pageSize int) ([]models.User, int64, error) {
+func (s *AdminService) AdminGetUserList(page, pageSize int) ([]models.User, int64, error) {
 	var users []models.User
 	var total int64
 
-	common.DB.Model(&models.User{}).Count(&total)
+	s.db.Model(&models.User{}).Count(&total)
 
 	offset := (page - 1) * pageSize
-	err := common.DB.Select("id", "username", "balance", "phone", "role", "dorm_id", "create_time", "last_login_at").
+	err := s.db.Select("id", "username", "balance", "phone", "role", "dorm_id", "create_time", "last_login_at").
 		Order("id DESC").Limit(pageSize).Offset(offset).Find(&users).Error
 	return users, total, err
 }
 
-func AdminUpdateUserRole(userID int64, role string) error {
+func (s *AdminService) AdminUpdateUserRole(userID int64, role string) error {
 	if role != "user" && role != "admin" {
 		return fmt.Errorf("无效的角色")
 	}
-	result := common.DB.Model(&models.User{}).Where("id = ?", userID).Update("role", role)
+	result := s.db.Model(&models.User{}).Where("id = ?", userID).Update("role", role)
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("用户不存在")
 	}

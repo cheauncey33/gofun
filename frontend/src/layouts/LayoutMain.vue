@@ -167,7 +167,13 @@ onMounted(async () => {
   } catch {}
 })
 
-function logout() {
+async function logout() {
+  const refreshToken = localStorage.getItem('refresh_token')
+  if (refreshToken) {
+    await api.logout(refreshToken).catch(() => {})
+  }
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('refresh_token')
   localStorage.removeItem('token')
   localStorage.removeItem('username')
   localStorage.removeItem('role')

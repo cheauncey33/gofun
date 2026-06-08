@@ -70,6 +70,20 @@ var orderTransitionMap = map[OrderStatus][]OrderStatus{
 	OrderStatusRefunding:  {OrderStatusRefunded},
 }
 
+// HasBeenPaid 表示订单是否已经扣过款。
+// 在"支付时扣款"模型下,余额只在 PayOrder(Pending→Paid)时扣减,
+// 因此除待支付(Pending)和已取消(Cancelled,从未付款即取消)外的状态都意味着已扣款,
+// 取消/退款时据此决定是否需要把余额退还给用户。
+func (o OrderStatus) HasBeenPaid() bool {
+	switch o {
+	case OrderStatusPaid, OrderStatusDelivering, OrderStatusDelivered,
+		OrderStatusRefunding, OrderStatusRefunded:
+		return true
+	default:
+		return false
+	}
+}
+
 func (o OrderStatus) CanTransitionTo(target OrderStatus) bool {
 	allowed, ok := orderTransitionMap[o]
 	if !ok {

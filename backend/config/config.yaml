@@ -18,10 +18,14 @@ redis:
 rabbitmq:
   url: "amqp://guest:guest@localhost:5672/"
   queue_name: "order_queue"
+  retry_queue_name: "order_retry_queue"
+  dlx_name: "order_dlx"
+  dlq_name: "order_dead_letter_queue"
 
 jwt:
   secret: "replace-with-a-strong-secret-in-production"
   expire_secs: 500
+  refresh_expire_secs: 604800
 
 snowflake:
   node_id: 1
@@ -42,6 +46,7 @@ ratelimit:
 order_consumer:
   worker_count: 12
   prefetch_count: 10
+  max_retries: 3
 
 cors:
   allow_origins:

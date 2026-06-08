@@ -1,0 +1,9 @@
+.git
+.vscode
+.claude
+**/node_modules
+**/dist
+**/logs
+**/.DS_Store
+backend/WHU_Snack_GO
+deploy/.env

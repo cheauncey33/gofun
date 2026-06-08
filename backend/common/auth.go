@@ -21,6 +21,11 @@ func AuthMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		if claims.TokenType != "" && claims.TokenType != "access" {
+			response.Error(c, http.StatusUnauthorized, response.CodeTokenInvalid, "token类型无效")
+			c.Abort()
+			return
+		}
 		c.Set("user_id", claims.UserID)
 		c.Next()
 	}

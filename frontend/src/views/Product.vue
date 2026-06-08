@@ -116,6 +116,7 @@ async function submitOrder() {
   submitting.value = true
   try {
     await axios.post('/api/v1/orders', {
+      idempotency_key: newIdempotencyKey(),
       items: [
         {
           product_id: currentProduct.value.id,
@@ -131,6 +132,11 @@ async function submitOrder() {
   } finally {
     submitting.value = false
   }
+}
+
+function newIdempotencyKey() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 function handleLogout() {

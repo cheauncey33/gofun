@@ -100,11 +100,11 @@ func TestLoad_InvalidYAML(t *testing.T) {
 
 func TestValidate_EmptyDSN(t *testing.T) {
 	cfg := &Config{
-		Server: ServerConfig{Port: 8080},
-		MySQL:  MySQLConfig{DSN: ""},
-		Redis:  RedisConfig{Addr: "localhost:6379"},
+		Server:   ServerConfig{Port: 8080},
+		MySQL:    MySQLConfig{DSN: ""},
+		Redis:    RedisConfig{Addr: "localhost:6379"},
 		RabbitMQ: RabbitMQConfig{URL: "amqp://localhost"},
-		JWT:    JWTConfig{Secret: "test"},
+		JWT:      JWTConfig{Secret: "test"},
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Error("expected error for empty DSN")
@@ -195,5 +195,44 @@ jwt:
 	}
 	if cfg.Snowflake.NodeID != 1 {
 		t.Errorf("expected default NodeID 1, got %d", cfg.Snowflake.NodeID)
+	}
+}
+
+func TestLoad_EnvironmentOverrides(t *testing.T) {
+	t.Setenv("SERVER_HOST", "0.0.0.0")
+	t.Setenv("MYSQL_DSN", "env:dsn@tcp(mysql)/db")
+	t.Setenv("JWT_SECRET", "env-secret")
+	t.Setenv("CORS_ALLOW_ORIGINS", "https://example.com, http://localhost")
+
+	dir := t.TempDir()
+	content := `
+mysql:
+  dsn: "file:dsn@tcp(localhost)/db"
+redis:
+  addr: "localhost:6379"
+rabbitmq:
+  url: "amqp://localhost"
+jwt:
+  secret: "file-secret"
+`
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte(content), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Server.Host != "0.0.0.0" {
+		t.Errorf("expected env server host, got %s", cfg.Server.Host)
+	}
+	if cfg.MySQL.DSN != "env:dsn@tcp(mysql)/db" {
+		t.Errorf("expected env MySQL DSN, got %s", cfg.MySQL.DSN)
+	}
+	if cfg.JWT.Secret != "env-secret" {
+		t.Errorf("expected env JWT secret, got %s", cfg.JWT.Secret)
+	}
+	if len(cfg.Cors.AllowOrigins) != 2 || cfg.Cors.AllowOrigins[0] != "https://example.com" {
+		t.Errorf("unexpected CORS origins: %#v", cfg.Cors.AllowOrigins)
 	}
 }

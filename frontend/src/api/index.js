@@ -6,18 +6,50 @@ export function setRouter(r) { _router = r }
 const api = axios.create({ baseURL: '/api/v1', timeout: 15000 })
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token')
+  const token = localStorage.getItem('access_token') || localStorage.getItem('token')
   if (token) config.headers.Authorization = token
   return config
 })
 
+function clearAuthStorage() {
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('refresh_token')
+  localStorage.removeItem('token')
+  localStorage.removeItem('username')
+  localStorage.removeItem('role')
+}
+
+let refreshPromise = null
+
 api.interceptors.response.use(
   (res) => res,
-  (err) => {
+  async (err) => {
+    const original = err.config
+    const isRefreshRequest = original?.url === '/auth/refresh'
+    if (err.response?.status === 401 && original && !original._retry && !isRefreshRequest) {
+      const refreshToken = localStorage.getItem('refresh_token')
+      if (refreshToken) {
+        original._retry = true
+        try {
+          refreshPromise ||= api.post('/auth/refresh', { refresh_token: refreshToken })
+            .then((res) => {
+              const data = res.data?.data
+              localStorage.setItem('access_token', data.access_token)
+              localStorage.setItem('refresh_token', data.refresh_token)
+              localStorage.setItem('token', data.access_token)
+              return data.access_token
+            })
+            .finally(() => {
+              refreshPromise = null
+            })
+          const accessToken = await refreshPromise
+          original.headers.Authorization = accessToken
+          return api(original)
+        } catch {}
+      }
+    }
     if (err.response?.status === 401) {
-      localStorage.removeItem('token')
-      localStorage.removeItem('username')
-      localStorage.removeItem('role')
+      clearAuthStorage()
       if (_router) _router.push('/login')
       else window.location.href = '/login'
     }
@@ -29,11 +61,16 @@ const get = (url, params) => api.get(url, { params }).then(r => r.data)
 const post = (url, data) => api.post(url, data).then(r => r.data)
 const put = (url, data) => api.put(url, data).then(r => r.data)
 const del = (url) => api.delete(url).then(r => r.data)
+const newIdempotencyKey = () => {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
 
 export default {
   // Auth
   login: (username, password) => post('/login', { username, password }),
   register: (username, password, dorm_id) => post('/register', { username, password, dorm_id }),
+  logout: (refresh_token) => post('/logout', { refresh_token }),
 
   // Products
   getProducts: (params) => get('/products', params),
@@ -42,7 +79,7 @@ export default {
   getCategoryProducts: (id, params) => get(`/categories/${id}/products`, params),
 
   // Orders
-  createOrder: (items) => post('/orders', { items }),
+  createOrder: (items, idempotencyKey = newIdempotencyKey()) => post('/orders', { items, idempotency_key: idempotencyKey }),
   getOrders: (params) => get('/orders', params),
   getOrderDetail: (id) => get(`/orders/${id}`),
   cancelOrder: (id, reason) => post(`/orders/${id}/cancel`, { reason }),

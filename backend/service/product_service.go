@@ -1,11 +1,18 @@
 package service
 
 import (
-	"WHU_Snack_GO/common"
+	"WHU_Snack_GO/container"
 	"WHU_Snack_GO/models"
+	"WHU_Snack_GO/repository"
+	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
+
+	gocache "github.com/patrickmn/go-cache"
+	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 )
 
 type ProductListCache struct {
@@ -18,7 +25,7 @@ type ProductListQuery struct {
 	PageSize   int    `form:"page_size,default=10"`
 	CategoryID *int64 `form:"category_id"`
 	Keyword    string `form:"keyword"`
-	SortBy     string `form:"sort_by"` // price_asc, price_desc, sales, newest
+	SortBy     string `form:"sort_by"`
 }
 
 func (q *ProductListQuery) Normalize() {
@@ -30,32 +37,50 @@ func (q *ProductListQuery) Normalize() {
 	}
 }
 
-func GetProductList(query ProductListQuery) ([]models.Product, int64, error) {
+type ProductService struct {
+	db          *gorm.DB
+	rdb         *redis.Client
+	localCache  *gocache.Cache
+	productRepo repository.ProductRepository
+}
+
+func NewProductService(c *container.Container) *ProductService {
+	return &ProductService{
+		db:          c.DB,
+		rdb:         c.RDB,
+		localCache:  c.LocalCache,
+		productRepo: c.ProductRepo,
+	}
+}
+
+func (s *ProductService) GetProductList(query ProductListQuery) ([]models.Product, int64, error) {
 	query.Normalize()
+	ctx := context.Background()
 	cacheKey := fmt.Sprintf("product:list:page=%d:size=%d:cat=%v:kw=%s:sort=%s",
 		query.Page, query.PageSize, query.CategoryID, query.Keyword, query.SortBy)
 
-	// L1: 本地缓存
-	if val, found := common.LocalCache.Get(cacheKey); found {
+	if val, found := s.localCache.Get(cacheKey); found {
 		cached := val.(ProductListCache)
-		return cached.Products, cached.Total, nil
+		products := cloneProducts(cached.Products)
+		s.hydrateProductStocks(ctx, products)
+		return products, cached.Total, nil
 	}
 
-	// L2: Redis
-	redisVal, err := common.RDB.Get(common.Ctx, cacheKey).Result()
+	redisVal, err := s.rdb.Get(ctx, cacheKey).Result()
 	if err == nil {
 		var cached ProductListCache
 		if json.Unmarshal([]byte(redisVal), &cached) == nil {
-			common.LocalCache.Set(cacheKey, cached, 0)
-			return cached.Products, cached.Total, nil
+			s.localCache.Set(cacheKey, cached, 0)
+			products := cloneProducts(cached.Products)
+			s.hydrateProductStocks(ctx, products)
+			return products, cached.Total, nil
 		}
 	}
 
-	// L3: MySQL — 构建查询
 	var products []models.Product
 	var total int64
 
-	db := common.DB.Model(&models.Product{}).Preload("Category").Where("status = ?", models.ProductStatusOnSale)
+	db := s.db.Model(&models.Product{}).Preload("Category").Where("status = ?", models.ProductStatusOnSale)
 
 	if query.CategoryID != nil {
 		db = db.Where("category_id = ?", *query.CategoryID)
@@ -64,7 +89,6 @@ func GetProductList(query ProductListQuery) ([]models.Product, int64, error) {
 		db = db.Where("name LIKE ? OR description LIKE ?", "%"+query.Keyword+"%", "%"+query.Keyword+"%")
 	}
 
-	// 排序
 	switch query.SortBy {
 	case "price_asc":
 		db = db.Order("price ASC")
@@ -86,38 +110,95 @@ func GetProductList(query ProductListQuery) ([]models.Product, int64, error) {
 		return nil, 0, err
 	}
 
-	// 回填缓存
-	cached := ProductListCache{Products: products, Total: total}
-	common.LocalCache.Set(cacheKey, cached, 0)
+	cacheProducts := cloneProducts(products)
+	stripProductStocks(cacheProducts)
+	cached := ProductListCache{Products: cacheProducts, Total: total}
+	s.localCache.Set(cacheKey, cached, 0)
 	jsonBytes, _ := json.Marshal(cached)
-	common.RDB.Set(common.Ctx, cacheKey, string(jsonBytes), 5*time.Minute)
+	s.rdb.Set(ctx, cacheKey, string(jsonBytes), 5*time.Minute)
 
+	s.hydrateProductStocks(ctx, products)
 	return products, total, nil
 }
 
-func GetProductDetail(productID int64) (*models.Product, error) {
+func (s *ProductService) GetProductDetail(productID int64) (*models.Product, error) {
 	var product models.Product
-	err := common.DB.Preload("Category").First(&product, productID).Error
+	err := s.db.Preload("Category").First(&product, productID).Error
 	if err != nil {
 		return nil, err
 	}
+	s.hydrateProductStocks(context.Background(), []models.Product{product})
 	return &product, nil
 }
 
-func GetCategoryList() ([]models.Category, error) {
+func (s *ProductService) GetCategoryList() ([]models.Category, error) {
 	var categories []models.Category
-	err := common.DB.Order("sort ASC, id ASC").Find(&categories).Error
+	err := s.db.Order("sort ASC, id ASC").Find(&categories).Error
 	return categories, err
 }
 
-func InitProductStockToRedis() error {
+func cloneProducts(products []models.Product) []models.Product {
+	cloned := make([]models.Product, len(products))
+	copy(cloned, products)
+	return cloned
+}
+
+func stripProductStocks(products []models.Product) {
+	for i := range products {
+		products[i].Stock = 0
+	}
+}
+
+func (s *ProductService) hydrateProductStocks(ctx context.Context, products []models.Product) {
+	if len(products) == 0 {
+		return
+	}
+
+	keys := make([]string, 0, len(products))
+	for _, product := range products {
+		keys = append(keys, fmt.Sprintf("snack:stock:%d", product.ID))
+	}
+
+	values, err := s.rdb.MGet(ctx, keys...).Result()
+	if err != nil {
+		return
+	}
+	for i, value := range values {
+		if value == nil {
+			continue
+		}
+		stock, ok := redisValueToInt(value)
+		if ok {
+			products[i].Stock = stock
+		}
+	}
+}
+
+func redisValueToInt(value any) (int, bool) {
+	switch v := value.(type) {
+	case string:
+		n, err := strconv.Atoi(v)
+		return n, err == nil
+	case []byte:
+		n, err := strconv.Atoi(string(v))
+		return n, err == nil
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	default:
+		return 0, false
+	}
+}
+
+func (s *ProductService) InitProductStockToRedis() error {
 	var products []models.Product
-	if err := common.DB.Find(&products).Error; err != nil {
+	if err := s.db.Find(&products).Error; err != nil {
 		return fmt.Errorf("读取商品数据失败: %v", err)
 	}
 	for _, p := range products {
 		redisKey := fmt.Sprintf("snack:stock:%d", p.ID)
-		err := common.RDB.Set(common.Ctx, redisKey, p.Stock, 0).Err()
+		err := s.rdb.Set(context.Background(), redisKey, p.Stock, 0).Err()
 		if err != nil {
 			return fmt.Errorf("预热商品%v失败-%v", p.ID, err)
 		}

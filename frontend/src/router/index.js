@@ -28,7 +28,7 @@ const routes = [
 const router = createRouter({ history: createWebHistory(), routes })
 
 router.beforeEach((to, from, next) => {
-  const token = localStorage.getItem('token')
+  const token = localStorage.getItem('access_token') || localStorage.getItem('token')
   const role = localStorage.getItem('role')
   const isAuthPage = to.path === '/login' || to.path === '/register'
 
