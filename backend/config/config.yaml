@@ -4,26 +4,26 @@ server:
   mode: "release"
 
 mysql:
-  dsn: "root:root@tcp(127.0.0.1:3306)/whu_snack_go?charset=utf8mb4&parseTime=True&loc=Local"
+  dsn: "snack:snack123456@tcp(127.0.0.1:3307)/whu_snack_go?charset=utf8mb4&parseTime=True&loc=Local"
   max_idle_conns: 10
   max_open_conns: 100
   conn_max_lifetime: 300
 
 redis:
   addr: "127.0.0.1:6379"
-  password: ""
+  password: "redis123456"
   db: 0
   pool_size: 100
 
 rabbitmq:
-  url: "amqp://guest:guest@localhost:5672/"
+  url: "amqp://snack:rabbit123456@localhost:5672/"
   queue_name: "order_queue"
   retry_queue_name: "order_retry_queue"
   dlx_name: "order_dlx"
   dlq_name: "order_dead_letter_queue"
 
 jwt:
-  secret: "replace-with-a-strong-secret-in-production"
+  secret: "dev-jwt-secret-please-change"
   expire_secs: 500
   refresh_expire_secs: 604800
 

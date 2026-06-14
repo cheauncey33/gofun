@@ -143,3 +143,21 @@ func (ctrl *OrderController) PayOrder(c *gin.Context) {
 	}
 	response.Success(c, nil)
 }
+
+func (ctrl *OrderController) ConfirmOrder(c *gin.Context) {
+	userID, ok := common.GetUserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "用户未授权")
+		return
+	}
+	orderID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "订单ID格式错误")
+		return
+	}
+	if err := ctrl.orderSvc.ConfirmOrder(orderID, userID); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeInvalidOrderStatus, err.Error())
+		return
+	}
+	response.Success(c, nil)
+}

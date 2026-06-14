@@ -37,19 +37,13 @@ export function shortDateTime(value) {
 export const orderStatusText = {
   1: '待支付',
   2: '已支付',
-  3: '配送中',
-  4: '已完成',
+  3: '已完成',
   5: '已取消',
-  6: '退款中',
-  7: '已退款',
 }
 
 export const orderStatusTag = {
   1: 'warning',
   2: 'primary',
-  3: 'primary',
-  4: 'success',
+  3: 'success',
   5: 'info',
-  6: 'danger',
-  7: 'info',
 }

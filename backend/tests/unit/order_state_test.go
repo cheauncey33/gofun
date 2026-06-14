@@ -7,13 +7,11 @@ import (
 
 // TestOrderStateMachine_FullPathway 测试完整订单生命周期
 func TestOrderStateMachine_FullPathway(t *testing.T) {
-	// 正常流程: pending → paid → delivering → delivered → refunding → refunded
+	// 正常正向流程: pending → paid → completed → cancelled (退款)
 	pathway := []models.OrderStatus{
 		models.OrderStatusPaid,
-		models.OrderStatusDelivering,
-		models.OrderStatusDelivered,
-		models.OrderStatusRefunding,
-		models.OrderStatusRefunded,
+		models.OrderStatusCompleted,
+		models.OrderStatusCancelled,
 	}
 
 	current := models.OrderStatusPending
@@ -40,59 +38,51 @@ func TestOrderStateMachine_CancelFromPaid(t *testing.T) {
 	}
 }
 
-// TestOrderStateMachine_CancelFromDelivering 配送中可直接取消
-func TestOrderStateMachine_CancelFromDelivering(t *testing.T) {
-	if !models.OrderStatusDelivering.CanTransitionTo(models.OrderStatusCancelled) {
-		t.Error("delivering should be cancellable")
+// TestOrderStateMachine_CancelFromCompleted 已完成可以取消（即退款）
+func TestOrderStateMachine_CancelFromCompleted(t *testing.T) {
+	if !models.OrderStatusCompleted.CanTransitionTo(models.OrderStatusCancelled) {
+		t.Error("completed should be cancellable (refund path)")
 	}
 }
 
-// TestOrderStateMachine_CancelFromDelivered 已完成不可直接取消, 只能走退款
-func TestOrderStateMachine_CancelFromDelivered(t *testing.T) {
-	if models.OrderStatusDelivered.CanTransitionTo(models.OrderStatusCancelled) {
-		t.Error("delivered should NOT be cancellable directly, must go through refunding")
-	}
-	if !models.OrderStatusDelivered.CanTransitionTo(models.OrderStatusRefunding) {
-		t.Error("delivered should be transitionable to refunding")
-	}
-}
+// TestOrderStateMachine_TerminalState 终态(Cancelled)不可再转换
+func TestOrderStateMachine_TerminalState(t *testing.T) {
+	allStates := allStatuses()
 
-// TestOrderStateMachine_TerminalStates 终态不可再转换
-func TestOrderStateMachine_TerminalStates(t *testing.T) {
-	terminalStates := []models.OrderStatus{
-		models.OrderStatusCancelled,
-		models.OrderStatusRefunded,
-	}
-
-	allStates := []models.OrderStatus{
-		models.OrderStatusPending,
-		models.OrderStatusPaid,
-		models.OrderStatusDelivering,
-		models.OrderStatusDelivered,
-		models.OrderStatusCancelled,
-		models.OrderStatusRefunding,
-		models.OrderStatusRefunded,
-	}
-
-	for _, terminal := range terminalStates {
-		for _, target := range allStates {
-			if terminal.CanTransitionTo(target) {
-				t.Errorf("terminal state %s should not transition to any state, but allowed %s",
-					terminal.String(), target.String())
-			}
+	for _, target := range allStates {
+		if models.OrderStatusCancelled.CanTransitionTo(target) {
+			t.Errorf("terminal state cancelled should not transition to %s", target.String())
 		}
 	}
 }
 
-// TestOrderStateMachine_DeliveredOnlyRefunding 已完成只能走退款流程
-func TestOrderStateMachine_DeliveredOnlyRefunding(t *testing.T) {
-	allowed := []models.OrderStatus{models.OrderStatusRefunding}
+// TestOrderStateMachine_CompletedOnlyCancelled 已完成只能取消
+func TestOrderStateMachine_CompletedOnlyCancelled(t *testing.T) {
 	for _, s := range allStatuses() {
-		expect := contains(allowed, s)
-		got := models.OrderStatusDelivered.CanTransitionTo(s)
+		expect := s == models.OrderStatusCancelled
+		got := models.OrderStatusCompleted.CanTransitionTo(s)
 		if got != expect {
-			t.Errorf("OrderStatusDelivered.CanTransitionTo(%s) = %v, want %v",
+			t.Errorf("Completed.CanTransitionTo(%s) = %v, want %v",
 				s.String(), got, expect)
+		}
+	}
+}
+
+// TestOrderStateMachine_HasBeenPaid_OnlyPaidAndCompleted 只有 Paid 和 Completed 算已扣款
+func TestOrderStateMachine_HasBeenPaid_OnlyPaidAndCompleted(t *testing.T) {
+	tests := []struct {
+		status models.OrderStatus
+		paid   bool
+	}{
+		{models.OrderStatusPending, false},
+		{models.OrderStatusPaid, true},
+		{models.OrderStatusCompleted, true},
+		{models.OrderStatusCancelled, false},
+	}
+
+	for _, tt := range tests {
+		if got := tt.status.HasBeenPaid(); got != tt.paid {
+			t.Errorf("%s.HasBeenPaid() = %v, want %v", tt.status.String(), got, tt.paid)
 		}
 	}
 }
@@ -101,11 +91,8 @@ func allStatuses() []models.OrderStatus {
 	return []models.OrderStatus{
 		models.OrderStatusPending,
 		models.OrderStatusPaid,
-		models.OrderStatusDelivering,
-		models.OrderStatusDelivered,
+		models.OrderStatusCompleted,
 		models.OrderStatusCancelled,
-		models.OrderStatusRefunding,
-		models.OrderStatusRefunded,
 	}
 }
 

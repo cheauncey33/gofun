@@ -14,29 +14,18 @@ func TestOrderStatus_CanTransitionTo(t *testing.T) {
 		// 待支付
 		{"pending to paid", OrderStatusPending, OrderStatusPaid, true},
 		{"pending to cancelled", OrderStatusPending, OrderStatusCancelled, true},
-		{"pending to delivering", OrderStatusPending, OrderStatusDelivering, false},
-		{"pending to refunding", OrderStatusPending, OrderStatusRefunding, false},
+		{"pending to completed", OrderStatusPending, OrderStatusCompleted, false},
 		// 已支付
-		{"paid to delivering", OrderStatusPaid, OrderStatusDelivering, true},
+		{"paid to completed", OrderStatusPaid, OrderStatusCompleted, true},
 		{"paid to cancelled", OrderStatusPaid, OrderStatusCancelled, true},
-		{"paid to refunding", OrderStatusPaid, OrderStatusRefunding, true},
 		{"paid to pending", OrderStatusPaid, OrderStatusPending, false},
-		// 配送中
-		{"delivering to delivered", OrderStatusDelivering, OrderStatusDelivered, true},
-		{"delivering to cancelled", OrderStatusDelivering, OrderStatusCancelled, true},
-		{"delivering to refunding", OrderStatusDelivering, OrderStatusRefunding, false},
 		// 已完成
-		{"delivered to refunding", OrderStatusDelivered, OrderStatusRefunding, true},
-		{"delivered to cancelled", OrderStatusDelivered, OrderStatusCancelled, false},
-		{"delivered to delivering", OrderStatusDelivered, OrderStatusDelivering, false},
+		{"completed to cancelled", OrderStatusCompleted, OrderStatusCancelled, true},
+		{"completed to paid", OrderStatusCompleted, OrderStatusPaid, false},
+		{"completed to pending", OrderStatusCompleted, OrderStatusPending, false},
 		// 已取消(终态)
 		{"cancelled to any", OrderStatusCancelled, OrderStatusPaid, false},
-		{"cancelled to refunding", OrderStatusCancelled, OrderStatusRefunding, false},
-		// 退款中
-		{"refunding to refunded", OrderStatusRefunding, OrderStatusRefunded, true},
-		{"refunding to cancelled", OrderStatusRefunding, OrderStatusCancelled, false},
-		// 已退款(终态)
-		{"refunded to any", OrderStatusRefunded, OrderStatusPaid, false},
+		{"cancelled to completed", OrderStatusCancelled, OrderStatusCompleted, false},
 	}
 
 	for _, tt := range tests {
@@ -57,11 +46,8 @@ func TestOrderStatus_String(t *testing.T) {
 	}{
 		{OrderStatusPending, "pending"},
 		{OrderStatusPaid, "paid"},
-		{OrderStatusDelivering, "delivering"},
-		{OrderStatusDelivered, "delivered"},
+		{OrderStatusCompleted, "completed"},
 		{OrderStatusCancelled, "cancelled"},
-		{OrderStatusRefunding, "refunding"},
-		{OrderStatusRefunded, "refunded"},
 	}
 
 	for _, tt := range tests {
@@ -79,10 +65,7 @@ func TestOrderStatus_HasBeenPaid(t *testing.T) {
 		{OrderStatusPending, false},   // 待支付:从未扣款,取消不退钱
 		{OrderStatusCancelled, false}, // 已取消:未付款即取消
 		{OrderStatusPaid, true},
-		{OrderStatusDelivering, true},
-		{OrderStatusDelivered, true},
-		{OrderStatusRefunding, true},
-		{OrderStatusRefunded, true},
+		{OrderStatusCompleted, true},
 	}
 
 	for _, tt := range tests {

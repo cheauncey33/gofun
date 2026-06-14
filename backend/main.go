@@ -138,6 +138,7 @@ func main() {
 			auth.POST("/orders/:id/cancel", orderCtrl.CancelOrder)
 			auth.POST("/orders/:id/refund", orderCtrl.RequestRefund)
 			auth.POST("/orders/:id/pay", orderCtrl.PayOrder)
+			auth.POST("/orders/:id/confirm", orderCtrl.ConfirmOrder)
 
 			auth.GET("/user/info", userCtrl.GetUserInfo)
 			auth.PUT("/user/info", userCtrl.UpdateUserInfo)

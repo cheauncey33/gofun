@@ -10,8 +10,7 @@
     <el-radio-group v-model="statusFilter" class="filter-tabs" @change="fetch" size="large">
       <el-radio-button value="">全部</el-radio-button>
       <el-radio-button :value="2">已支付</el-radio-button>
-      <el-radio-button :value="3">配送中</el-radio-button>
-      <el-radio-button :value="4">已完成</el-radio-button>
+      <el-radio-button :value="3">已完成</el-radio-button>
       <el-radio-button :value="5">已取消</el-radio-button>
     </el-radio-group>
 
@@ -45,7 +44,7 @@ const loading = ref(false)
 const statusFilter = ref('')
 const newStatus = reactive({})
 
-const transitionMap = { 1: [2, 5], 2: [3, 5, 6], 3: [4, 5], 4: [6], 6: [7] }
+const transitionMap = { 1: [2, 5], 2: [3, 5], 3: [5] }
 
 function allowedTransitions(s) {
   return transitionMap[s] || []

@@ -9,6 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/snowflake"
@@ -66,6 +69,51 @@ var deductStockLua = `
 	end
 
 	return 1
+	`
+
+// 普通订单库存回滚：原子执行 幂等检查 + 设置回滚标记 + 恢复所有商品库存
+var rollbackNormalStockLua = `
+		local rollbackKey = KEYS[1]
+		-- ARGV[1]: rollback key TTL (seconds)
+		-- ARGV[2..2+N-1]: quantities to restore, matching KEYS[2..1+N]
+
+		if redis.call('EXISTS', rollbackKey) == 1 then
+			return 0
+		end
+
+		redis.call('SET', rollbackKey, '1', 'EX', ARGV[1])
+
+		for i = 2, #KEYS do
+			redis.call('INCRBY', KEYS[i], ARGV[i])
+		end
+
+		return 1
+	`
+
+// 秒杀订单库存回滚：原子执行 幂等检查 + 设置回滚标记 + 恢复活动库存 + 扣减用户已购计数
+var rollbackSeckillStockLua = `
+		local rollbackKey  = KEYS[1]
+		local stockKey     = KEYS[2]
+		local userCountKey = KEYS[3]
+		-- ARGV[1]: rollback key TTL (seconds)
+		-- ARGV[2]: userID (用作 HINCRBY 的 field)
+		-- ARGV[3..]: quantities per item (多个 item 的购买数量)
+
+		if redis.call('EXISTS', rollbackKey) == 1 then
+			return 0
+		end
+
+		redis.call('SET', rollbackKey, '1', 'EX', ARGV[1])
+
+		local totalQty = 0
+		for i = 3, #ARGV do
+			totalQty = totalQty + tonumber(ARGV[i])
+		end
+
+		redis.call('INCRBY', stockKey, totalQty)
+		redis.call('HINCRBY', userCountKey, ARGV[2], -totalQty)
+
+		return 1
 	`
 
 type OrderService struct {
@@ -346,34 +394,69 @@ func (s *OrderService) PayOrder(orderID, userID int64) error {
 }
 
 func (s *OrderService) RollbackReservedStock(msg OrderMessage) {
-	if msg.OrderID > 0 {
-		rollbackKey := fmt.Sprintf("order:stock_rollback:%d", msg.OrderID)
-		ok, err := s.rdb.SetNX(context.Background(), rollbackKey, "1", 24*time.Hour).Result()
-		if err != nil || !ok {
+	ctx := context.Background()
+
+	if msg.OrderID <= 0 {
+		log.Println("[回滚] 订单ID无效，跳过库存回滚")
+		return
+	}
+
+	rollbackKey := fmt.Sprintf("order:stock_rollback:%d", msg.OrderID)
+	rollbackTTL := int64((24 * time.Hour).Seconds())
+
+	if msg.SeckillActivityID > 0 {
+		stockKey := fmt.Sprintf("seckill:stock:%d", msg.SeckillActivityID)
+		userKey := fmt.Sprintf("seckill:user_count:%d", msg.SeckillActivityID)
+
+		keys := []string{rollbackKey, stockKey, userKey}
+		args := []interface{}{rollbackTTL, strconv.FormatInt(msg.UserID, 10)}
+		for _, item := range msg.Items.Items {
+			args = append(args, item.Num)
+		}
+
+		result, err := s.rdb.Eval(ctx, rollbackSeckillStockLua, keys, args...).Result()
+		if err != nil {
+			log.Printf("[回滚] 秒杀订单 %d Lua 回滚失败: %v", msg.OrderID, err)
 			return
 		}
+		if result.(int64) == 0 {
+			log.Printf("[回滚] 秒杀订单 %d 已回滚过，跳过重复回滚", msg.OrderID)
+			return
+		}
+		log.Printf("[回滚] 秒杀订单 %d 库存已原子回滚: stock+%s", msg.OrderID, formatRollbackQuantities(msg.Items.Items))
+	} else {
+		keys := []string{rollbackKey}
+		args := []interface{}{rollbackTTL}
+		for _, item := range msg.Items.Items {
+			keys = append(keys, fmt.Sprintf("snack:stock:%d", item.ProductID))
+			args = append(args, item.Num)
+		}
+
+		result, err := s.rdb.Eval(ctx, rollbackNormalStockLua, keys, args...).Result()
+		if err != nil {
+			log.Printf("[回滚] 订单 %d Lua 回滚失败: %v", msg.OrderID, err)
+			return
+		}
+		if result.(int64) == 0 {
+			log.Printf("[回滚] 订单 %d 已回滚过，跳过重复回滚", msg.OrderID)
+			return
+		}
+		log.Printf("[回滚] 订单 %d 库存已原子回滚: %s", msg.OrderID, formatRollbackQuantities(msg.Items.Items))
 	}
 
 	// 订单最终失败，释放幂等键，允许用户用同一 key 重新下单（秒杀单不带 key，自动跳过）
 	if msg.Items.IdempotencyKey != "" {
 		idempotencyRedisKey := fmt.Sprintf("order:idempotency:%d:%s", msg.UserID, msg.Items.IdempotencyKey)
-		s.rdb.Del(context.Background(), idempotencyRedisKey)
+		s.rdb.Del(ctx, idempotencyRedisKey)
 	}
+}
 
-	if msg.SeckillActivityID > 0 {
-		stockKey := fmt.Sprintf("seckill:stock:%d", msg.SeckillActivityID)
-		userKey := fmt.Sprintf("seckill:user_count:%d", msg.SeckillActivityID)
-		for _, item := range msg.Items.Items {
-			s.rdb.IncrBy(context.Background(), stockKey, int64(item.Num))
-			s.rdb.HIncrBy(context.Background(), userKey, fmt.Sprintf("%d", msg.UserID), int64(-item.Num))
-		}
-		return
+func formatRollbackQuantities(items []CreateOrderItemInput) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		parts = append(parts, fmt.Sprintf("product[%d]+%d", item.ProductID, item.Num))
 	}
-
-	for _, item := range msg.Items.Items {
-		redisKey := fmt.Sprintf("snack:stock:%d", item.ProductID)
-		s.rdb.IncrBy(context.Background(), redisKey, int64(item.Num))
-	}
+	return strings.Join(parts, ", ")
 }
 
 func (s *OrderService) GetOrderList(userID int64, page, pageSize int, status *int) ([]models.Order, int64, error) {
@@ -472,39 +555,20 @@ func (s *OrderService) CancelOrder(orderID, userID int64, reason string) error {
 }
 
 func (s *OrderService) RequestRefund(orderID, userID int64, reason string) error {
-	var order models.Order
-	if err := s.db.Where("id = ? AND user_id = ?", orderID, userID).First(&order).Error; err != nil {
-		return fmt.Errorf("订单不存在")
+	// 退款就是 Completed → Cancelled（退库存+退款），直接复用 CancelOrder。
+	// CancelOrder 已根据 HasBeenPaid() 自动处理退款逻辑。
+	return s.CancelOrder(orderID, userID, reason)
+}
+
+func (s *OrderService) ConfirmOrder(orderID, userID int64) error {
+	res := s.db.Model(&models.Order{}).
+		Where("id = ? AND user_id = ? AND status = ?", orderID, userID, models.OrderStatusPaid).
+		Update("status", models.OrderStatusCompleted)
+	if res.Error != nil {
+		return res.Error
 	}
-
-	if !order.Status.CanTransitionTo(models.OrderStatusRefunding) {
-		return fmt.Errorf("当前订单状态不允许退款")
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("当前订单状态不允许确认收货")
 	}
-
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&order).Update("status", models.OrderStatusRefunding).Error; err != nil {
-			return err
-		}
-
-		var items []models.OrderItem
-		if err := tx.Where("order_id = ?", orderID).Find(&items).Error; err != nil {
-			return err
-		}
-		for _, item := range items {
-			tx.Model(&models.Product{}).Where("id = ?", item.ProductID).
-				Update("stock", gorm.Expr("stock + ?", item.Quantity))
-			redisKey := fmt.Sprintf("snack:stock:%d", item.ProductID)
-			s.rdb.IncrBy(context.Background(), redisKey, int64(item.Quantity))
-		}
-
-		tx.Model(&models.User{}).Where("id = ?", order.UserID).
-			Update("balance", gorm.Expr("balance + ?", order.TotalPrice))
-
-		tx.Model(&order).Updates(map[string]interface{}{
-			"status":        models.OrderStatusRefunded,
-			"cancel_reason": reason,
-		})
-
-		return nil
-	})
+	return nil
 }

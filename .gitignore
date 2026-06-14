@@ -1,0 +1,27 @@
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Backend build artifacts
+backend/whu-snack-go
+backend/whu-snack-go.exe
+*.exe
+
+# Logs
+*.log
+backend/local.out.log
+backend/local.err.log
+
+# Go
+*.out
+coverage.out
+
+# Node / frontend
+node_modules/
+frontend/dist/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

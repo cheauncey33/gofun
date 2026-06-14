@@ -33,8 +33,10 @@ services:
         condition: service_healthy
 
   mysql:
-    image: mysql:8.4
+    image: mysql:8.0
     restart: unless-stopped
+    ports:
+      - "3307:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: whu_snack_go
@@ -52,6 +54,8 @@ services:
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
+    ports:
+      - "6379:6379"
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
@@ -64,8 +68,11 @@ services:
       retries: 10
 
   rabbitmq:
-    image: rabbitmq:4.1-management-alpine
+    image: rabbitmq:3-management-alpine
     restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
     environment:
       RABBITMQ_DEFAULT_USER: snack
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}

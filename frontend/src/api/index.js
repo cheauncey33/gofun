@@ -82,8 +82,10 @@ export default {
   createOrder: (items, idempotencyKey = newIdempotencyKey()) => post('/orders', { items, idempotency_key: idempotencyKey }),
   getOrders: (params) => get('/orders', params),
   getOrderDetail: (id) => get(`/orders/${id}`),
+  payOrder: (id) => post(`/orders/${id}/pay`),
   cancelOrder: (id, reason) => post(`/orders/${id}/cancel`, { reason }),
   refundOrder: (id, reason) => post(`/orders/${id}/refund`, { reason }),
+  confirmOrder: (id) => post(`/orders/${id}/confirm`),
 
   // Addresses
   getAddresses: () => get('/addresses'),

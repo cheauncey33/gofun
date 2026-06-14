@@ -53,35 +53,24 @@ type Product struct {
 type OrderStatus int
 
 const (
-	OrderStatusPending    OrderStatus = 1
-	OrderStatusPaid       OrderStatus = 2
-	OrderStatusDelivering OrderStatus = 3
-	OrderStatusDelivered  OrderStatus = 4
-	OrderStatusCancelled  OrderStatus = 5
-	OrderStatusRefunding  OrderStatus = 6
-	OrderStatusRefunded   OrderStatus = 7
+	OrderStatusPending   OrderStatus = 1
+	OrderStatusPaid      OrderStatus = 2
+	OrderStatusCompleted OrderStatus = 3
+	OrderStatusCancelled OrderStatus = 5
 )
 
 var orderTransitionMap = map[OrderStatus][]OrderStatus{
-	OrderStatusPending:    {OrderStatusPaid, OrderStatusCancelled},
-	OrderStatusPaid:       {OrderStatusDelivering, OrderStatusCancelled, OrderStatusRefunding},
-	OrderStatusDelivering: {OrderStatusDelivered, OrderStatusCancelled},
-	OrderStatusDelivered:  {OrderStatusRefunding},
-	OrderStatusRefunding:  {OrderStatusRefunded},
+	OrderStatusPending:   {OrderStatusPaid, OrderStatusCancelled},
+	OrderStatusPaid:      {OrderStatusCompleted, OrderStatusCancelled},
+	OrderStatusCompleted: {OrderStatusCancelled},
 }
 
 // HasBeenPaid 表示订单是否已经扣过款。
 // 在"支付时扣款"模型下,余额只在 PayOrder(Pending→Paid)时扣减,
-// 因此除待支付(Pending)和已取消(Cancelled,从未付款即取消)外的状态都意味着已扣款,
-// 取消/退款时据此决定是否需要把余额退还给用户。
+// 因此 Paid 和 Completed 意味着已扣款,取消时需退款;
+// Pending 和 Cancelled 从未扣款,取消时只退库存不退钱。
 func (o OrderStatus) HasBeenPaid() bool {
-	switch o {
-	case OrderStatusPaid, OrderStatusDelivering, OrderStatusDelivered,
-		OrderStatusRefunding, OrderStatusRefunded:
-		return true
-	default:
-		return false
-	}
+	return o == OrderStatusPaid || o == OrderStatusCompleted
 }
 
 func (o OrderStatus) CanTransitionTo(target OrderStatus) bool {
@@ -103,16 +92,10 @@ func (o OrderStatus) String() string {
 		return "pending"
 	case OrderStatusPaid:
 		return "paid"
-	case OrderStatusDelivering:
-		return "delivering"
-	case OrderStatusDelivered:
-		return "delivered"
+	case OrderStatusCompleted:
+		return "completed"
 	case OrderStatusCancelled:
 		return "cancelled"
-	case OrderStatusRefunding:
-		return "refunding"
-	case OrderStatusRefunded:
-		return "refunded"
 	default:
 		return "unknown"
 	}

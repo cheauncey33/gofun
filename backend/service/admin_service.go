@@ -218,7 +218,7 @@ func (s *AdminService) AdminUpdateOrderStatus(orderID int64, targetStatus models
 	if !order.Status.CanTransitionTo(targetStatus) {
 		return fmt.Errorf("状态转换不允许: %s -> %s", order.Status.String(), targetStatus.String())
 	}
-	if targetStatus == models.OrderStatusCancelled || targetStatus == models.OrderStatusRefunded {
+	if targetStatus == models.OrderStatusCancelled {
 		// 只有取消前已扣款的订单才退款;待支付订单被取消只退库存不退钱。
 		refund := order.Status.HasBeenPaid()
 		return s.db.Transaction(func(tx *gorm.DB) error {
