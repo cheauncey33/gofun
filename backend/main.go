@@ -9,6 +9,7 @@ import (
 	"WHU_Snack_GO/pkg/logger"
 	"WHU_Snack_GO/pkg/middleware"
 	"WHU_Snack_GO/pkg/validator"
+	"WHU_Snack_GO/pkg/ws"
 	"WHU_Snack_GO/service"
 	"context"
 	"flag"
@@ -87,6 +88,16 @@ func main() {
 	}
 	orderSvc.SetPublishTimeout(orderTimeoutSvc.PublishDelayedOrderTimeout)
 
+	// WebSocket Hub：订单状态变更主动推送给前端，替代轮询。
+	wsHub := ws.NewHub()
+	go wsHub.Run()
+	orderSvc.SetNotifier(func(userID int64, ev service.OrderStatusEvent) {
+		wsHub.PushJSON(userID, ev)
+	})
+	orderTimeoutSvc.SetNotifier(func(userID int64, ev service.OrderStatusEvent) {
+		wsHub.PushJSON(userID, ev)
+	})
+
 	// 构建 controller 层
 	orderCtrl := controller.NewOrderController(orderSvc)
 	seckillCtrl := controller.NewSeckillController(seckillSvc)
@@ -94,6 +105,7 @@ func main() {
 	userCtrl := controller.NewUserController(userSvc)
 	adminCtrl := controller.NewAdminController(adminSvc)
 	addressCtrl := controller.NewAddressController(addressSvc)
+	wsCtrl := controller.NewWSController(wsHub)
 
 	// 预热商品库存
 	if err := productSvc.InitProductStockToRedis(); err != nil {
@@ -128,6 +140,9 @@ func main() {
 		v1.POST("/register", userCtrl.Register)
 		v1.POST("/auth/refresh", userCtrl.Refresh)
 		v1.POST("/logout", userCtrl.Logout)
+
+		// WebSocket 订单实时推送：浏览器无法自定义请求头，token 走查询参数 ?token=，在 Handle 内自行鉴权。
+		v1.GET("/ws", wsCtrl.Handle)
 
 		auth := v1.Group("/")
 		auth.Use(common.AuthMiddleware())

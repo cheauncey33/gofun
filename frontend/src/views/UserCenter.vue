@@ -9,6 +9,15 @@
 
     <el-card shadow="never" class="section-card">
       <template #header><span class="section-title">基本信息</span></template>
+      <div class="profile-head">
+        <el-avatar :size="72" :src="user.avatar_url" class="profile-avatar">
+          {{ (user.username || '用').charAt(0).toUpperCase() }}
+        </el-avatar>
+        <div class="profile-head-info">
+          <div class="profile-name">{{ user.username }}</div>
+          <div class="profile-balance">余额 {{ money(user.balance) }}</div>
+        </div>
+      </div>
       <el-descriptions :column="1">
         <el-descriptions-item label="用户名">{{ user.username }}</el-descriptions-item>
         <el-descriptions-item label="余额"><span class="price-text">{{ money(user.balance) }}</span></el-descriptions-item>

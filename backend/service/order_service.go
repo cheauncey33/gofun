@@ -17,6 +17,7 @@ import (
 	"github.com/bwmarrin/snowflake"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type CreateOrderItemInput struct {
@@ -122,9 +123,21 @@ type OrderService struct {
 	snowflakeNode  *snowflake.Node
 	publish        func(body []byte) error
 	publishTimeout func(orderID, userID int64) error
+	notify         func(userID int64, ev OrderStatusEvent)
 	orderRepo      repository.OrderRepository
 	productRepo    repository.ProductRepository
 	lockTimeout    time.Duration
+}
+
+// OrderStatusEvent 是通过 WebSocket 推送给前端的订单状态变更事件。
+// Status 取 models.OrderStatus 的整数值（下单失败时为 0），StatusText 为其英文标识。
+// Event 标识触发场景：created/paid/cancelled/completed/timeout_cancelled/failed。
+type OrderStatusEvent struct {
+	OrderID    int64  `json:"order_id,string"`
+	Status     int    `json:"status"`
+	StatusText string `json:"status_text"`
+	Event      string `json:"event"`
+	Message    string `json:"message"`
 }
 
 func NewOrderService(c *container.Container, lockTimeoutSec int) *OrderService {
@@ -141,6 +154,39 @@ func NewOrderService(c *container.Container, lockTimeoutSec int) *OrderService {
 
 func (s *OrderService) SetPublishTimeout(fn func(orderID, userID int64) error) {
 	s.publishTimeout = fn
+}
+
+// SetNotifier 注入订单状态推送回调（通常由 WebSocket Hub 提供）。
+func (s *OrderService) SetNotifier(fn func(userID int64, ev OrderStatusEvent)) {
+	s.notify = fn
+}
+
+// emitOrderEvent 向指定用户推送一条订单状态事件，未注入 notifier 时静默跳过。
+func (s *OrderService) emitOrderEvent(userID, orderID int64, status models.OrderStatus, event, message string) {
+	if s.notify == nil {
+		return
+	}
+	s.notify(userID, OrderStatusEvent{
+		OrderID:    orderID,
+		Status:     int(status),
+		StatusText: status.String(),
+		Event:      event,
+		Message:    message,
+	})
+}
+
+// NotifyOrderFailed 在消费端遇到不可重试错误（订单最终未能创建）时推送失败事件。
+func (s *OrderService) NotifyOrderFailed(userID, orderID int64, message string) {
+	if s.notify == nil {
+		return
+	}
+	s.notify(userID, OrderStatusEvent{
+		OrderID:    orderID,
+		Status:     0,
+		StatusText: "failed",
+		Event:      "failed",
+		Message:    message,
+	})
 }
 
 func (s *OrderService) CreateOrder(userID int64, input CreateOrderInput) error {
@@ -354,14 +400,18 @@ func (s *OrderService) ProcessOrderTask(msg OrderMessage) error {
 
 		return nil
 	})
-	if txErr == nil && s.publishTimeout != nil {
-		_ = s.publishTimeout(msg.OrderID, msg.UserID)
+	if txErr == nil {
+		if s.publishTimeout != nil {
+			_ = s.publishTimeout(msg.OrderID, msg.UserID)
+		}
+		// 订单已落库（待支付），主动推送给前端，替代轮询。
+		s.emitOrderEvent(msg.UserID, msg.OrderID, models.OrderStatusPending, "created", "订单已创建，请尽快支付")
 	}
 	return txErr
 }
 
 func (s *OrderService) PayOrder(orderID, userID int64) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		var order models.Order
 		if err := tx.Where("id = ? AND user_id = ?", orderID, userID).First(&order).Error; err != nil {
 			return fmt.Errorf("订单不存在")
@@ -390,7 +440,11 @@ func (s *OrderService) PayOrder(orderID, userID int64) error {
 			return fmt.Errorf("余额不足")
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	s.emitOrderEvent(userID, orderID, models.OrderStatusPaid, "paid", "支付成功")
+	return nil
 }
 
 func (s *OrderService) RollbackReservedStock(msg OrderMessage) {
@@ -493,24 +547,28 @@ func (s *OrderService) GetOrderDetail(orderID, userID int64) (*models.Order, err
 }
 
 func (s *OrderService) CancelOrder(orderID, userID int64, reason string) error {
-	var order models.Order
-	if err := s.db.Where("id = ? AND user_id = ?", orderID, userID).First(&order).Error; err != nil {
-		return fmt.Errorf("订单不存在")
-	}
-
-	if !order.Status.CanTransitionTo(models.OrderStatusCancelled) {
-		return fmt.Errorf("当前订单状态不允许取消")
-	}
-
-	// 是否退款取决于取消前是否已扣款:待支付订单从未扣款,只退库存不退钱。
-	originStatus := order.Status
-	refund := originStatus.HasBeenPaid()
-
 	var restoredItems []models.OrderItem
+	var refund bool
+	var totalPrice float64
+
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		// 条件更新挡住并发取消/支付/超时:只有抢到这次取消的一方才继续退库存退款。
+		// SELECT FOR UPDATE：加行锁后再读状态，消除事务外读与事务内写之间的竞态窗口。
+		var order models.Order
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ?", orderID, userID).First(&order).Error; err != nil {
+			return fmt.Errorf("订单不存在")
+		}
+
+		if !order.Status.CanTransitionTo(models.OrderStatusCancelled) {
+			return fmt.Errorf("当前订单状态不允许取消")
+		}
+
+		// 是否退款取决于取消前是否已扣款：待支付订单从未扣款，只退库存不退钱。
+		refund = order.Status.HasBeenPaid()
+		totalPrice = order.TotalPrice
+
 		res := tx.Model(&models.Order{}).
-			Where("id = ? AND status = ?", orderID, originStatus).
+			Where("id = ? AND status = ?", orderID, order.Status).
 			Updates(map[string]interface{}{
 				"status":        models.OrderStatusCancelled,
 				"cancel_reason": reason,
@@ -534,8 +592,8 @@ func (s *OrderService) CancelOrder(orderID, userID int64, reason string) error {
 		}
 
 		if refund {
-			if err := tx.Model(&models.User{}).Where("id = ?", order.UserID).
-				Update("balance", gorm.Expr("balance + ?", order.TotalPrice)).Error; err != nil {
+			if err := tx.Model(&models.User{}).Where("id = ?", userID).
+				Update("balance", gorm.Expr("balance + ?", totalPrice)).Error; err != nil {
 				return err
 			}
 		}
@@ -551,6 +609,12 @@ func (s *OrderService) CancelOrder(orderID, userID int64, reason string) error {
 		redisKey := fmt.Sprintf("snack:stock:%d", item.ProductID)
 		s.rdb.IncrBy(context.Background(), redisKey, int64(item.Quantity))
 	}
+
+	message := "订单已取消"
+	if refund {
+		message = "订单已取消，款项已退回余额"
+	}
+	s.emitOrderEvent(userID, orderID, models.OrderStatusCancelled, "cancelled", message)
 	return nil
 }
 
@@ -570,5 +634,6 @@ func (s *OrderService) ConfirmOrder(orderID, userID int64) error {
 	if res.RowsAffected == 0 {
 		return fmt.Errorf("当前订单状态不允许确认收货")
 	}
+	s.emitOrderEvent(userID, orderID, models.OrderStatusCompleted, "completed", "已确认收货，订单完成")
 	return nil
 }

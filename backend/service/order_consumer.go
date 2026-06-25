@@ -165,6 +165,8 @@ func (s *OrderConsumerService) handleDelivery(ctx context.Context, ch *amqp.Chan
 		if errors.Is(err, ErrOrderNonRetryable) {
 			s.orderSvc.RollbackReservedStock(msg)
 			log.Printf("order consumer worker %d order %d non-retryable, reserved stock rolled back\n", workerID, msg.OrderID)
+			// 订单最终创建失败，推送失败事件让前端及时提示用户。
+			s.orderSvc.NotifyOrderFailed(msg.UserID, msg.OrderID, err.Error())
 			return d.Ack(false)
 		}
 		if handleErr := s.handleFailedDelivery(ctx, ch, d, maxRetries); handleErr != nil {

@@ -2,8 +2,11 @@
   <el-container class="app-shell">
     <el-aside width="240px" class="sidebar">
       <div class="brand">
-        <div class="brand-title"><span>WHU</span> Snack</div>
-        <div class="brand-subtitle">校园零食商城</div>
+        <div class="brand-mark">S</div>
+        <div class="brand-text">
+          <div class="brand-title"><span>WHU</span> Snack</div>
+          <div class="brand-subtitle">校园零食铺</div>
+        </div>
       </div>
 
       <el-menu
@@ -46,7 +49,7 @@
             <div class="user-name">{{ username }}</div>
             <div class="user-balance">余额 {{ money(balance) }}</div>
           </div>
-          <el-avatar :size="36" class="user-avatar">{{ username.charAt(0).toUpperCase() }}</el-avatar>
+          <el-avatar :size="36" class="user-avatar" :src="avatarUrl">{{ username.charAt(0).toUpperCase() }}</el-avatar>
           <el-button size="small" text @click="logout">退出</el-button>
         </div>
       </el-header>
@@ -94,7 +97,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, provide } from 'vue'
+import { ref, computed, onMounted, onUnmounted, provide } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   DataLine,
@@ -113,6 +116,7 @@ import { ElMessage } from 'element-plus'
 import { useCart } from '../stores/cart.js'
 import api from '../api/index.js'
 import { imageUrl, money } from '../utils/display.js'
+import { connectOrderSocket, disconnectOrderSocket } from '../stores/orderSocket.js'
 
 const cart = useCart()
 const cartDrawer = ref(false)
@@ -125,6 +129,7 @@ const route = useRoute()
 const router = useRouter()
 const username = ref(localStorage.getItem('username') || '用户')
 const balance = ref(0)
+const avatarUrl = ref('')
 const isAdmin = ref(false)
 const activeSeckillCount = ref(0)
 
@@ -152,6 +157,7 @@ async function refreshUser() {
     const res = await api.getUserInfo()
     username.value = res.data?.username || username.value
     balance.value = res.data?.balance || 0
+    avatarUrl.value = res.data?.avatar_url || ''
     isAdmin.value = res.data?.role === 'admin'
     if (res.data?.role) localStorage.setItem('role', res.data.role)
   } catch {}
@@ -161,13 +167,22 @@ provide('refreshUser', refreshUser)
 
 onMounted(async () => {
   await refreshUser()
+  // 建立订单实时推送连接，余额变化时（如支付）顺带刷新用户信息
+  connectOrderSocket()
+  window.addEventListener('order:status', refreshUser)
   try {
     const res = await api.getSeckillActivities({ page: 1, page_size: 50 })
     activeSeckillCount.value = (res.data?.list || []).filter((a) => a.status === 1).length
   } catch {}
 })
 
+onUnmounted(() => {
+  window.removeEventListener('order:status', refreshUser)
+  disconnectOrderSocket()
+})
+
 async function logout() {
+  disconnectOrderSocket()
   const refreshToken = localStorage.getItem('refresh_token')
   if (refreshToken) {
     await api.logout(refreshToken).catch(() => {})

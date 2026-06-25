@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 
@@ -33,6 +34,12 @@ type OrderTimeoutService struct {
 	orderRepo      repository.OrderRepository
 	productRepo    repository.ProductRepository
 	timeoutMinutes int
+	notify         func(userID int64, ev OrderStatusEvent)
+}
+
+// SetNotifier 注入订单状态推送回调（通常由 WebSocket Hub 提供）。
+func (s *OrderTimeoutService) SetNotifier(fn func(userID int64, ev OrderStatusEvent)) {
+	s.notify = fn
 }
 
 func NewOrderTimeoutService(db *gorm.DB, rdb *redis.Client, conn *amqp.Connection,
@@ -60,11 +67,11 @@ func (s *OrderTimeoutService) SetupTimeoutInfrastructure() error {
 		return fmt.Errorf("timeout setup: exchange declare failed: %w", err)
 	}
 
-	ttlMs := int32(s.timeoutMinutes * 60 * 1000)
+	// 不设置队列级 x-message-ttl，改为每条消息发布时携带 Expiration，
+	// 避免队头阻塞导致后续已过期消息无法及时路由到 DLX。
 	args := amqp.Table{
 		"x-dead-letter-exchange":    orderTimeoutExchange,
 		"x-dead-letter-routing-key": "timeout",
-		"x-message-ttl":             ttlMs,
 	}
 	_, err = ch.QueueDeclare(orderDelayQueue, true, false, false, false, args)
 	if err != nil {
@@ -94,6 +101,7 @@ func (s *OrderTimeoutService) PublishDelayedOrderTimeout(orderID, userID int64) 
 	msg := OrderTimeoutMessage{OrderID: orderID, UserID: userID}
 	body, _ := json.Marshal(msg)
 
+	ttlMs := strconv.FormatInt(int64(s.timeoutMinutes)*60*1000, 10)
 	return ch.PublishWithContext(
 		context.Background(),
 		"",
@@ -104,6 +112,7 @@ func (s *OrderTimeoutService) PublishDelayedOrderTimeout(orderID, userID int64) 
 			ContentType:  "application/json",
 			Body:         body,
 			DeliveryMode: amqp.Persistent,
+			Expiration:   ttlMs, // 消息级 TTL，每条独立计时，避免队头阻塞延误后续消息
 		},
 	)
 }
@@ -204,6 +213,7 @@ func (s *OrderTimeoutService) processTimeout(msg OrderTimeoutMessage) error {
 	}
 
 	var restoredItems []models.OrderItem
+	var cancelled bool
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		// 条件更新:只有订单仍为 Pending 时才取消。
 		// 这一步同时挡住两种竞态——用户刚好支付(Pending→Paid)、或并发手动取消;
@@ -236,6 +246,7 @@ func (s *OrderTimeoutService) processTimeout(msg OrderTimeoutMessage) error {
 		}
 
 		restoredItems = items
+		cancelled = true
 		return nil
 	}); err != nil {
 		return err
@@ -246,6 +257,17 @@ func (s *OrderTimeoutService) processTimeout(msg OrderTimeoutMessage) error {
 	for _, item := range restoredItems {
 		redisKey := fmt.Sprintf("snack:stock:%d", item.ProductID)
 		s.rdb.IncrBy(ctx, redisKey, int64(item.Quantity))
+	}
+
+	// 仅在本次真正执行了取消时推送（RowsAffected==0 的并发场景不重复通知）。
+	if cancelled && s.notify != nil {
+		s.notify(msg.UserID, OrderStatusEvent{
+			OrderID:    msg.OrderID,
+			Status:     int(models.OrderStatusCancelled),
+			StatusText: models.OrderStatusCancelled.String(),
+			Event:      "timeout_cancelled",
+			Message:    "订单超时未支付，已自动取消",
+		})
 	}
 	return nil
 }

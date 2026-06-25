@@ -12,6 +12,7 @@ import (
 
 	gocache "github.com/patrickmn/go-cache"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
 
@@ -42,6 +43,7 @@ type ProductService struct {
 	rdb         *redis.Client
 	localCache  *gocache.Cache
 	productRepo repository.ProductRepository
+	sfGroup     singleflight.Group // 防缓存击穿：同一 key 并发只打一次 DB
 }
 
 func NewProductService(c *container.Container) *ProductService {
@@ -77,58 +79,101 @@ func (s *ProductService) GetProductList(query ProductListQuery) ([]models.Produc
 		}
 	}
 
-	var products []models.Product
-	var total int64
-
-	db := s.db.Model(&models.Product{}).Preload("Category").Where("status = ?", models.ProductStatusOnSale)
-
-	if query.CategoryID != nil {
-		db = db.Where("category_id = ?", *query.CategoryID)
+	// 同一查询条件并发只打一次 DB，防止双层缓存同时失效时的击穿
+	type listResult struct {
+		products []models.Product
+		total    int64
 	}
-	if query.Keyword != "" {
-		db = db.Where("name LIKE ? OR description LIKE ?", "%"+query.Keyword+"%", "%"+query.Keyword+"%")
-	}
+	v, err, _ := s.sfGroup.Do(cacheKey, func() (interface{}, error) {
+		var products []models.Product
+		var total int64
 
-	switch query.SortBy {
-	case "price_asc":
-		db = db.Order("price ASC")
-	case "price_desc":
-		db = db.Order("price DESC")
-	case "sales":
-		db = db.Order("sales_count DESC")
-	case "newest":
-		db = db.Order("create_time DESC")
-	default:
-		db = db.Order("id DESC")
-	}
+		db := s.db.Model(&models.Product{}).Preload("Category").Where("status = ?", models.ProductStatusOnSale)
 
-	db.Count(&total)
+		if query.CategoryID != nil {
+			db = db.Where("category_id = ?", *query.CategoryID)
+		}
+		if query.Keyword != "" {
+			db = db.Where("name LIKE ? OR description LIKE ?", "%"+query.Keyword+"%", "%"+query.Keyword+"%")
+		}
 
-	offset := (query.Page - 1) * query.PageSize
-	err = db.Limit(query.PageSize).Offset(offset).Find(&products).Error
+		switch query.SortBy {
+		case "price_asc":
+			db = db.Order("price ASC")
+		case "price_desc":
+			db = db.Order("price DESC")
+		case "sales":
+			db = db.Order("sales_count DESC")
+		case "newest":
+			db = db.Order("create_time DESC")
+		default:
+			db = db.Order("id DESC")
+		}
+
+		db.Count(&total)
+
+		offset := (query.Page - 1) * query.PageSize
+		if err := db.Limit(query.PageSize).Offset(offset).Find(&products).Error; err != nil {
+			return nil, err
+		}
+
+		cacheProducts := cloneProducts(products)
+		stripProductStocks(cacheProducts)
+		cached := ProductListCache{Products: cacheProducts, Total: total}
+		s.localCache.Set(cacheKey, cached, 0)
+		jsonBytes, _ := json.Marshal(cached)
+		s.rdb.Set(ctx, cacheKey, string(jsonBytes), 5*time.Minute)
+
+		return &listResult{products: products, total: total}, nil
+	})
 	if err != nil {
 		return nil, 0, err
 	}
 
-	cacheProducts := cloneProducts(products)
-	stripProductStocks(cacheProducts)
-	cached := ProductListCache{Products: cacheProducts, Total: total}
-	s.localCache.Set(cacheKey, cached, 0)
-	jsonBytes, _ := json.Marshal(cached)
-	s.rdb.Set(ctx, cacheKey, string(jsonBytes), 5*time.Minute)
-
-	s.hydrateProductStocks(ctx, products)
-	return products, total, nil
+	res := v.(*listResult)
+	s.hydrateProductStocks(ctx, res.products)
+	return res.products, res.total, nil
 }
 
 func (s *ProductService) GetProductDetail(productID int64) (*models.Product, error) {
-	var product models.Product
-	err := s.db.Preload("Category").First(&product, productID).Error
+	ctx := context.Background()
+	cacheKey := fmt.Sprintf("product:detail:%d", productID)
+
+	// L1：本地缓存
+	if val, found := s.localCache.Get(cacheKey); found {
+		product := val.(models.Product)
+		s.hydrateProductStocks(ctx, []models.Product{product})
+		return &product, nil
+	}
+
+	// L2：Redis 缓存
+	if redisVal, err := s.rdb.Get(ctx, cacheKey).Result(); err == nil {
+		var product models.Product
+		if json.Unmarshal([]byte(redisVal), &product) == nil {
+			s.localCache.Set(cacheKey, product, 0)
+			s.hydrateProductStocks(ctx, []models.Product{product})
+			return &product, nil
+		}
+	}
+
+	// 缓存全部 miss，用 singleflight 保证只有一个请求打 DB
+	v, err, _ := s.sfGroup.Do(cacheKey, func() (interface{}, error) {
+		var product models.Product
+		if err := s.db.Preload("Category").First(&product, productID).Error; err != nil {
+			return nil, err
+		}
+		jsonBytes, _ := json.Marshal(product)
+		s.rdb.Set(ctx, cacheKey, string(jsonBytes), 10*time.Minute)
+		s.localCache.Set(cacheKey, product, 0)
+		return &product, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	s.hydrateProductStocks(context.Background(), []models.Product{product})
-	return &product, nil
+
+	product := v.(*models.Product)
+	s.hydrateProductStocks(ctx, []models.Product{*product})
+	return product, nil
 }
 
 func (s *ProductService) GetCategoryList() ([]models.Category, error) {

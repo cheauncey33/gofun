@@ -56,7 +56,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, inject } from 'vue'
+import { ref, onMounted, onUnmounted, inject } from 'vue'
 import { ElMessageBox, ElNotification } from 'element-plus'
 import api from '../api/index.js'
 import { money, orderStatusTag, orderStatusText, shortDateTime } from '../utils/display.js'
@@ -172,5 +172,17 @@ async function refund(row) {
   }
 }
 
-onMounted(fetch)
+// 收到 WebSocket 推送的订单状态变更后刷新列表，保证页面与后端最终状态一致
+function onOrderStatus() {
+  fetch()
+}
+
+onMounted(() => {
+  fetch()
+  window.addEventListener('order:status', onOrderStatus)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('order:status', onOrderStatus)
+})
 </script>
