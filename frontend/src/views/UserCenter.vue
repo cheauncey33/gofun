@@ -15,12 +15,12 @@
         </el-avatar>
         <div class="profile-head-info">
           <div class="profile-name">{{ user.username }}</div>
-          <div class="profile-balance">余额 {{ money(user.balance) }}</div>
+          <div class="profile-balance">余额 {{ moneyCents(user.balance_cents) }}</div>
         </div>
       </div>
       <el-descriptions :column="1">
         <el-descriptions-item label="用户名">{{ user.username }}</el-descriptions-item>
-        <el-descriptions-item label="余额"><span class="price-text">{{ money(user.balance) }}</span></el-descriptions-item>
+        <el-descriptions-item label="余额"><span class="price-text">{{ moneyCents(user.balance_cents) }}</span></el-descriptions-item>
         <el-descriptions-item label="手机号">{{ user.phone || '未设置' }}</el-descriptions-item>
         <el-descriptions-item label="角色">
           <el-tag v-if="user.role === 'admin'" type="danger" effect="dark" size="small">管理员</el-tag>
@@ -58,7 +58,7 @@
 import { ref, reactive, onMounted, inject } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../api/index.js'
-import { money, shortDateTime } from '../utils/display.js'
+import { moneyCents, shortDateTime } from '../utils/display.js'
 
 const refreshUser = inject('refreshUser', () => {})
 const user = ref({})

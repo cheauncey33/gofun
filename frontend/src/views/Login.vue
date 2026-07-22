@@ -1,21 +1,21 @@
 <template>
   <div class="auth-container">
     <aside class="auth-brand">
-      <div class="auth-brand-mark"><i>S</i> WHU Snack</div>
+      <div class="auth-brand-mark"><i>赴</i> 赴场</div>
       <div>
-        <h1 class="auth-headline">下课了，<br />来点<em>好吃的</em>。</h1>
+        <h1 class="auth-headline">欢迎回来，<br />继续奔赴<em>热爱</em>。</h1>
         <p class="auth-tagline">
-          武大校园零食铺 —— 下单、秒杀、到货提醒，一站搞定。
-          热乎的小零嘴，正在等你翻牌。
+          多主办方活动票务平台 —— 发现、购票、限时开售，一处完成。
+          你想见的人和现场，正在前方等你。
         </p>
       </div>
-      <div class="auth-foot">© WHU Snack GO · 校园零食订购系统</div>
+      <div class="auth-foot">© 赴场 · 多主办方活动票务平台</div>
     </aside>
 
     <section class="auth-panel">
       <div class="auth-box">
         <h2>欢迎回来</h2>
-        <p class="auth-sub">登录你的账号，继续逛吃逛吃</p>
+        <p class="auth-sub">登录账号，继续发现值得奔赴的现场</p>
         <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent>
           <el-form-item prop="username">
             <el-input v-model="form.username" placeholder="用户名" size="large">
@@ -44,12 +44,13 @@
 
 <script setup>
 import { ref, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 import api from '../api/index.js'
 
 const router = useRouter()
+const route = useRoute()
 const formRef = ref(null)
 const loading = ref(false)
 const form = reactive({ username: '', password: '' })
@@ -69,7 +70,7 @@ async function handleLogin() {
     localStorage.setItem('token', res.data.access_token)
     localStorage.setItem('username', form.username)
     ElMessage.success('登录成功')
-    router.push('/')
+    router.push(typeof route.query.redirect === 'string' ? route.query.redirect : '/')
   } catch (e) {
     ElMessage.error(e.response?.data?.msg || '登录失败')
   } finally {

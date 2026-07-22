@@ -21,12 +21,15 @@ type Container struct {
 	MQDLXName        string
 	MQDLQName        string
 	SnowflakeNode    *snowflake.Node
-	JWTSecret        []byte
-	LocalCache       *gocache.Cache
+	JWTSecret         []byte
+	TicketQRSecret    []byte
+	TicketQRSecrets   [][]byte
+	LocalCache        *gocache.Cache
 
-	ProductRepo  repository.ProductRepository
-	OrderRepo    repository.OrderRepository
-	CategoryRepo repository.CategoryRepository
+	ProductRepo       repository.ProductRepository
+	OrderRepo         repository.OrderRepository
+	CategoryRepo      repository.CategoryRepository
+	TicketCatalogRepo repository.TicketCatalogRepository
 
 	publishMu         sync.Mutex
 	PublishPersistent func(body []byte) error

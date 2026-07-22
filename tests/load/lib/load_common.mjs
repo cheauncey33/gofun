@@ -94,11 +94,13 @@ export function pickWeighted(items) {
   return items.at(-1);
 }
 
-export async function httpJson(method, path, { token, body, label, metrics, okStatuses = [200] } = {}) {
+export async function httpJson(method, path, {
+  token, body, label, metrics, okStatuses = [200], headers: extraHeaders = {},
+} = {}) {
   const started = performance.now();
   let status = "network_error";
   try {
-    const headers = { "Content-Type": "application/json" };
+    const headers = { "Content-Type": "application/json", ...extraHeaders };
     if (token) headers.Authorization = token;
     const res = await fetch(`${cfg.baseUrl}${path}`, {
       method,

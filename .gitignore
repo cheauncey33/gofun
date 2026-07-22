@@ -16,10 +16,19 @@ backend/local.err.log
 # Go
 *.out
 coverage.out
+backend/.gocache/
+backend/.gopath/
 
 # Node / frontend
 node_modules/
 frontend/dist/
+frontend/.npm-cache/
+
+# Local source-preservation snapshots
+.backup/
+
+# OCR / VLM scratch output
+mineru_vlm_output/
 
 # Editor / OS
 .DS_Store

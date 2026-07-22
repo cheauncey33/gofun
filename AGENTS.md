@@ -1,200 +1,382 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file is the fast-start guide for Codex agents working in this repository.
+Keep it accurate and practical. Prefer facts from the current code over older
+README text.
+
+## How To Collaborate With The User
+
+- Respond in Chinese unless the user asks otherwise.
+- Do not blindly agree with the user. Separate facts, assumptions, suggestions,
+  and uncertainty.
+- Before larger changes, briefly explain the real problem, your assumptions,
+  touched modules, chosen approach, risks, and validation plan.
+- Keep changes small and reversible. Do not introduce frameworks, abstractions,
+  dependencies, or broad refactors unless they are clearly necessary.
+- Explain important design choices with project-specific code references.
+- Do not treat "the code runs" as enough. Say how the user can verify behavior.
+- If you find unrelated dirty worktree changes, do not revert them.
 
 ## Project Overview
 
-WHU Snack GO is a campus snack ordering system with a Go backend (Gin + GORM) and Vue 3 frontend (Element Plus + Vite). It features normal product ordering and flash-sale (seckill) activities with Redis-based inventory pre-deduction and RabbitMQ-based async order processing.
+WHU Snack GO is a campus snack ordering system.
 
-## Development Commands
+- Backend: Go, Gin, GORM, MySQL, Redis, RabbitMQ, Snowflake IDs.
+- Frontend: Vue 3, Vite, Element Plus, Vue Router, Axios.
+- Core feature: normal ordering and flash-sale ordering use Redis inventory
+  pre-deduction plus RabbitMQ asynchronous order creation.
+- Monitoring: Prometheus metrics at `/metrics`, Grafana dashboard under
+  `monitoring/`.
 
-### Backend (Go 1.25)
+## Useful Commands
 
-All commands run from `backend/`:
+Run backend commands from `backend/`:
 
-```bash
-# Build
-cd backend && go build -o whu-snack-go .
-
-# Run (requires running MySQL, Redis, RabbitMQ)
+```powershell
+go build -o whu-snack-go .
 go run . -config ./config/config.yaml
-
-# Run all tests
 go test ./... -count=1
-
-# Run a single test (tests are in models/, repository/, service/, tests/unit/)
 go test ./models/ -run TestOrderStatus -v
-go test ./tests/unit/ -run TestResponseFormat -v
-go test ./service/ -run TestCreateOrder -v
-
-# Run tests with coverage
-go test ./... -coverprofile=coverage.out
+go test ./service/ -run TestValidateCreateOrderInput -v
 ```
 
-### Frontend (Vue 3 + Vite)
+Run frontend commands from `frontend/`:
 
-```bash
-cd frontend && npm install && npm run dev      # dev server on :5173
-cd frontend && npm run build                    # production build → dist/
+```powershell
+npm.cmd install
+npm.cmd run dev
+npm.cmd run build
 ```
 
-### Docker Compose (full stack)
+Full stack:
 
-```bash
-cp deploy/env.example .env && nano .env          # set passwords first
+```powershell
+Copy-Item deploy/env.example .env
 docker compose up -d --build
 docker compose logs -f backend
 ```
 
-### Load testing (`tests/load/`)
+Load tests live in `tests/load/` and mutate real data for write scenarios. Use a
+dedicated database, Redis, and queue before running:
 
-Node.js scripts (built-in `fetch`, no k6/wrk needed) that pressure a running backend. Config is via env vars read in `tests/load/lib/load_common.mjs` (`BASE_URL`, `CONCURRENCY`, `DURATION_SECONDS`, `ADMIN_PASSWORD`, etc.).
-
-```bash
-node tests/load/smoke.mjs          # validate env + one full user path (run first)
-node tests/load/read_baseline.mjs  # read-only capacity
-node tests/load/shopping_mix.mjs   # normal browse + occasional order
-node tests/load/order_write.mjs    # Redis pre-deduct → MQ → MySQL write path
-node tests/load/seckill_spike.mjs  # seckill token + execute paths
+```powershell
+node tests/load/smoke.mjs
+node tests/load/read_baseline.mjs
+node tests/load/shopping_mix.mjs
+node tests/load/order_write.mjs
+node tests/load/seckill_spike.mjs
 ```
 
-Write scenarios mutate real data (create orders, reduce stock, change balances) — use a dedicated DB/Redis/queue. For raw-capacity runs, raise `ratelimit.*` in `config.yaml` and restart. See `tests/load/LOAD_TEST_PLAN.md`.
+Note: on some Windows shells, `npm.ps1` may be blocked. Use `npm.cmd`. If `go`
+is not in PATH, do not claim tests passed.
 
-### Monitoring stack
+## Backend Structure
 
-`monitoring/docker-compose.monitoring.yml` runs Prometheus + Grafana separately from the app stack, scraping the backend's `/metrics` endpoint. Grafana dashboard: `monitoring/grafana/dashboards/whu_snack_overview.json`.
+Main dependency flow:
 
-## Architecture
-
-### Layered backend
-
-```
-controller → service → repository → models (GORM)
-                 ↓
-          container (DI: DB, Redis, MQ, Snowflake, repos)
+```text
+controller -> service -> repository -> models
+             service -> Redis / RabbitMQ / DB transaction
+main.go -> container.NewContainer -> services -> controllers -> routes
 ```
 
-- **`container/`** — DI container that wires DB, Redis, RabbitMQ, Snowflake, and repositories. Also sets legacy `common` package globals for middleware compatibility.
-- **`common/`** — Global singletons (`common.DB`, `common.RDB`, `common.MQChannel`, `common.Node`) plus auth middleware, JWT, rate limiting, and RabbitMQ helpers. Partially legacy — new code prefers `container.Container`.
-- **`controller/`** — Gin handlers. Thin: validate input, call service, return response.
-- **`service/`** — Business logic. Services receive `*container.Container` or individual dependencies.
-- **`repository/`** — Interface-based data access over GORM. Interfaces (e.g. `OrderRepository`, `ProductRepository`) are defined alongside implementations.
-- **`models/`** — GORM model structs with soft-delete via `gorm.DeletedAt`. Includes order state machine (`CanTransitionTo`).
-- **`pkg/`** — Reusable packages: `response` (JSON response helpers + error codes), `apperr` (typed app errors), `lock` (Redis distributed lock), `logger` (zap + lumberjack), `middleware` (request ID), `validator` (custom validations).
-- **`metrics/`** — Prometheus metrics exposed at `/metrics`, with middleware tracking HTTP requests, order events, seckill outcomes, and MQ messages.
-- **`config/`** — Viper-based config with YAML file + env var overrides. `GlobalConfig` singleton.
+Important directories:
 
-### Order flow (async)
+- `backend/main.go`: startup, dependency wiring, routes, background goroutines.
+- `backend/container/`: builds DB, Redis, RabbitMQ, Snowflake, repositories.
+  It also fills legacy `common.*` globals for middleware compatibility.
+- `backend/common/`: legacy globals, JWT auth, admin auth, rate limiting,
+  RabbitMQ helpers.
+- `backend/controller/`: thin Gin handlers. They validate input, read user ID,
+  call service, and wrap responses.
+- `backend/service/`: business logic. Most important files are
+  `order_service.go`, `order_consumer.go`, `order_timeout.go`,
+  `seckill_service.go`, and `compensation_service.go`.
+- `backend/repository/`: GORM data access interfaces and implementations.
+- `backend/models/`: GORM models and order state machine.
+- `backend/pkg/`: reusable packages such as `response`, `apperr`, `lock`,
+  `logger`, `middleware`, `validator`, and `ws`.
+- `backend/metrics/`: Prometheus metrics.
 
-```
-User request → controller → service.CreateOrder
-  → Idempotency check: if idempotency_key present, SETNX <idempotency_key> (10min TTL)
-    prevents duplicate submissions; released on failure or after order completes
-  → User-level distributed lock (lock:order:user:<userID>) prevents concurrent orders
-  → Redis Lua script pre-deducts stock (snack:stock:<productID>)
-  → Publish OrderMessage to RabbitMQ order_queue (persistent, publisher-confirms)
-  → Return immediately (user sees "order processing")
+## Startup Flow
 
-Consumer worker (order_consumer.go):
-  → ProcessOrderTask: DB transaction validates products, deducts MySQL stock,
-    creates Order (status=Pending) + OrderItems — balance is NOT deducted here
-  → On non-retryable error: rollback Redis reserved stock + release idempotency key, Ack
-  → On retryable error: publish to retry queue (x-retry-count header)
-  → After max retries: publish to DLQ via DLX
-  → On success: publish delayed timeout message (auto-cancel if not paid in time)
+`backend/main.go` does the following:
 
-Payment (separate step): user calls PayOrder → DB transaction conditionally
-  updates Pending→Paid AND deducts balance atomically (RowsAffected==0 rejects
-  concurrent pays/timeouts). This "pay-when-paid" model means cancel of a
-  Pending order only restores stock (no refund needed).
-```
+1. Load config.
+2. Initialize logger.
+3. Build `container.Container`.
+4. Initialize validator.
+5. Build services and controllers.
+6. Setup order timeout queue infrastructure.
+7. Start WebSocket Hub.
+8. Warm product stock into Redis.
+9. Register routes and middleware.
+10. Start background goroutines:
+    - RabbitMQ order consumer.
+    - RabbitMQ order timeout consumer.
+    - HTTP server.
+    - IP limiter cleanup every 30 minutes.
+    - stock compensation every 5 minutes.
+11. Wait for OS signal and shut down through context cancellation.
 
-### Order state machine
+## Normal Order Flow
 
-7 states: `Pending(1) → Paid(2) → Delivering(3) → Delivered(4)`. Terminal: `Cancelled(5)`, `Refunded(7)`. `Refunding(6)` is an intermediate state before `Refunded`.
+The normal order entry point is `OrderService.CreateOrder`.
 
-Transitions are defined in `models/model.go:orderTransitionMap`. `HasBeenPaid()` determines whether cancel requires balance refund (Paid/Delivering/Delivered/Refunding/Refunded = was paid) or just stock restoration (Pending/Cancelled = never paid).
-
-### Background goroutines (started in main.go)
-
-| Goroutine | Interval | Purpose |
-|-----------|----------|---------|
-| Order consumer | event-driven (RabbitMQ) | Processes order_queue + retry_queue messages |
-| Timeout consumer | event-driven (RabbitMQ) | Listens on order_timeout_queue for expired orders |
-| Stock compensation | 5 min | Compares Redis vs MySQL stock, resets Redis if oversold |
-| IP limiter cleanup | 30 min | Removes stale per-IP rate limiters |
-
-### Order timeout (delayed queue)
-
-```
-OrderTimeoutService publishes to order_delay_queue with TTL (default 15min).
-When TTL expires, message routes to order_timeout_queue via DLX.
-Timeout worker: if order still pending → cancel, restore stock + balance.
+```text
+frontend api.createOrder()
+-> POST /api/v1/orders
+-> OrderController.CreateOrder
+-> OrderService.CreateOrder
+-> normalize item quantities
+-> Redis user lock: lock:order:user:<userID>
+-> optional idempotency SETNX: order:idempotency:<userID>:<key>
+-> Redis Lua pre-deducts snack:stock:<productID>
+-> publish OrderMessage to RabbitMQ
+-> return before MySQL order is created
 ```
 
-### Seckill (flash sale)
+The real order row is created asynchronously:
 
+```text
+OrderConsumerService workers
+-> RabbitMQ delivery channel
+-> OrderService.ProcessOrderTask
+-> DB transaction
+-> validate products
+-> decrement MySQL product stock
+-> create Order(status=Pending) and OrderItems
+-> increment sales_count
+-> create SeckillOrder if this came from seckill
+-> publish delayed timeout message
+-> push WebSocket "created" event
 ```
-1. Admin calls warmup → loads activity stock into Redis (seckill:stock:<id>)
-   with TTL = time until activity end
-2. User requests token → HMAC-SHA256(activityID:userID:timestamp) stored in
-   Redis as seckill:token:<activityID>:<userID> with 60s TTL
-3. User executes seckill: Lua script atomically:
-   a. Validates token (GET + DEL to one-shot the token)
-   b. Checks stock (seckill:stock:<id>)
-   c. Checks per-user limit (seckill:user_count:<id> hash)
-   d. Deducts stock + increments user count
-   e. Extends TTL on stock/user keys
-   → Publishes OrderMessage to MQ (same consumer flow as normal orders)
+
+Important consequence:
+
+- "create order API returned success" does not guarantee the order is already
+  queryable in MySQL.
+- "order created" still means `Pending`, not paid.
+
+## Payment, Cancellation, And Order States
+
+Current order states in `models/model.go`:
+
+```text
+Pending(1)
+Paid(2)
+Completed(3)
+Cancelled(5)
 ```
 
-Seckill Redis keys auto-expire when the activity ends (TTL = endTime - now).
-Admin operations (update/delete) refresh or clear Redis keys accordingly.
+Allowed transitions:
 
-### Stock compensation
+```text
+Pending -> Paid
+Pending -> Cancelled
+Paid -> Completed
+Paid -> Cancelled
+Completed -> Cancelled
+Cancelled -> terminal
+```
 
-Runs every 5 minutes: scans all products, compares Redis stock vs MySQL stock. If Redis > MySQL (oversell risk), resets Redis to MySQL value.
+The project uses a pay-when-paid model:
 
-### Authentication
+- Create order: reserve stock only. Do not deduct user balance.
+- Pay order: `Pending -> Paid`, deduct balance atomically in the same DB
+  transaction.
+- Cancel pending order: restore stock only.
+- Cancel paid/completed order: restore stock and refund balance.
+- `HasBeenPaid()` is the source of truth for refund decisions.
 
-JWT with access + refresh tokens. `AuthMiddleware` validates `Authorization: Bearer <token>` and sets `user_id` in Gin context. `AdminAuthMiddleware` checks role="admin" via DB query. Frontend uses axios interceptor for automatic token refresh on 401.
+## Order Timeout Flow
 
-### Middleware chain (in order)
+`OrderTimeoutService` uses RabbitMQ delayed behavior through a delay queue and
+dead-letter routing:
 
-1. `RequestIDMiddleware` — attaches UUID per request
-2. `PrometheusMiddleware` — tracks request count/duration
-3. `GlobalRateLimitMiddleware` — token-bucket rate limiter (100k rps in config)
-4. `IPRateLimitMiddleware` — per-IP token-bucket limiter, cleaned every 30min
-5. CORS — configured allow origins from config
+```text
+ProcessOrderTask success
+-> PublishDelayedOrderTimeout(orderID, userID)
+-> message waits in order_delay_queue with per-message TTL
+-> expired message routes to order_timeout_queue
+-> timeout worker checks order
+-> if still Pending, conditionally update to Cancelled
+-> restore MySQL stock
+-> after transaction commit, restore Redis stock
+-> push WebSocket timeout_cancelled event
+```
 
-### Frontend
+The conditional update avoids double handling when payment and timeout race.
 
-**Routing**: Vue Router with lazy-loaded routes. Route guards in `router/index.js`:
-- No token → redirect to `/login` (except auth pages)
-- Has token + on auth page → redirect to `/`
-- `meta.requiresAdmin` + role ≠ admin → redirect to `/`
+## Seckill Flow
 
-**State**: Cart is a reactive Pinia-style composable (`stores/cart.js`) — local only, not persisted to server. IDs from API come as strings (`json:",string"` tag) and are converted to numbers for cart operations.
+Seckill service has a special Redis front door, then reuses the normal order
+consumer flow.
 
-**API layer** (`api/index.js`): Axios instance with `/api/v1` base. Request interceptor attaches `Authorization` header from localStorage. Response interceptor on 401:
-- If not a refresh request and `refresh_token` exists → POST `/auth/refresh` (deduplicated via `refreshPromise` singleton), retry original request with new token
-- If still 401 after refresh (or no refresh token) → clear auth storage, redirect to `/login`
+```text
+admin warmup
+-> Redis seckill:stock:<activityID>
+-> user requests token
+-> Redis seckill:token:<activityID>:<userID>, TTL 60s
+-> user executes seckill
+-> Redis Lua checks token, stock, per-user limit
+-> deduct seckill stock and increment user count
+-> publish OrderMessage with SeckillActivityID and SeckillPrice
+-> normal RabbitMQ consumer creates the order
+```
 
-**Idempotency keys**: Generated client-side via `crypto.randomUUID()` (fallback to `Date.now()-Math.random()`). Sent as `idempotency_key` on order creation to prevent duplicate submissions.
+Important Redis keys:
 
-**Dev proxy**: Vite proxies `/api` → `http://127.0.0.1:8080` (see `vite.config.js`), so frontend dev server avoids CORS issues.
+- `snack:stock:<productID>`: normal product stock.
+- `seckill:stock:<activityID>`: seckill stock.
+- `seckill:user_count:<activityID>`: per-user seckill purchase count hash.
+- `seckill:token:<activityID>:<userID>`: one-shot seckill token.
+- `lock:*`: Redis distributed locks.
 
-## Key Conventions
+## Goroutines And Channels
 
-- **Error codes**: 5-digit business codes: 4xxxx client errors, 5xxxx server errors, 6xxxx business errors. See `pkg/response/error_code.go`.
-- **Money**: `float64` in models (known issue — TODO comments recommend migrating to int64 cents or `shopspring/decimal`).
-- **Snowflake IDs**: All entity IDs are Snowflake int64, serialized as strings in JSON via `json:",string"` tag on `Base.ID`.
-- **Soft delete**: All models embed `Base` with `gorm.DeletedAt`.
-- **Redis keys**: `snack:stock:<productID>` for normal inventory, `seckill:stock:<activityID>` for seckill, `lock:*` for distributed locks.
-- **Distributed locks**: `pkg/lock.WithLock` uses Redis SETNX + Lua script release (UUID-based ownership) to prevent deadlocks.
-- **Publisher confirms**: RabbitMQ channel is set to confirm mode; `PublishPersistent` waits for broker ack with 5s timeout.
-- **Config**: All config keys are env-overridable (e.g. `MYSQL_DSN`, `REDIS_PASSWORD`). The `.env` file is used by Docker Compose only. `backend/config/config.example.yaml` is the canonical reference; `backend/config/config.yaml` is gitignored (local dev).
-- **Config sections**: `server`, `mysql`, `redis`, `rabbitmq`, `jwt`, `snowflake`, `log`, `ratelimit`, `cors`, `order_consumer` (worker_count, prefetch_count, max_retries), `delayed_order` (timeout_minutes default 15, lock_timeout_sec default 10).
-- **GORM table naming**: `SingularTable: true` — table names match struct names exactly (no pluralization).
-- **Auto-admin seed**: On startup, if no admin user exists in DB, creates `admin`/`admin123` with role="admin" and balance=9999 (see `container/init.go`).
-- **GORM AutoMigrate**: All models are auto-migrated on startup. The `uni_user_phone` index on `user` table is explicitly dropped (legacy workaround).
+The project uses explicit goroutines and channels in business code:
+
+- `main.go` starts WebSocket Hub, order consumer, timeout consumer, HTTP server,
+  IP limiter cleanup, and stock compensation goroutines.
+- `service/order_consumer.go` starts multiple worker goroutines based on
+  `order_consumer.worker_count`.
+- `service/order_timeout.go` starts timeout worker goroutines.
+- `pkg/ws/hub.go` defines custom channels:
+  - `register chan *Client`
+  - `unregister chan *Client`
+  - `send chan []byte`
+- `main.go` uses `make(chan os.Signal, 1)` for graceful shutdown.
+- RabbitMQ `Consume` returns delivery channels consumed with `select`.
+
+## Frontend Structure
+
+Important files:
+
+- `frontend/src/api/index.js`: Axios instance, auth header, token refresh,
+  idempotency key generation, API methods.
+- `frontend/src/router/index.js`: route definitions and auth/admin guards.
+- `frontend/src/stores/cart.js`: local reactive cart composable. It is not a
+  server-side cart and is not Pinia.
+- `frontend/src/stores/orderSocket.js`: WebSocket client for order status
+  events.
+- `frontend/src/layouts/LayoutMain.vue`: shell layout, cart drawer, checkout,
+  user refresh, socket lifecycle.
+- `frontend/src/views/SeckillDetail.vue`: token request and seckill execution.
+- `frontend/src/views/OrderDetail.vue`: pay, cancel, refund, confirm actions.
+
+IDs from the Go API are serialized as strings by `json:",string"`. The frontend
+often converts IDs to numbers for cart operations.
+
+## API And Response Conventions
+
+- Base API path: `/api/v1`.
+- Frontend dev proxy maps `/api` to `http://127.0.0.1:8080`.
+- JSON response shape is in `pkg/response/response.go`:
+
+```json
+{
+  "code": 0,
+  "msg": "ok",
+  "data": {},
+  "request_id": "..."
+}
+```
+
+- Business codes are in `pkg/response/error_code.go`:
+  - `4xxxx`: client/auth/resource errors.
+  - `5xxxx`: server/DB/Redis/MQ errors.
+  - `6xxxx`: business errors.
+
+## Data And Consistency Conventions
+
+- MySQL is the final source of truth for orders and product stock.
+- Redis is a front-side inventory and concurrency guard.
+- Stock compensation only pulls Redis down when Redis stock is greater than
+  MySQL stock, or recreates missing Redis stock.
+- Publisher confirms are enabled for normal order publishing.
+- `OrderMessage.OrderID` is generated before publishing. Consumer checks for an
+  existing order ID to make processing idempotent.
+- Distributed lock implementation is in `pkg/lock/redis_lock.go`: `SETNX` with
+  UUID value and Lua release.
+- Money is currently `float64` despite GORM decimal tags. This is a known risk;
+  prefer `int64` cents or a decimal library for future serious money changes.
+- GORM uses `SingularTable: true`.
+- Models embed `Base` with soft delete via `gorm.DeletedAt`.
+- Snowflake IDs are `int64` and JSON-encoded as strings.
+
+## Config Notes
+
+- Canonical sample config: `backend/config/config.example.yaml`.
+- Local config: `backend/config/config.yaml`.
+- Docker `.env` is copied from `deploy/env.example`.
+- Important config sections: `server`, `mysql`, `redis`, `rabbitmq`, `jwt`,
+  `snowflake`, `log`, `ratelimit`, `order_consumer`, `cors`, `delayed_order`.
+- On startup, if no admin exists, the app creates `admin` / `admin123`.
+
+## Testing And Validation Strategy
+
+For narrow backend changes:
+
+```powershell
+cd backend
+go test ./models/ -count=1
+go test ./service/ -count=1
+go test ./pkg/... -count=1
+```
+
+For broader backend changes:
+
+```powershell
+cd backend
+go test ./... -count=1
+```
+
+For frontend changes:
+
+```powershell
+cd frontend
+npm.cmd run build
+```
+
+For order/seckill changes, do not rely only on unit tests. Validate the runtime
+chain when possible:
+
+```text
+config -> DB/Redis/RabbitMQ connections -> HTTP route -> Redis key changes
+-> RabbitMQ message -> MySQL order row -> WebSocket/client refresh
+```
+
+## Common Pitfalls
+
+- Do not assume order creation is synchronous.
+- Do not deduct balance during order creation; payment owns balance deduction.
+- Do not refund pending orders; pending orders were never paid.
+- Do not bypass `CanTransitionTo()` and `HasBeenPaid()` for order status logic.
+- Do not update product stock in MySQL without considering Redis stock refresh.
+- Do not add a server cart unless explicitly requested; the current cart is
+  frontend-local.
+- Do not introduce a second dependency wiring style. New code should prefer
+  `container.Container` over new `common` globals.
+- Do not claim README descriptions are current when code disagrees.
+- Be careful with Chinese text encoding in PowerShell output; `rg` may show
+  correct text even when `Get-Content` displays mojibake.
+
+## Files Worth Reading First
+
+For most future work, start with these files:
+
+```text
+backend/main.go
+backend/container/init.go
+backend/models/model.go
+backend/service/order_service.go
+backend/service/order_consumer.go
+backend/service/order_timeout.go
+backend/service/seckill_service.go
+backend/pkg/ws/hub.go
+frontend/src/api/index.js
+frontend/src/layouts/LayoutMain.vue
+frontend/src/stores/cart.js
+frontend/src/stores/orderSocket.js
+```

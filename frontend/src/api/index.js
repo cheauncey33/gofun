@@ -58,7 +58,7 @@ api.interceptors.response.use(
 )
 
 const get = (url, params) => api.get(url, { params }).then(r => r.data)
-const post = (url, data) => api.post(url, data).then(r => r.data)
+const post = (url, data, config) => api.post(url, data, config).then(r => r.data)
 const put = (url, data) => api.put(url, data).then(r => r.data)
 const del = (url) => api.delete(url).then(r => r.data)
 const newIdempotencyKey = () => {
@@ -69,54 +69,66 @@ const newIdempotencyKey = () => {
 export default {
   // Auth
   login: (username, password) => post('/login', { username, password }),
-  register: (username, password, dorm_id) => post('/register', { username, password, dorm_id }),
+  register: (username, password, dorm_id = 1) => post('/register', { username, password, dorm_id }),
   logout: (refresh_token) => post('/logout', { refresh_token }),
 
-  // Products
-  getProducts: (params) => get('/products', params),
-  getProductDetail: (id) => get(`/products/${id}`),
-  getCategories: () => get('/categories'),
-  getCategoryProducts: (id, params) => get(`/categories/${id}/products`, params),
+  // Event discovery
+  getEvents: (params) => get('/events', params),
+  getEventDetail: (id) => get(`/events/${id}`),
+  getRushSales: () => get('/rush-sales'),
 
   // Orders
-  createOrder: (items, idempotencyKey = newIdempotencyKey()) => post('/orders', { items, idempotency_key: idempotencyKey }),
+  createOrder: (ticketTierId, quantity, purchaseInfo = {}, idempotencyKey = newIdempotencyKey()) =>
+    post('/orders', { ticket_tier_id: String(ticketTierId), quantity, ...purchaseInfo }, {
+      headers: { 'X-Idempotency-Key': idempotencyKey },
+    }),
   getOrders: (params) => get('/orders', params),
   getOrderDetail: (id) => get(`/orders/${id}`),
   payOrder: (id) => post(`/orders/${id}/pay`),
   cancelOrder: (id, reason) => post(`/orders/${id}/cancel`, { reason }),
-  refundOrder: (id, reason) => post(`/orders/${id}/refund`, { reason }),
-  confirmOrder: (id) => post(`/orders/${id}/confirm`),
-
-  // Addresses
-  getAddresses: () => get('/addresses'),
-  createAddress: (data) => post('/addresses', data),
-  updateAddress: (id, data) => put(`/addresses/${id}`, data),
-  deleteAddress: (id) => del(`/addresses/${id}`),
-  setDefaultAddress: (id) => put(`/addresses/${id}/default`),
 
   // User
   getUserInfo: () => get('/user/info'),
   updateUserInfo: (data) => put('/user/info', data),
   changePassword: (old_password, new_password) => put('/user/password', { old_password, new_password }),
 
-  // Seckill
-  getSeckillActivities: (params) => get('/seckill/activities', params),
-  getSeckillDetail: (id) => get(`/seckill/activities/${id}`),
-  getSeckillToken: (id) => post(`/seckill/activities/${id}/token`),
-  executeSeckill: (id, token, quantity) => post(`/seckill/activities/${id}/execute`, { token, quantity }),
+  // Rush sale
+  getRushSaleToken: (id) => post(`/rush-sales/${id}/token`),
+  executeRushSale: (id, token, quantity, purchaseInfo = {}, idempotencyKey = newIdempotencyKey()) =>
+    post(`/rush-sales/${id}/execute`, { token, quantity, ...purchaseInfo }, {
+      headers: { 'X-Idempotency-Key': idempotencyKey },
+    }),
 
-  // Admin
-  getDashboard: () => get('/admin/dashboard'),
-  adminCreateProduct: (data) => post('/admin/products', data),
-  adminUpdateProduct: (id, data) => put(`/admin/products/${id}`, data),
-  adminDeleteProduct: (id) => del(`/admin/products/${id}`),
-  adminUpdateProductStatus: (id, status) => put(`/admin/products/${id}/status`, { status }),
-  adminGetOrders: (params) => get('/admin/orders', params),
-  adminUpdateOrderStatus: (id, status) => put(`/admin/orders/${id}/status`, { status }),
-  adminGetUsers: (params) => get('/admin/users', params),
-  adminUpdateUserRole: (id, role) => put(`/admin/users/${id}/role`, { role }),
-  adminCreateSeckill: (data) => post('/admin/seckill', data),
-  adminUpdateSeckill: (id, data) => put(`/admin/seckill/${id}`, data),
-  adminDeleteSeckill: (id) => del(`/admin/seckill/${id}`),
-  adminWarmUpSeckill: (id) => post(`/admin/seckill/${id}/warmup`),
+  // Platform and organizer management APIs are ready for the phase-two console.
+  adminGetOrganizers: (params) => get('/admin/organizers', params),
+  adminCreateOrganizer: (data) => post('/admin/organizers', data),
+  organizerGetMine: () => get('/organizers/mine'),
+  organizerGetOverview: (organizerId) => get(`/organizers/${organizerId}/overview`),
+  organizerGetVenues: (organizerId) => get(`/organizers/${organizerId}/venues`),
+  organizerCreateVenue: (organizerId, data) => post(`/organizers/${organizerId}/venues`, data),
+  organizerGetEvents: (organizerId, params) => get(`/organizers/${organizerId}/events`, params),
+  organizerCreateEvent: (organizerId, data) => post(`/organizers/${organizerId}/events`, data),
+  organizerCreateSession: (organizerId, eventId, data) =>
+    post(`/organizers/${organizerId}/events/${eventId}/sessions`, data),
+  organizerCreateTicketTier: (organizerId, sessionId, data) =>
+    post(`/organizers/${organizerId}/sessions/${sessionId}/ticket-tiers`, data),
+  organizerPublishEvent: (organizerId, eventId) =>
+    post(`/organizers/${organizerId}/events/${eventId}/publish`),
+  organizerUnpublishEvent: (organizerId, eventId) =>
+    post(`/organizers/${organizerId}/events/${eventId}/unpublish`),
+  organizerCancelEvent: (organizerId, eventId, data = {}) =>
+    post(`/organizers/${organizerId}/events/${eventId}/cancel`, data),
+  organizerBatchRefundEvent: (organizerId, eventId, data = {}) =>
+    post(`/organizers/${organizerId}/events/${eventId}/refunds`, data),
+  organizerDisableTicketTier: (organizerId, tierId) =>
+    post(`/organizers/${organizerId}/ticket-tiers/${tierId}/disable`),
+  organizerGetOrders: (organizerId, params) =>
+    get(`/organizers/${organizerId}/orders`, params),
+  organizerVerifyTicket: (organizerId, credential, sessionId) =>
+    post(`/organizers/${organizerId}/verifications`, {
+      credential,
+      ...(sessionId ? { session_id: String(sessionId) } : {}),
+    }),
+  organizerGetVerifications: (organizerId, params) =>
+    get(`/organizers/${organizerId}/verifications`, params),
 }

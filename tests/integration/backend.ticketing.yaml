@@ -1,0 +1,60 @@
+server:
+  host: "127.0.0.1"
+  port: 18080
+  mode: "test"
+
+mysql:
+  dsn: "fuchang:fuchang-it-mysql@tcp(127.0.0.1:13306)/fuchang_ticketing_it?charset=utf8mb4&parseTime=True&loc=Local"
+  max_idle_conns: 5
+  max_open_conns: 20
+  conn_max_lifetime: 300
+
+redis:
+  addr: "127.0.0.1:16379"
+  password: "fuchang-it-redis"
+  db: 0
+  pool_size: 20
+
+rabbitmq:
+  url: "amqp://fuchang:fuchang-it-rabbit@127.0.0.1:25672/"
+  queue_name: "fuchang.it.order.queue"
+  retry_queue_name: "fuchang.it.order.retry"
+  dlx_name: "fuchang.it.order.dlx"
+  dlq_name: "fuchang.it.order.dead"
+
+jwt:
+  secret: "fuchang-integration-test-secret-only"
+  expire_secs: 3600
+  refresh_expire_secs: 86400
+
+ticket_qr:
+  secret: "fuchang-integration-ticket-qr-secret-only"
+
+snowflake:
+  node_id: 9
+
+log:
+  level: "debug"
+  file_path: ""
+  max_size: 10
+  max_backups: 1
+  max_age: 1
+
+ratelimit:
+  global_rate: 1000
+  global_burst: 1200
+  ip_rate: 100
+  ip_burst: 120
+
+order_consumer:
+  worker_count: 2
+  prefetch_count: 2
+  max_retries: 2
+
+delayed_order:
+  timeout_minutes: 1
+  lock_timeout_sec: 5
+
+cors:
+  allow_origins:
+    - "http://127.0.0.1:5173"

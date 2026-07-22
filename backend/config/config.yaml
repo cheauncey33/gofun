@@ -17,15 +17,19 @@ redis:
 
 rabbitmq:
   url: "amqp://snack:rabbit123456@localhost:5672/"
-  queue_name: "order_queue"
-  retry_queue_name: "order_retry_queue"
-  dlx_name: "order_dlx"
-  dlq_name: "order_dead_letter_queue"
+  queue_name: "fuchang.order.queue"
+  retry_queue_name: "fuchang.order.retry"
+  dlx_name: "fuchang.order.dlx"
+  dlq_name: "fuchang.order.dead"
 
 jwt:
   secret: "dev-jwt-secret-please-change"
   expire_secs: 500
   refresh_expire_secs: 604800
+
+ticket_qr:
+  secret: "dev-ticket-qr-secret-please-change"
+  previous_secrets: []
 
 snowflake:
   node_id: 1

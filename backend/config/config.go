@@ -16,6 +16,7 @@ type Config struct {
 	Redis         RedisConfig         `mapstructure:"redis"`
 	RabbitMQ      RabbitMQConfig      `mapstructure:"rabbitmq"`
 	JWT           JWTConfig           `mapstructure:"jwt"`
+	TicketQR      TicketQRConfig      `mapstructure:"ticket_qr"`
 	Snowflake     SnowflakeConfig     `mapstructure:"snowflake"`
 	Log           LogConfig           `mapstructure:"log"`
 	RateLimit     RateLimitConfig     `mapstructure:"ratelimit"`
@@ -56,6 +57,11 @@ type JWTConfig struct {
 	Secret            string `mapstructure:"secret"`
 	ExpireSecs        int    `mapstructure:"expire_secs"`
 	RefreshExpireSecs int    `mapstructure:"refresh_expire_secs"`
+}
+
+type TicketQRConfig struct {
+	Secret           string   `mapstructure:"secret"`
+	PreviousSecrets  []string `mapstructure:"previous_secrets"`
 }
 
 type SnowflakeConfig struct {
@@ -126,6 +132,7 @@ func Load(configPath string) (*Config, error) {
 		"jwt.secret",
 		"jwt.expire_secs",
 		"jwt.refresh_expire_secs",
+		"ticket_qr.secret",
 		"snowflake.node_id",
 		"log.level",
 		"log.file_path",
@@ -196,10 +203,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("redis.pool_size", 100)
 
 	v.SetDefault("rabbitmq.url", "amqp://guest:guest@localhost:5672/")
-	v.SetDefault("rabbitmq.queue_name", "order_queue")
-	v.SetDefault("rabbitmq.retry_queue_name", "order_retry_queue")
-	v.SetDefault("rabbitmq.dlx_name", "order_dlx")
-	v.SetDefault("rabbitmq.dlq_name", "order_dead_letter_queue")
+	v.SetDefault("rabbitmq.queue_name", "fuchang.order.queue")
+	v.SetDefault("rabbitmq.retry_queue_name", "fuchang.order.retry")
+	v.SetDefault("rabbitmq.dlx_name", "fuchang.order.dlx")
+	v.SetDefault("rabbitmq.dlq_name", "fuchang.order.dead")
 
 	v.SetDefault("jwt.expire_secs", 500)
 	v.SetDefault("jwt.refresh_expire_secs", 7*24*60*60)
@@ -237,6 +244,9 @@ func (c *Config) Validate() error {
 	}
 	if c.JWT.Secret == "" {
 		return fmt.Errorf("jwt.secret 不能为空")
+	}
+	if len(c.TicketQR.Secret) < 16 {
+		return fmt.Errorf("ticket_qr.secret 至少需要 16 个字符")
 	}
 	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port 必须在 1-65535 之间")

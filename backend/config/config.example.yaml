@@ -17,15 +17,20 @@ redis:
 
 rabbitmq:
   url: "amqp://guest:guest@localhost:5672/"
-  queue_name: "order_queue"
-  retry_queue_name: "order_retry_queue"
-  dlx_name: "order_dlx"
-  dlq_name: "order_dead_letter_queue"
+  queue_name: "fuchang.order.queue"
+  retry_queue_name: "fuchang.order.retry"
+  dlx_name: "fuchang.order.dlx"
+  dlq_name: "fuchang.order.dead"
 
 jwt:
   secret: "change-me-to-a-random-string"
   expire_secs: 500
   refresh_expire_secs: 604800
+
+ticket_qr:
+  secret: "change-me-to-an-independent-ticket-qr-secret"
+  # 轮换密钥后把旧 secret 放这里，旧二维码仍可验签；新票只用 secret 签发。
+  previous_secrets: []
 
 snowflake:
   node_id: 1

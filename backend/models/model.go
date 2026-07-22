@@ -17,19 +17,22 @@ type Dormitory struct {
 	BuildingName string `gorm:"size:64;column:building_name;not null"`
 	RoomNumber   string `gorm:"size:32;column:room_number;not null"`
 }
+
 // TODO: float64 money fields (Balance, Price, TotalPrice etc.) should be changed
 // to int64 (cents) or use shopspring/decimal to avoid IEEE 754 rounding errors.
 type User struct {
 	Base
-	Username    string     `gorm:"unique;column:username;not null" json:"username"`
-	Password    string     `gorm:"column:password;not null" json:"-"`
-	Balance     float64    `gorm:"type:decimal(10,2)" json:"balance"`
-	Phone       *string    `gorm:"size:20" json:"phone"`
-	AvatarURL   string     `gorm:"size:512" json:"avatar_url"`
-	DormID      int64      `json:"dorm_id"`
-	Dorm        Dormitory  `gorm:"foreignKey:DormID" json:"dorm,omitempty"`
-	Role        string     `gorm:"size:16;default:'user'" json:"role"`
-	LastLoginAt *time.Time `json:"last_login_at"`
+	Username string  `gorm:"unique;column:username;not null" json:"username"`
+	Password string  `gorm:"column:password;not null" json:"-"`
+	Balance  float64 `gorm:"type:decimal(10,2)" json:"balance"`
+	// BalanceCents 是票务领域的余额来源。Balance 仅供遗留零食模块回滚使用。
+	BalanceCents int64      `gorm:"not null;default:100000" json:"balance_cents"`
+	Phone        *string    `gorm:"size:20" json:"phone"`
+	AvatarURL    string     `gorm:"size:512" json:"avatar_url"`
+	DormID       int64      `json:"dorm_id"`
+	Dorm         Dormitory  `gorm:"foreignKey:DormID" json:"dorm,omitempty"`
+	Role         string     `gorm:"size:16;default:'user'" json:"role"`
+	LastLoginAt  *time.Time `json:"last_login_at"`
 }
 type ProductStatus int
 

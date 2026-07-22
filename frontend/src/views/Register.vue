@@ -1,15 +1,15 @@
 <template>
   <div class="auth-container">
     <aside class="auth-brand">
-      <div class="auth-brand-mark"><i>S</i> WHU Snack</div>
+      <div class="auth-brand-mark"><i>赴</i> 赴场</div>
       <div>
-        <h1 class="auth-headline">注册一下，<br />开吃<em>新生活</em>。</h1>
+        <h1 class="auth-headline">注册之后，<br />奔赴<em>热爱现场</em>。</h1>
         <p class="auth-tagline">
-          三十秒创建账号，立刻解锁全场零食与限时秒杀。
-          武大同学的深夜食堂，欢迎你。
+          创建账号，收藏每一次值得奔赴的现场。
+          一张票，是一次见面的开始。
         </p>
       </div>
-      <div class="auth-foot">© WHU Snack GO · 校园零食订购系统</div>
+      <div class="auth-foot">© 赴场 · 多主办方活动票务平台</div>
     </aside>
 
     <section class="auth-panel">

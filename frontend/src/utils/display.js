@@ -20,6 +20,10 @@ export function money(value) {
   return `¥${n.toFixed(2)}`
 }
 
+export function moneyCents(cents) {
+  return money(Number(cents || 0) / 100)
+}
+
 export const snackPlaceholder = '/snack-placeholder.svg'
 
 export function imageUrl(value) {

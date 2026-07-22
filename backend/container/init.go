@@ -3,11 +3,13 @@ package container
 import (
 	"WHU_Snack_GO/common"
 	"WHU_Snack_GO/config"
+	"WHU_Snack_GO/migrations"
 	"WHU_Snack_GO/models"
 	"WHU_Snack_GO/repository"
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,20 +47,23 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	lc := initLocalCache()
 
 	c := &Container{
-		DB:               db,
-		RDB:              rdb,
-		MQConn:           conn,
-		MQChannel:        ch,
-		MQQueueName:      queueName,
-		MQRetryQueueName: retryQueueName,
-		MQDLXName:        dlxName,
-		MQDLQName:        dlqName,
-		SnowflakeNode:    node,
-		JWTSecret:        []byte(cfg.JWT.Secret),
-		LocalCache:       lc,
-		ProductRepo:      repository.NewProductRepository(db),
-		OrderRepo:        repository.NewOrderRepository(db),
-		CategoryRepo:     repository.NewCategoryRepository(db),
+		DB:                db,
+		RDB:               rdb,
+		MQConn:            conn,
+		MQChannel:         ch,
+		MQQueueName:       queueName,
+		MQRetryQueueName:  retryQueueName,
+		MQDLXName:         dlxName,
+		MQDLQName:         dlqName,
+		SnowflakeNode:     node,
+		JWTSecret:         []byte(cfg.JWT.Secret),
+		TicketQRSecret:    []byte(cfg.TicketQR.Secret),
+		TicketQRSecrets:   ticketQRSecrets(cfg),
+		LocalCache:        lc,
+		ProductRepo:       repository.NewProductRepository(db),
+		OrderRepo:         repository.NewOrderRepository(db),
+		CategoryRepo:      repository.NewCategoryRepository(db),
+		TicketCatalogRepo: repository.NewTicketCatalogRepository(db),
 	}
 
 	// 闭包捕获 container 状态
@@ -99,21 +104,14 @@ func initDB(cfg config.MySQLConfig) (*gorm.DB, error) {
 	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
 	sqlDB.SetConnMaxLifetime(time.Duration(cfg.ConnMaxLifetime) * time.Second)
 
-	err = db.AutoMigrate(
-		&models.Dormitory{},
-		&models.Category{},
-		&models.Order{},
-		&models.OrderItem{},
-		&models.User{},
-		&models.Product{},
-		&models.Address{},
-		&models.SeckillActivity{},
-		&models.SeckillOrder{},
-	)
-	if err != nil {
-		return nil, err
+	if err := migrations.Run(db); err != nil {
+		return nil, fmt.Errorf("执行数据库迁移: %w", err)
 	}
-	_ = db.Exec("DROP INDEX uni_user_phone ON user")
+	if db.Migrator().HasIndex(&models.User{}, "uni_user_phone") {
+		if err := db.Migrator().DropIndex(&models.User{}, "uni_user_phone"); err != nil {
+			return nil, fmt.Errorf("删除遗留手机号唯一索引: %w", err)
+		}
+	}
 
 	var adminCount int64
 	db.Model(&models.User{}).Where("role = ?", "admin").Count(&adminCount)
@@ -125,16 +123,39 @@ func initDB(cfg config.MySQLConfig) (*gorm.DB, error) {
 		}
 		hashed, _ := bcrypt.GenerateFromPassword([]byte("admin123"), 12)
 		db.Where(models.User{Username: "admin"}).Assign(models.User{
-			Password: string(hashed),
-			Balance:  9999,
-			DormID:   dorm.ID,
-			Role:     "admin",
+			Password:     string(hashed),
+			Balance:      9999,
+			BalanceCents: 999900,
+			DormID:       dorm.ID,
+			Role:         "admin",
 		}).FirstOrCreate(&models.User{})
 		log.Println("默认管理员已创建: admin / admin123")
 	}
 
 	log.Println("MySQL 连接成功")
 	return db, nil
+}
+
+// ticketingSchemaModels 用于测试票务模型边界；运行时结构由 migrations/*.sql 决定。
+// 遗留零食电商模型仍保留在源码中用于回滚，但不属于赴场迁移基线。
+func ticketingSchemaModels() []interface{} {
+	return []interface{}{
+		&models.Dormitory{},
+		&models.User{},
+		&models.Organizer{},
+		&models.OrganizerMember{},
+		&models.Venue{},
+		&models.Event{},
+		&models.EventSession{},
+		&models.TicketTier{},
+		&models.TicketOrder{},
+		&models.TicketOrderItem{},
+		&models.TicketOrderAttendee{},
+		&models.TicketOrderOutbox{},
+		&models.RushSaleCampaign{},
+		&models.AdmissionTicket{},
+		&models.TicketVerificationRecord{},
+	}
 }
 
 func initRedis(cfg config.RedisConfig) (*redis.Client, error) {
@@ -267,6 +288,18 @@ func declareOrderQueues(ch *amqp.Channel, queueName, retryQueueName, dlxName, dl
 		return fmt.Errorf("声明重试队列失败: %w", err)
 	}
 	return nil
+}
+
+func ticketQRSecrets(cfg *config.Config) [][]byte {
+	secrets := [][]byte{[]byte(cfg.TicketQR.Secret)}
+	for _, previous := range cfg.TicketQR.PreviousSecrets {
+		previous = strings.TrimSpace(previous)
+		if previous == "" || previous == cfg.TicketQR.Secret {
+			continue
+		}
+		secrets = append(secrets, []byte(previous))
+	}
+	return secrets
 }
 
 var _ sync.Mutex

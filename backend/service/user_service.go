@@ -62,10 +62,11 @@ func (s *UserService) Register(username, password string, dormID int64) error {
 		return err
 	}
 	user := models.User{
-		Username: username,
-		Password: string(hashedPassword),
-		Balance:  100.0,
-		DormID:   dormID,
+		Username:     username,
+		Password:     string(hashedPassword),
+		Balance:      100.0,
+		BalanceCents: 100000,
+		DormID:       dormID,
 	}
 	return s.db.Create(&user).Error
 }
@@ -187,7 +188,7 @@ func parseServiceToken(secret []byte, tokenString string) (*struct {
 
 func (s *UserService) GetUserInfo(userID int64) (models.User, error) {
 	var user models.User
-	err := s.db.Select("id", "username", "balance", "dorm_id", "phone", "avatar_url", "role", "last_login_at", "create_time").
+	err := s.db.Select("id", "username", "balance", "balance_cents", "dorm_id", "phone", "avatar_url", "role", "last_login_at", "create_time").
 		Where("id = ?", userID).First(&user).Error
 	return user, err
 }

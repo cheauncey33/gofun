@@ -1,0 +1,243 @@
+package repository
+
+import (
+	"WHU_Snack_GO/models"
+	"context"
+
+	"gorm.io/gorm"
+)
+
+// TicketCatalogRepository 只负责票务目录的数据读写。
+// 权限判断、状态流转和时间规则仍放在 service，避免把业务规则藏进 SQL 层。
+type TicketCatalogRepository interface {
+	CreateOrganizerWithOwner(ctx context.Context, organizer *models.Organizer, ownerUserID int64) error
+	FindOrganizerByID(ctx context.Context, id int64) (*models.Organizer, error)
+	ListOrganizers(ctx context.Context, page, pageSize int) ([]models.Organizer, int64, error)
+	FindActiveMembership(ctx context.Context, organizerID, userID int64) (*models.OrganizerMember, error)
+	ListActiveMembershipsByUser(ctx context.Context, userID int64) ([]models.OrganizerMember, error)
+
+	CreateVenue(ctx context.Context, venue *models.Venue) error
+	FindVenueByID(ctx context.Context, id int64) (*models.Venue, error)
+	ListVenuesByOrganizer(ctx context.Context, organizerID int64) ([]models.Venue, error)
+
+	CreateEvent(ctx context.Context, event *models.Event) error
+	SaveEvent(ctx context.Context, event *models.Event) error
+	FindEventByID(ctx context.Context, id int64) (*models.Event, error)
+	FindEventDetail(ctx context.Context, id int64) (*models.Event, error)
+	ListPublishedEvents(ctx context.Context, city, category string, page, pageSize int) ([]models.Event, int64, error)
+	ListEventsByOrganizer(ctx context.Context, organizerID int64, page, pageSize int) ([]models.Event, int64, error)
+
+	CreateSession(ctx context.Context, session *models.EventSession) error
+	FindSessionByID(ctx context.Context, id int64) (*models.EventSession, error)
+	CreateTicketTier(ctx context.Context, tier *models.TicketTier) error
+	FindTicketTierByID(ctx context.Context, id int64) (*models.TicketTier, error)
+}
+
+type ticketCatalogRepo struct {
+	db *gorm.DB
+}
+
+func NewTicketCatalogRepository(db *gorm.DB) TicketCatalogRepository {
+	return &ticketCatalogRepo{db: db}
+}
+
+func (r *ticketCatalogRepo) CreateOrganizerWithOwner(
+	ctx context.Context,
+	organizer *models.Organizer,
+	ownerUserID int64,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(organizer).Error; err != nil {
+			return err
+		}
+		member := models.OrganizerMember{
+			OrganizerID: organizer.ID,
+			UserID:      ownerUserID,
+			Role:        models.OrganizerRoleOwner,
+			Status:      models.OrganizerStatusActive,
+		}
+		return tx.Create(&member).Error
+	})
+}
+
+func (r *ticketCatalogRepo) FindOrganizerByID(ctx context.Context, id int64) (*models.Organizer, error) {
+	var organizer models.Organizer
+	err := r.db.WithContext(ctx).First(&organizer, id).Error
+	return &organizer, err
+}
+
+func (r *ticketCatalogRepo) ListOrganizers(
+	ctx context.Context,
+	page, pageSize int,
+) ([]models.Organizer, int64, error) {
+	var organizers []models.Organizer
+	var total int64
+	query := r.db.WithContext(ctx).Model(&models.Organizer{})
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := query.Order("create_time DESC").
+		Limit(pageSize).Offset((page - 1) * pageSize).
+		Find(&organizers).Error
+	return organizers, total, err
+}
+
+func (r *ticketCatalogRepo) FindActiveMembership(
+	ctx context.Context,
+	organizerID, userID int64,
+) (*models.OrganizerMember, error) {
+	var member models.OrganizerMember
+	err := r.db.WithContext(ctx).
+		Where("organizer_id = ? AND user_id = ? AND status = ?",
+			organizerID, userID, models.OrganizerStatusActive).
+		First(&member).Error
+	return &member, err
+}
+
+func (r *ticketCatalogRepo) ListActiveMembershipsByUser(
+	ctx context.Context,
+	userID int64,
+) ([]models.OrganizerMember, error) {
+	var memberships []models.OrganizerMember
+	err := r.db.WithContext(ctx).
+		Preload("Organizer").
+		Where("user_id = ? AND status = ?", userID, models.OrganizerStatusActive).
+		Order("create_time ASC").
+		Find(&memberships).Error
+	return memberships, err
+}
+
+func (r *ticketCatalogRepo) CreateVenue(ctx context.Context, venue *models.Venue) error {
+	return r.db.WithContext(ctx).Create(venue).Error
+}
+
+func (r *ticketCatalogRepo) FindVenueByID(ctx context.Context, id int64) (*models.Venue, error) {
+	var venue models.Venue
+	err := r.db.WithContext(ctx).First(&venue, id).Error
+	return &venue, err
+}
+
+func (r *ticketCatalogRepo) ListVenuesByOrganizer(ctx context.Context, organizerID int64) ([]models.Venue, error) {
+	var venues []models.Venue
+	err := r.db.WithContext(ctx).
+		Where("organizer_id = ?", organizerID).
+		Order("create_time DESC").
+		Find(&venues).Error
+	return venues, err
+}
+
+func (r *ticketCatalogRepo) CreateEvent(ctx context.Context, event *models.Event) error {
+	return r.db.WithContext(ctx).Create(event).Error
+}
+
+func (r *ticketCatalogRepo) SaveEvent(ctx context.Context, event *models.Event) error {
+	return r.db.WithContext(ctx).Save(event).Error
+}
+
+func (r *ticketCatalogRepo) FindEventByID(ctx context.Context, id int64) (*models.Event, error) {
+	var event models.Event
+	err := r.db.WithContext(ctx).First(&event, id).Error
+	return &event, err
+}
+
+func (r *ticketCatalogRepo) FindEventDetail(ctx context.Context, id int64) (*models.Event, error) {
+	var event models.Event
+	err := r.db.WithContext(ctx).
+		Preload("Organizer").
+		Preload("Sessions", func(db *gorm.DB) *gorm.DB {
+			return db.Order("starts_at ASC")
+		}).
+		Preload("Sessions.Venue").
+		Preload("Sessions.TicketTiers", func(db *gorm.DB) *gorm.DB {
+			return db.Order("price_cents ASC")
+		}).
+		First(&event, id).Error
+	return &event, err
+}
+
+func (r *ticketCatalogRepo) ListPublishedEvents(
+	ctx context.Context,
+	city, category string,
+	page, pageSize int,
+) ([]models.Event, int64, error) {
+	var events []models.Event
+	var total int64
+	query := r.db.WithContext(ctx).Model(&models.Event{}).
+		Where("status = ?", models.EventStatusPublished)
+	if category != "" {
+		query = query.Where("category = ?", category)
+	}
+	if city != "" {
+		matchingSessions := r.db.Model(&models.EventSession{}).
+			Select("1").
+			Joins("JOIN venue ON venue.id = event_session.venue_id AND venue.delete_time IS NULL").
+			Where("event_session.event_id = event.id").
+			Where("venue.city = ?", city)
+		query = query.Where("EXISTS (?)", matchingSessions)
+	}
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := query.Preload("Organizer").
+		Preload("Sessions", func(db *gorm.DB) *gorm.DB {
+			return db.Where("status IN ?", []models.SessionStatus{
+				models.SessionStatusOnSale,
+				models.SessionStatusSoldOut,
+			}).Order("starts_at ASC")
+		}).
+		Preload("Sessions.Venue").
+		Preload("Sessions.TicketTiers", "status IN ?", []models.TicketTierStatus{
+			models.TicketTierStatusOnSale,
+			models.TicketTierStatusSoldOut,
+		}).
+		Order("published_at DESC").
+		Limit(pageSize).Offset((page - 1) * pageSize).
+		Find(&events).Error
+	return events, total, err
+}
+
+func (r *ticketCatalogRepo) ListEventsByOrganizer(
+	ctx context.Context,
+	organizerID int64,
+	page, pageSize int,
+) ([]models.Event, int64, error) {
+	var events []models.Event
+	var total int64
+	query := r.db.WithContext(ctx).Model(&models.Event{}).
+		Where("organizer_id = ?", organizerID)
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := query.
+		Preload("Sessions", func(db *gorm.DB) *gorm.DB {
+			return db.Order("starts_at ASC")
+		}).
+		Preload("Sessions.Venue").
+		Preload("Sessions.TicketTiers", func(db *gorm.DB) *gorm.DB {
+			return db.Order("price_cents ASC")
+		}).
+		Order("create_time DESC").
+		Limit(pageSize).Offset((page - 1) * pageSize).
+		Find(&events).Error
+	return events, total, err
+}
+
+func (r *ticketCatalogRepo) CreateSession(ctx context.Context, session *models.EventSession) error {
+	return r.db.WithContext(ctx).Create(session).Error
+}
+
+func (r *ticketCatalogRepo) FindSessionByID(ctx context.Context, id int64) (*models.EventSession, error) {
+	var session models.EventSession
+	err := r.db.WithContext(ctx).Preload("Venue").First(&session, id).Error
+	return &session, err
+}
+
+func (r *ticketCatalogRepo) CreateTicketTier(ctx context.Context, tier *models.TicketTier) error {
+	return r.db.WithContext(ctx).Create(tier).Error
+}
+
+func (r *ticketCatalogRepo) FindTicketTierByID(ctx context.Context, id int64) (*models.TicketTier, error) {
+	var tier models.TicketTier
+	err := r.db.WithContext(ctx).First(&tier, id).Error
+	return &tier, err
+}

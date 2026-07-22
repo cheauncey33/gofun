@@ -29,6 +29,8 @@ rabbitmq:
 jwt:
   secret: "test-secret"
   expire_secs: 3600
+ticket_qr:
+  secret: "test-ticket-qr-secret"
 snowflake:
   node_id: 2
 log:
@@ -105,6 +107,7 @@ func TestValidate_EmptyDSN(t *testing.T) {
 		Redis:    RedisConfig{Addr: "localhost:6379"},
 		RabbitMQ: RabbitMQConfig{URL: "amqp://localhost"},
 		JWT:      JWTConfig{Secret: "test"},
+		TicketQR: TicketQRConfig{Secret: "test-ticket-qr-secret"},
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Error("expected error for empty DSN")
@@ -118,6 +121,7 @@ func TestValidate_EmptyRedisAddr(t *testing.T) {
 		Redis:    RedisConfig{Addr: ""},
 		RabbitMQ: RabbitMQConfig{URL: "amqp://localhost"},
 		JWT:      JWTConfig{Secret: "test"},
+		TicketQR: TicketQRConfig{Secret: "test-ticket-qr-secret"},
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Error("expected error for empty Redis addr")
@@ -131,9 +135,24 @@ func TestValidate_EmptyJWTSecret(t *testing.T) {
 		Redis:    RedisConfig{Addr: "localhost:6379"},
 		RabbitMQ: RabbitMQConfig{URL: "amqp://localhost"},
 		JWT:      JWTConfig{Secret: ""},
+		TicketQR: TicketQRConfig{Secret: "test-ticket-qr-secret"},
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Error("expected error for empty JWT secret")
+	}
+}
+
+func TestValidate_ShortTicketQRSecret(t *testing.T) {
+	cfg := &Config{
+		Server:   ServerConfig{Port: 8080},
+		MySQL:    MySQLConfig{DSN: "test"},
+		Redis:    RedisConfig{Addr: "localhost:6379"},
+		RabbitMQ: RabbitMQConfig{URL: "amqp://localhost"},
+		JWT:      JWTConfig{Secret: "test"},
+		TicketQR: TicketQRConfig{Secret: "too-short"},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for short ticket QR secret")
 	}
 }
 
@@ -144,6 +163,7 @@ func TestValidate_InvalidPort(t *testing.T) {
 		Redis:    RedisConfig{Addr: "localhost:6379"},
 		RabbitMQ: RabbitMQConfig{URL: "amqp://localhost"},
 		JWT:      JWTConfig{Secret: "test"},
+		TicketQR: TicketQRConfig{Secret: "test-ticket-qr-secret"},
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Error("expected error for invalid port")
@@ -157,6 +177,7 @@ func TestValidate_ValidConfig(t *testing.T) {
 		Redis:    RedisConfig{Addr: "localhost:6379"},
 		RabbitMQ: RabbitMQConfig{URL: "amqp://localhost"},
 		JWT:      JWTConfig{Secret: "test"},
+		TicketQR: TicketQRConfig{Secret: "test-ticket-qr-secret"},
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("expected no error, got: %v", err)
@@ -174,6 +195,8 @@ rabbitmq:
   url: "amqp://localhost"
 jwt:
   secret: "test"
+ticket_qr:
+  secret: "test-ticket-qr-secret"
 `
 	path := filepath.Join(dir, "config.yaml")
 	os.WriteFile(path, []byte(content), 0644)
@@ -214,6 +237,8 @@ rabbitmq:
   url: "amqp://localhost"
 jwt:
   secret: "file-secret"
+ticket_qr:
+  secret: "test-ticket-qr-secret"
 `
 	path := filepath.Join(dir, "config.yaml")
 	os.WriteFile(path, []byte(content), 0644)

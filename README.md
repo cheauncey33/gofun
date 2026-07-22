@@ -1,248 +1,72 @@
-# WHU Snack Go
+# 赴场
 
-武大零食超市系统 - 基于 Go + Vue 3 的校园零食外卖平台
+> 赴热爱之场，见想见的人。
 
-## 项目简介
-
-WHU Snack Go 是一个专为武汉大学校园设计的零食外卖平台，采用微服务架构设计，支持商品浏览、购物车、订单管理、秒杀活动等核心功能。系统采用前后端分离架构，后端使用 Go 语言开发，前端使用 Vue 3 + Vite 构建。
+赴场是一个使用 Go 构建的多主办方活动票务平台。当前第一阶段聚焦无选座票务：
+主办方维护活动、场馆、场次和票档，用户完成普通购票或限时开售抢票，
+Redis 负责前置票额与并发控制，RabbitMQ 异步确认订单，MySQL 保存最终订单和票额。
 
 ## 技术栈
 
-### 后端
-- **Go 1.25** - 核心语言
-- **Gin** - HTTP 框架
-- **GORM** - ORM 框架
-- **Redis** - 缓存层
-- **RabbitMQ** - 消息队列
-- **MySQL** - 持久化存储
-- **Snowflake** - 分布式 ID 生成
+- 后端：Go、Gin、GORM、MySQL、Redis、RabbitMQ、Snowflake ID
+- 前端：Vue 3、Vite、Element Plus、Vue Router、Axios
+- 可观测性：Prometheus `/metrics`、Grafana
 
-### 前端
-- **Vue 3** - 前端框架
-- **Vite** - 构建工具
-- **Element Plus** - UI 组件库
-- **Pinia** - 状态管理
-- **Vue Router** - 路由管理
+## 第一阶段能力
 
-### 基础设施
-- **Docker Compose** - 容器编排
-- **Prometheus** - 监控指标
-- **Grafana** - 可视化面板
-- **Nginx** - 反向代理
+- 多主办方与 `owner / operator` 成员权限
+- 场馆、活动、场次、票档管理
+- 主办方工作台：运营概览、活动创建/续配/发布、近期订单
+- 公开活动发现与活动详情
+- 普通购票：Redis 预扣、RabbitMQ 异步确认、幂等请求
+- 限时开售：一次性令牌、活动票额、底层票额、个人限购 Lua 原子校验
+- 订单状态：`queued → pending_payment → paid / cancelled`
+- 超时取消、票额释放、余额支付和退款
+- 支付后按购买数量签发电子票，订单详情展示独立二维码
+- 主办方扫码或手动输入票码核销，并保留成功与失败审计记录
+- 服务重启时按 queued 订单重建 Redis 并重投 RabbitMQ
 
-## 核心功能
+本阶段不包含在线选座、实名观演人、电子票转赠、离线核销、第三方支付和主办方结算。
+完整的范围、字段、接口与风险见 [第一阶段改造说明](docs/FUCHANG_PHASE1.md)。
+主办方可运营闭环见 [主办方工作台说明](docs/FUCHANG_ORGANIZER_CLOSURE.md)。
+电子票、核销与数据库基线见 [电子票与核销说明](docs/FUCHANG_ADMISSION_TICKET.md)。
 
-### 用户模块
-- 用户注册与登录 (JWT 双 token 认证)
-- 个人信息管理
-- 修改密码
-- 收货地址管理
+## 本地运行
 
-### 商品模块
-- 商品列表展示 (支持分类、搜索、排序)
-- 商品详情查看
-- 分类管理
-- 库存管理 (Redis 缓存 + 预热)
+后端：
 
-### 订单模块
-- 购物车功能
-- 普通下单 (RabbitMQ 异步化)
-- 订单状态流转
-- 取消订单 / 申请退款
-- 订单超时自动取消
-
-### 秒杀模块
-- 秒杀活动管理
-- 秒杀令牌机制
-- Lua 脚本原子扣减库存
-- 限购与防超卖
-- 预热与缓存
-
-### 管理后台
-- 仪表盘统计
-- 商品管理 (上下架)
-- 订单管理
-- 用户管理
-- 秒杀活动管理
-
-## 项目结构
-
-```
-whu_snack_go/
-├── backend/
-│   ├── common/          # 公共组件 (JWT, Redis, RabbitMQ, 限流)
-│   ├── config/          # 配置管理
-│   ├── container/       # 依赖注入容器
-│   ├── controller/      # 控制器层
-│   ├── models/          # 数据模型
-│   ├── pkg/             # 公共包 (错误处理, 日志, 响应)
-│   ├── repository/       # 数据访问层
-│   ├── service/         # 业务逻辑层
-│   ├── metrics/         # Prometheus 监控
-│   └── main.go          # 入口文件
-├── frontend/
-│   ├── src/
-│   │   ├── api/         # API 请求
-│   │   ├── components/  # 公共组件
-│   │   ├── layouts/     # 布局
-│   │   ├── router/      # 路由配置
-│   │   ├── stores/      # Pinia 状态管理
-│   │   ├── views/       # 页面视图
-│   │   └── main.js      # 入口文件
-├── deploy/              # 部署配置
-├── monitoring/          # 监控配置
-├── tests/               # 测试脚本
-│   └── load/           # 压测脚本
-└── docker-compose.yml  # 容器编排
-```
-
-## 快速开始
-
-### 前置要求
-
-- Go 1.25+
-- Node.js 18+
-- Docker & Docker Compose
-- MySQL 8.0+
-- Redis 7.0+
-- RabbitMQ 3.12+
-
-### 后端配置
-
-1. 复制配置文件：
-```bash
-cp backend/config/config.example.yaml backend/config/config.yaml
-```
-
-2. 修改配置文件，配置数据库、Redis、RabbitMQ 连接信息。
-
-3. 启动后端服务：
-```bash
+```powershell
 cd backend
-go run main.go -config config/config.yaml
+go run . -config ./config/config.yaml
 ```
 
-### 前端配置
+前端：
 
-1. 安装依赖：
-```bash
+```powershell
 cd frontend
-npm install
+npm.cmd install
+npm.cmd run dev
 ```
 
-2. 启动开发服务器：
-```bash
-npm run dev
+验证：
+
+```powershell
+cd backend
+go test ./... -count=1
+
+cd ../frontend
+npm.cmd run build
 ```
 
-### Docker Compose 启动 (推荐)
+## 重要一致性约定
 
-```bash
-# 启动完整服务 (后端 + 前端 + MySQL + Redis + RabbitMQ)
-docker-compose up -d
+- MySQL 是票务订单和票额的最终事实来源。
+- Redis 键使用 `fuchang:ticket:*` 与 `fuchang:rush:*` 命名空间。
+- RabbitMQ 队列使用 `fuchang.order.*`。
+- 新票务金额一律使用 `int64` 分；旧零食领域的 `float64` 字段只为回滚保留，未挂载运行路由。
+- `queued` 表示订单凭据已经创建，但消费者尚未完成 MySQL 票额确认；它不是支付成功。
 
-# 启动监控系统
-docker-compose -f monitoring/docker-compose.monitoring.yml up -d
-```
+## 源码保护
 
-## API 接口
-
-### 用户接口
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | /api/v1/register | 用户注册 |
-| POST | /api/v1/login | 用户登录 |
-| POST | /api/v1/refresh | 刷新 Token |
-| GET | /api/v1/user/info | 获取用户信息 |
-| PUT | /api/v1/user/info | 更新用户信息 |
-| PUT | /api/v1/user/password | 修改密码 |
-
-### 商品接口
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | /api/v1/products | 商品列表 |
-| GET | /api/v1/products/:id | 商品详情 |
-| GET | /api/v1/categories | 分类列表 |
-
-### 订单接口
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | /api/v1/orders | 创建订单 |
-| GET | /api/v1/orders | 订单列表 |
-| GET | /api/v1/orders/:id | 订单详情 |
-| POST | /api/v1/orders/:id/cancel | 取消订单 |
-| POST | /api/v1/orders/:id/refund | 申请退款 |
-
-### 秒杀接口
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | /api/v1/seckill/activities | 秒杀列表 |
-| GET | /api/v1/seckill/activities/:id | 秒杀详情 |
-| POST | /api/v1/seckill/activities/:id/token | 获取秒杀令牌 |
-| POST | /api/v1/seckill/activities/:id/execute | 执行秒杀 |
-
-### 管理接口
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | /api/v1/admin/dashboard | 仪表盘 |
-| POST | /api/v1/admin/products | 创建商品 |
-| PUT | /api/v1/admin/products/:id | 更新商品 |
-| GET | /api/v1/admin/orders | 订单列表 |
-| PUT | /api/v1/admin/orders/:id/status | 更新订单状态 |
-
-## 核心设计
-
-### 高并发处理
-
-1. **多级缓存**: L1 本地缓存 (Go Cache) + L2 Redis 缓存
-2. **限流**: 全局限流 + IP 限流 (令牌桶算法)
-3. **秒杀优化**: 预热机制 + Lua 原子操作 + 令牌机制
-4. **异步下单**: RabbitMQ 消息队列削峰
-
-### 数据一致性
-
-1. **库存补偿**: 定时任务比对 Redis 与 MySQL 库存
-2. **幂等消费**: 基于订单 ID 做幂等校验
-3. **失败重试**: 死信队列 + 延迟队列
-
-### 可观测性
-
-1. **日志**: Zap 结构化日志
-2. **监控**: Prometheus 指标采集
-3. **链路追踪**: Request ID 透传
-
-## 压测
-
-项目内置压测脚本，支持多种场景：
-
-```bash
-# 安装依赖
-cd tests/load
-npm install
-
-# 基础读压测
-node read_baseline.mjs
-
-# 秒杀 spike 压测
-node seckill_spike.mjs
-
-# 混合读写压测
-node shopping_mix.mjs
-```
-
-## 部署
-
-详见 [DEPLOYMENT.md](./DEPLOYMENT.md)
-
-推荐部署架构：
-- Nginx (负载均衡) → Go Backend (多实例)
-- 前端静态资源 (CDN)
-
-## 许可证
-
-MIT License
+改造前源码已保存为本地标签 `pre-fuchang-phase1-20260721`，当前改造分支为
+`feature/fuchang-phase1`。离线恢复包位于被 Git 忽略的 `.backup/` 目录。

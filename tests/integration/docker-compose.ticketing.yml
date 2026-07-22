@@ -1,0 +1,89 @@
+services:
+  backend:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8080
+      SERVER_MODE: test
+      MYSQL_DSN: "fuchang:fuchang-it-mysql@tcp(mysql:3306)/fuchang_ticketing_it?charset=utf8mb4&parseTime=True&loc=Local"
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: fuchang-it-redis
+      RABBITMQ_URL: amqp://fuchang:fuchang-it-rabbit@rabbitmq:5672/
+      RABBITMQ_QUEUE_NAME: fuchang.it.order.queue
+      RABBITMQ_RETRY_QUEUE_NAME: fuchang.it.order.retry
+      RABBITMQ_DLX_NAME: fuchang.it.order.dlx
+      RABBITMQ_DLQ_NAME: fuchang.it.order.dead
+      JWT_SECRET: fuchang-integration-test-secret-only
+      JWT_EXPIRE_SECS: 3600
+      JWT_REFRESH_EXPIRE_SECS: 86400
+      TICKET_QR_SECRET: fuchang-integration-ticket-qr-secret-only
+      SNOWFLAKE_NODE_ID: 9
+      ORDER_CONSUMER_WORKER_COUNT: 2
+      ORDER_CONSUMER_PREFETCH_COUNT: 2
+      ORDER_CONSUMER_MAX_RETRIES: 2
+      DELAYED_ORDER_TIMEOUT_MINUTES: 1
+      DELAYED_ORDER_LOCK_TIMEOUT_SEC: 5
+      CORS_ALLOW_ORIGINS: http://127.0.0.1:5173,http://127.0.0.1:15173
+    ports:
+      - "18080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: fuchang-it-root
+      MYSQL_DATABASE: fuchang_ticketing_it
+      MYSQL_USER: fuchang
+      MYSQL_PASSWORD: fuchang-it-mysql
+      TZ: Asia/Shanghai
+    ports:
+      - "13306:3306"
+    volumes:
+      - mysql_it_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -ufuchang -pfuchang-it-mysql --silent"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--requirepass", "fuchang-it-redis", "--appendonly", "yes"]
+    ports:
+      - "16379:6379"
+    volumes:
+      - redis_it_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a fuchang-it-redis ping | grep PONG"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: fuchang
+      RABBITMQ_DEFAULT_PASS: fuchang-it-rabbit
+    ports:
+      - "25672:5672"
+      - "35672:15672"
+    volumes:
+      - rabbitmq_it_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  mysql_it_data:
+  redis_it_data:
+  rabbitmq_it_data:
