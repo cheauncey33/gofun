@@ -3,6 +3,7 @@ package repository
 import (
 	"WHU_Snack_GO/models"
 	"context"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -24,7 +25,8 @@ type TicketCatalogRepository interface {
 	SaveEvent(ctx context.Context, event *models.Event) error
 	FindEventByID(ctx context.Context, id int64) (*models.Event, error)
 	FindEventDetail(ctx context.Context, id int64) (*models.Event, error)
-	ListPublishedEvents(ctx context.Context, city, category string, page, pageSize int) ([]models.Event, int64, error)
+	ListPublishedEvents(ctx context.Context, city string, categories []string, keyword string, page, pageSize int) ([]models.Event, int64, error)
+	ListPublishedFacets(ctx context.Context) (cities []string, categories []string, err error)
 	ListEventsByOrganizer(ctx context.Context, organizerID int64, page, pageSize int) ([]models.Event, int64, error)
 
 	CreateSession(ctx context.Context, session *models.EventSession) error
@@ -157,15 +159,19 @@ func (r *ticketCatalogRepo) FindEventDetail(ctx context.Context, id int64) (*mod
 
 func (r *ticketCatalogRepo) ListPublishedEvents(
 	ctx context.Context,
-	city, category string,
+	city string,
+	categories []string,
+	keyword string,
 	page, pageSize int,
 ) ([]models.Event, int64, error) {
 	var events []models.Event
 	var total int64
 	query := r.db.WithContext(ctx).Model(&models.Event{}).
 		Where("status = ?", models.EventStatusPublished)
-	if category != "" {
-		query = query.Where("category = ?", category)
+	if len(categories) == 1 {
+		query = query.Where("category = ?", categories[0])
+	} else if len(categories) > 1 {
+		query = query.Where("category IN ?", categories)
 	}
 	if city != "" {
 		matchingSessions := r.db.Model(&models.EventSession{}).
@@ -174,6 +180,18 @@ func (r *ticketCatalogRepo) ListPublishedEvents(
 			Where("event_session.event_id = event.id").
 			Where("venue.city = ?", city)
 		query = query.Where("EXISTS (?)", matchingSessions)
+	}
+	if keyword != "" {
+		like := "%" + escapeLikePattern(keyword) + "%"
+		venueMatch := r.db.Model(&models.EventSession{}).
+			Select("1").
+			Joins("JOIN venue ON venue.id = event_session.venue_id AND venue.delete_time IS NULL").
+			Where("event_session.event_id = event.id").
+			Where("venue.name LIKE ? OR venue.city LIKE ?", like, like)
+		query = query.Where(
+			"title LIKE ? OR subtitle LIKE ? OR category LIKE ? OR EXISTS (?)",
+			like, like, like, venueMatch,
+		)
 	}
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -194,6 +212,46 @@ func (r *ticketCatalogRepo) ListPublishedEvents(
 		Limit(pageSize).Offset((page - 1) * pageSize).
 		Find(&events).Error
 	return events, total, err
+}
+
+func (r *ticketCatalogRepo) ListPublishedFacets(
+	ctx context.Context,
+) (cities []string, categories []string, err error) {
+	err = r.db.WithContext(ctx).Model(&models.Event{}).
+		Where("status = ?", models.EventStatusPublished).
+		Distinct().
+		Order("category ASC").
+		Pluck("category", &categories).Error
+	if err != nil {
+		return nil, nil, err
+	}
+
+	err = r.db.WithContext(ctx).
+		Table("venue").
+		Select("DISTINCT venue.city").
+		Joins("JOIN event_session ON event_session.venue_id = venue.id AND event_session.delete_time IS NULL").
+		Joins("JOIN event ON event.id = event_session.event_id AND event.delete_time IS NULL").
+		Where("venue.delete_time IS NULL").
+		Where("event.status = ?", models.EventStatusPublished).
+		Where("venue.city <> ''").
+		Order("venue.city ASC").
+		Pluck("venue.city", &cities).Error
+	if err != nil {
+		return nil, nil, err
+	}
+	if cities == nil {
+		cities = []string{}
+	}
+	if categories == nil {
+		categories = []string{}
+	}
+	return cities, categories, nil
+}
+
+func escapeLikePattern(value string) string {
+	// 去掉通配符，避免用户输入 %/_ 放大匹配面；其余原样模糊匹配。
+	replacer := strings.NewReplacer("%", "", "_", "")
+	return replacer.Replace(value)
 }
 
 func (r *ticketCatalogRepo) ListEventsByOrganizer(

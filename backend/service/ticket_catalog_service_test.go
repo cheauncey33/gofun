@@ -7,14 +7,19 @@ func TestTicketCatalogListQueryNormalize(t *testing.T) {
 		Page:     -2,
 		PageSize: 500,
 		City:     " 武汉 ",
-		Category: " 音乐现场 ",
+		Category: " 音乐现场 , 脱口秀 , 音乐现场 ",
+		Keyword:  " 夏夜 ",
 	}
 	query.Normalize()
 	if query.Page != 1 || query.PageSize != 12 {
 		t.Fatalf("unexpected pagination: page=%d pageSize=%d", query.Page, query.PageSize)
 	}
-	if query.City != "武汉" || query.Category != "音乐现场" {
+	if query.City != "武汉" || query.Keyword != "夏夜" {
 		t.Fatalf("query text was not trimmed: %#v", query)
+	}
+	got := query.Categories()
+	if len(got) != 2 || got[0] != "音乐现场" || got[1] != "脱口秀" {
+		t.Fatalf("unexpected categories: %#v", got)
 	}
 }
 

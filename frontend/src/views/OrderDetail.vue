@@ -180,15 +180,15 @@ onBeforeUnmount(() => clearTimeout(queueTimer))
 .order-detail { max-width: 960px; min-height: 70vh; margin: 0 auto; padding: 45px 28px; }
 .back { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
 .detail-state { min-height: 50vh; display: grid; place-content: center; color: var(--muted); }
-header { margin: 35px 0 25px; padding: 30px 36px; background: #1d1814; color: #f7f2ea; display: flex; justify-content: space-between; align-items: end; }
+header { margin: 35px 0 25px; padding: 30px 36px; border-radius: var(--radius-lg); background: #1d1814; color: #f7f2ea; display: flex; justify-content: space-between; align-items: end; }
 header p { color: #aaa098; font-size: 11px; }
 header h1 { margin: 8px 0; font-family: var(--font-display); font-size: 40px; }
 header span { color: #c7beb5; font-size: 12px; }
 header > strong { color: #ef715c; font-size: 30px; }
-.queue-banner { margin-bottom: 22px; padding: 18px 20px; border: 1px dashed var(--line-strong); display: grid; grid-template-columns: 64px 1fr auto; gap: 16px; align-items: center; }
+.queue-banner { margin-bottom: 22px; padding: 18px 20px; border: 1px dashed var(--line-strong); border-radius: var(--radius-md); display: grid; grid-template-columns: 64px 1fr auto; gap: 16px; align-items: center; }
 .queue-banner strong { display: block; font: 700 18px var(--font-display); }
 .queue-banner p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
-.queue-banner button { height: 40px; padding: 0 14px; border: 1px solid var(--line-strong); background: transparent; cursor: pointer; }
+.queue-banner button { height: 40px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: transparent; cursor: pointer; }
 .pulse-lines { display: flex; gap: 4px; align-items: end; height: 36px; }
 .pulse-lines i { width: 5px; background: var(--red); animation: pulse 1.1s ease-in-out infinite; }
 .pulse-lines i:nth-child(2) { animation-delay: .1s; height: 60%; }
@@ -197,7 +197,7 @@ header > strong { color: #ef715c; font-size: 30px; }
 .pulse-lines i:nth-child(5) { animation-delay: .4s; height: 75%; }
 .pulse-lines i:first-child { height: 40%; }
 @keyframes pulse { 0%,100% { opacity: .35; transform: scaleY(.7); } 50% { opacity: 1; transform: scaleY(1); } }
-.ticket { min-height: 210px; padding: 30px; border: 1px solid var(--line-strong); box-shadow: 8px 8px 0 #e7ddd0; display: grid; grid-template-columns: 170px 1fr 130px; gap: 30px; align-items: center; position: relative; overflow: hidden; }
+.ticket { min-height: 210px; padding: 30px; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-soft); display: grid; grid-template-columns: 170px 1fr 130px; gap: 30px; align-items: center; position: relative; overflow: hidden; }
 .ticket::after { content: '赴场'; position: absolute; right: -10px; bottom: -35px; color: rgba(181,52,41,.06); font: 800 110px var(--font-display); }
 .ticket-date { display: grid; gap: 10px; padding-right: 25px; border-right: 1px dashed var(--line-strong); }
 .ticket span, .ticket small { color: var(--muted); font-size: 10px; letter-spacing: .12em; }
@@ -207,9 +207,9 @@ header > strong { color: #ef715c; font-size: 30px; }
 .tier { display: grid; gap: 9px; position: relative; z-index: 1; }
 .tier strong { color: var(--red); font-size: 22px; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 28px; }
-.actions button { min-width: 130px; height: 44px; padding: 0 18px; border: 1px solid var(--line-strong); background: transparent; cursor: pointer; }
+.actions button { min-width: 130px; height: 44px; padding: 0 18px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: transparent; cursor: pointer; }
 .actions .primary { border-color: var(--red); background: var(--red); color: white; }
-.purchase-info { margin-top: 28px; padding: 18px 22px; border: 1px solid var(--line-strong); display: flex; flex-wrap: wrap; gap: 14px 36px; }
+.purchase-info { margin-top: 28px; padding: 18px 22px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); display: flex; flex-wrap: wrap; gap: 14px 36px; }
 .purchase-info > div { min-width: 210px; display: grid; grid-template-columns: auto auto; gap: 5px 16px; }
 .purchase-info small { grid-column: 1 / -1; color: var(--red); font-size: 10px; letter-spacing: .1em; }
 .purchase-info strong { font-size: 13px; }.purchase-info span { color: var(--muted); font-size: 11px; }
@@ -219,7 +219,7 @@ header > strong { color: #ef715c; font-size: 30px; }
 .ticket-section-heading p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 .ticket-section-heading > span { color: var(--muted); font-size: 12px; }
 .electronic-ticket-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.electronic-ticket { min-height: 194px; padding: 24px; border: 1px solid var(--line-strong); display: grid; grid-template-columns: 1fr 150px; gap: 20px; background: rgba(255,255,255,.24); position: relative; }
+.electronic-ticket { min-height: 194px; padding: 24px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); display: grid; grid-template-columns: 1fr 150px; gap: 20px; background: rgba(255,255,255,.24); position: relative; }
 .electronic-ticket::before { content: ''; position: absolute; top: 0; bottom: 0; right: 173px; border-left: 1px dashed var(--line-strong); }
 .ticket-copy > span { color: var(--red); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
 .ticket-copy h3 { margin: 8px 0; font: 700 18px var(--font-display); }

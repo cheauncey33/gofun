@@ -75,7 +75,12 @@ export default {
   // Event discovery
   getEvents: (params) => get('/events', params),
   getEventDetail: (id) => get(`/events/${id}`),
+  getCatalogMeta: () => get('/catalog/meta'),
   getRushSales: () => get('/rush-sales'),
+  getEventComments: (eventId, params) => get(`/events/${eventId}/comments`, params),
+  createEventComment: (eventId, content) => post(`/events/${eventId}/comments`, { content }),
+  deleteEventComment: (commentId) => del(`/comments/${commentId}`),
+  likeEventComment: (commentId) => post(`/comments/${commentId}/like`),
 
   // Orders
   createOrder: (ticketTierId, quantity, purchaseInfo = {}, idempotencyKey = newIdempotencyKey()) =>

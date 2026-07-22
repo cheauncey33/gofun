@@ -248,7 +248,7 @@ async function next() {
       <label>副标题<el-input v-model="eventForm.subtitle" maxlength="256" /></label>
       <label>活动分类 <b>*</b>
         <el-select v-model="eventForm.category" placeholder="请选择分类">
-          <el-option v-for="item in ['音乐现场', '演唱会', '脱口秀', '展览', '戏剧', '体育']" :key="item" :label="item" :value="item" />
+          <el-option v-for="item in ['音乐现场', '演唱会', '音乐节', '脱口秀', '展览', '戏剧', '体育']" :key="item" :label="item" :value="item" />
         </el-select>
       </label>
       <label>
@@ -322,13 +322,13 @@ async function next() {
 .switch-field { align-content: start; }
 .drawer-hint, .publish-check p { color: var(--muted); font-size: 12px; line-height: 1.7; }
 .tier-section { gap: 15px; }
-.tier-editor { padding: 18px; border: 1px solid var(--line); background: rgba(255,255,255,.28); display: grid; gap: 14px; }
+.tier-editor { padding: 18px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgba(255,255,255,.28); display: grid; gap: 14px; }
 .tier-editor header { display: flex; justify-content: space-between; }
 .tier-editor header button, .add-tier { border: 0; background: transparent; color: var(--red); cursor: pointer; }
 .tier-numbers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .tier-numbers :deep(.el-input-number) { width: 100%; }
-.add-tier { min-height: 42px; border: 1px dashed var(--line-strong); }
-.publish-check { padding: 24px; border: 1px solid var(--line-strong); display: grid; grid-template-columns: 80px 1fr; gap: 14px; }
+.add-tier { min-height: 42px; border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); }
+.publish-check { padding: 24px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); display: grid; grid-template-columns: 80px 1fr; gap: 14px; }
 .publish-check span { color: var(--muted); }
 .publish-check p { grid-column: 1 / -1; margin: 14px 0 0; padding-top: 18px; border-top: 1px solid var(--line); }
 .drawer-actions { display: flex; justify-content: flex-end; }

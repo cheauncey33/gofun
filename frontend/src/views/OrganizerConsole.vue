@@ -410,14 +410,14 @@ function formatDate(value) {
   align-content: start;
   gap: 8px;
 }
-.console-sidebar button { height: 44px; padding: 0 16px; display: flex; align-items: center; gap: 12px; text-align: left; font-size: 14px; }
+.console-sidebar button { height: 44px; padding: 0 16px; border-radius: var(--radius-sm); display: flex; align-items: center; gap: 12px; text-align: left; font-size: 14px; }
 .console-sidebar button.active { border-left: 3px solid var(--red); background: rgba(181,52,41,.055); color: var(--red); }
 .console-main { margin-left: 180px; padding: 32px clamp(28px, 4vw, 62px) 70px; }
 .console-heading { scroll-margin-top: 82px; display: flex; justify-content: space-between; align-items: center; }
 .console-heading h1 { margin: 0; font: 760 clamp(30px, 3vw, 42px) var(--font-display); }
 .console-heading p, .console-section header p { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
 .heading-actions { display: flex; gap: 10px; }
-.metric-band { margin-top: 28px; border: 1px solid var(--line-strong); display: grid; grid-template-columns: repeat(4, 1fr); }
+.metric-band { margin-top: 28px; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); overflow: hidden; display: grid; grid-template-columns: repeat(4, 1fr); }
 .metric-band div { min-height: 100px; padding: 22px 28px; border-right: 1px solid var(--line); }
 .metric-band div:last-child { border: 0; }
 .metric-band span { display: block; margin-bottom: 11px; color: var(--muted); font-size: 12px; }
@@ -427,7 +427,7 @@ function formatDate(value) {
 .console-section > header { margin-bottom: 15px; display: flex; justify-content: space-between; align-items: end; }
 .console-section h2 { margin: 0; font: 720 22px var(--font-display); }
 .console-section header > span { color: var(--muted); font-size: 12px; }
-.table-frame { border: 1px solid var(--line-strong); background: rgba(255,255,255,.22); }
+.table-frame { border: 1px solid var(--line-strong); border-radius: var(--radius-md); overflow: hidden; background: rgba(255,255,255,.22); }
 .table-frame :deep(.el-table), .table-frame :deep(.el-table tr), .table-frame :deep(.el-table th.el-table__cell) { background: transparent; }
 .table-frame :deep(.el-table th.el-table__cell) { color: var(--muted); font-size: 12px; font-weight: 600; }
 .table-frame :deep(.el-table td.el-table__cell) { padding: 12px 0; }

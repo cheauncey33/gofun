@@ -83,6 +83,8 @@ func main() {
 	ticketOrderCtrl := controller.NewTicketOrderController(ticketOrderSvc)
 	ticketVerificationCtrl := controller.NewTicketVerificationController(ticketVerificationSvc)
 	rushSaleCtrl := controller.NewRushSaleController(rushSaleSvc)
+	eventCommentSvc := service.NewEventCommentService(cont)
+	eventCommentCtrl := controller.NewEventCommentController(eventCommentSvc)
 	ticketCompensationSvc := service.NewTicketCompensationService(cont)
 	writeLimiter := common.NewIPRateLimiter(rate.Limit(5), 10)
 
@@ -129,6 +131,8 @@ func main() {
 		// 活动浏览无需登录；购票和主办方管理仍由各自的鉴权路由保护。
 		v1.GET("/events", ticketCatalogCtrl.ListPublishedEvents)
 		v1.GET("/events/:id", ticketCatalogCtrl.GetPublishedEvent)
+		v1.GET("/events/:id/comments", common.OptionalAuthMiddleware(), eventCommentCtrl.List)
+		v1.GET("/catalog/meta", ticketCatalogCtrl.GetCatalogMeta)
 		v1.GET("/rush-sales", rushSaleCtrl.ListCampaigns)
 
 		auth := v1.Group("/")
@@ -141,6 +145,9 @@ func main() {
 			auth.POST("/orders/:id/pay", ticketOrderCtrl.PayOrder)
 			auth.POST("/rush-sales/:id/token", writeLimitMiddleware(writeLimiter), rushSaleCtrl.IssueToken)
 			auth.POST("/rush-sales/:id/execute", writeLimitMiddleware(writeLimiter), rushSaleCtrl.Execute)
+			auth.POST("/events/:id/comments", writeLimitMiddleware(writeLimiter), eventCommentCtrl.Create)
+			auth.DELETE("/comments/:id", eventCommentCtrl.Delete)
+			auth.POST("/comments/:id/like", writeLimitMiddleware(writeLimiter), eventCommentCtrl.Like)
 
 			auth.GET("/user/info", userCtrl.GetUserInfo)
 			auth.PUT("/user/info", userCtrl.UpdateUserInfo)
@@ -185,6 +192,7 @@ func main() {
 	go ticketOrderSvc.StartTimeoutScanner(mainCtx)
 	go ticketOrderSvc.StartOutboxPublisher(mainCtx)
 	go ticketCompensationSvc.Start(mainCtx)
+	go eventCommentSvc.StartLikeCountFlusher(mainCtx)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),

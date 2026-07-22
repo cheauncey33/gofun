@@ -238,6 +238,8 @@ function resultType(value) {
   display: grid;
   grid-template-columns: minmax(340px, .82fr) minmax(440px, 1.18fr);
   border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
   background: rgba(255,255,255,.2);
 }
 .verification-station, .verification-records { min-width: 0; padding: 24px; }

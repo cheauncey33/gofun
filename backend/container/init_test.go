@@ -21,6 +21,7 @@ func TestTicketingSchemaModelsExcludeLegacyCommerceTables(t *testing.T) {
 		&models.TicketOrderOutbox{},
 		&models.AdmissionTicket{},
 		&models.TicketVerificationRecord{},
+		&models.EventComment{},
 	}
 	for _, model := range required {
 		if !actual[reflect.TypeOf(model)] {

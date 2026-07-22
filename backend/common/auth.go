@@ -31,6 +31,22 @@ func AuthMiddleware() gin.HandlerFunc {
 	}
 }
 
+// OptionalAuthMiddleware 有合法 access token 时写入 user_id，否则继续匿名访问。
+func OptionalAuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tokenString := c.GetHeader("Authorization")
+		if tokenString == "" {
+			c.Next()
+			return
+		}
+		claims, err := ParseToken(tokenString)
+		if err == nil && (claims.TokenType == "" || claims.TokenType == "access") {
+			c.Set("user_id", claims.UserID)
+		}
+		c.Next()
+	}
+}
+
 // GetUserID safely extracts user_id from gin context. Returns 0, false if not set.
 func GetUserID(c *gin.Context) (int64, bool) {
 	v, ok := c.Get("user_id")

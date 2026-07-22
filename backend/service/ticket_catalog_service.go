@@ -28,7 +28,9 @@ type TicketCatalogListQuery struct {
 	Page     int    `form:"page,default=1"`
 	PageSize int    `form:"page_size,default=12"`
 	City     string `form:"city"`
+	// Category 支持单个或逗号分隔多选，如 "脱口秀,音乐节"
 	Category string `form:"category"`
+	Keyword  string `form:"keyword"`
 }
 
 func (q *TicketCatalogListQuery) Normalize() {
@@ -39,7 +41,30 @@ func (q *TicketCatalogListQuery) Normalize() {
 		q.PageSize = 12
 	}
 	q.City = strings.TrimSpace(q.City)
-	q.Category = strings.TrimSpace(q.Category)
+	q.Category = strings.Join(splitCSV(q.Category), ",")
+	q.Keyword = strings.TrimSpace(q.Keyword)
+}
+
+func (q TicketCatalogListQuery) Categories() []string {
+	return splitCSV(q.Category)
+}
+
+func splitCSV(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
 }
 
 type CreateOrganizerInput struct {
@@ -565,7 +590,22 @@ func (s *TicketCatalogService) ListPublishedEvents(
 	query TicketCatalogListQuery,
 ) ([]models.Event, int64, error) {
 	query.Normalize()
-	return s.repo.ListPublishedEvents(ctx, query.City, query.Category, query.Page, query.PageSize)
+	return s.repo.ListPublishedEvents(
+		ctx, query.City, query.Categories(), query.Keyword, query.Page, query.PageSize,
+	)
+}
+
+type CatalogMeta struct {
+	Cities     []string `json:"cities"`
+	Categories []string `json:"categories"`
+}
+
+func (s *TicketCatalogService) GetCatalogMeta(ctx context.Context) (*CatalogMeta, error) {
+	cities, categories, err := s.repo.ListPublishedFacets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &CatalogMeta{Cities: cities, Categories: categories}, nil
 }
 
 func (s *TicketCatalogService) GetPublishedEvent(

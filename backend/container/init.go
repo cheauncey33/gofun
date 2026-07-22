@@ -155,6 +155,7 @@ func ticketingSchemaModels() []interface{} {
 		&models.RushSaleCampaign{},
 		&models.AdmissionTicket{},
 		&models.TicketVerificationRecord{},
+		&models.EventComment{},
 	}
 }
 

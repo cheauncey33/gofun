@@ -30,13 +30,22 @@ func (ctrl *TicketCatalogController) ListPublishedEvents(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "查询参数错误")
 		return
 	}
+	query.Normalize()
 	events, total, err := ctrl.service.ListPublishedEvents(c.Request.Context(), query)
 	if err != nil {
 		writeTicketCatalogError(c, err)
 		return
 	}
-	query.Normalize()
 	response.SuccessWithPage(c, events, total, query.Page, query.PageSize)
+}
+
+func (ctrl *TicketCatalogController) GetCatalogMeta(c *gin.Context) {
+	meta, err := ctrl.service.GetCatalogMeta(c.Request.Context())
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, meta)
 }
 
 func (ctrl *TicketCatalogController) GetPublishedEvent(c *gin.Context) {
