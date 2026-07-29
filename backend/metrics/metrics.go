@@ -67,6 +67,30 @@ var (
 		[]string{"result"}, // success | anomalies_found
 	)
 
+	EventSearchSyncRuns = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "event_search_sync_total",
+			Help: "Total Elasticsearch event projection reconciliation runs",
+		},
+		[]string{"result"}, // success | anomalies_found | skipped | error
+	)
+
+	DistributedRateLimitRequests = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "distributed_rate_limit_requests_total",
+			Help: "Total requests evaluated by the distributed write rate limiter",
+		},
+		[]string{"result"}, // allowed | rejected | error_fail_open | error_fail_closed
+	)
+
+	TicketTimeoutMessages = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "ticket_timeout_messages_total",
+			Help: "Total ticket payment timeout messages by handling result",
+		},
+		[]string{"result"}, // success | malformed | retry | permanent_discard
+	)
+
 	MQMessagesPublished = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "mq_messages_published_total",
@@ -80,6 +104,28 @@ var (
 			Help: "Total messages consumed from RabbitMQ",
 		},
 		[]string{"result"}, // success | error
+	)
+
+	OutboxBufferLength = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "outbox_buffer_len",
+			Help: "Current number of outbox drafts waiting in the process-local batch buffer",
+		},
+	)
+
+	OutboxFlushBatchSize = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "outbox_flush_batch_size",
+			Help:    "Number of outbox rows written per batch flush",
+			Buckets: []float64{1, 5, 10, 25, 50, 100, 200, 500, 1000},
+		},
+	)
+
+	OutboxRecoverBackfill = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "outbox_recover_backfill_total",
+			Help: "Total queued orders that received a backfilled outbox row",
+		},
 	)
 )
 

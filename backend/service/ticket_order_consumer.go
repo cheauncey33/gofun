@@ -2,6 +2,8 @@ package service
 
 import (
 	"WHU_Snack_GO/config"
+	"WHU_Snack_GO/metrics"
+	apptelemetry "WHU_Snack_GO/pkg/telemetry"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +13,10 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type TicketOrderConsumer struct {
@@ -127,14 +133,25 @@ func (c *TicketOrderConsumer) handle(
 ) error {
 	var message TicketOrderMessage
 	if err := json.Unmarshal(delivery.Body, &message); err != nil {
+		_, span := startTicketOrderConsumerSpan(ctx, delivery, message)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		span.End()
+		metrics.MQMessagesConsumed.WithLabelValues("malformed").Inc()
 		return delivery.Ack(false)
 	}
-	err := c.service.ProcessOrderTask(ctx, message)
+	consumerCtx, span := startTicketOrderConsumerSpan(ctx, delivery, message)
+	defer span.End()
+	err := c.service.ProcessOrderTask(consumerCtx, message)
 	if err == nil {
+		metrics.MQMessagesConsumed.WithLabelValues("success").Inc()
 		return delivery.Ack(false)
 	}
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
 	if errors.Is(err, ErrTicketOrderNonRetryable) {
-		c.service.FinalizeFailedMessage(ctx, message, err.Error())
+		c.service.FinalizeFailedMessage(consumerCtx, message, err.Error())
+		metrics.MQMessagesConsumed.WithLabelValues("permanent_error").Inc()
 		return delivery.Ack(false)
 	}
 
@@ -143,8 +160,9 @@ func (c *TicketOrderConsumer) handle(
 		headers := cloneHeaders(delivery.Headers)
 		headers["x-retry-count"] = retryCount
 		headers["x-dead-reason"] = err.Error()
+		copyTraceHeaders(headers, apptelemetry.InjectAMQP(consumerCtx))
 		if publishErr := channel.PublishWithContext(
-			ctx, c.dlxName, c.dlqName, true, false,
+			consumerCtx, c.dlxName, c.dlqName, true, false,
 			amqp.Publishing{
 				ContentType:  "application/json",
 				Body:         delivery.Body,
@@ -154,14 +172,16 @@ func (c *TicketOrderConsumer) handle(
 		); publishErr != nil {
 			return publishErr
 		}
-		c.service.FinalizeFailedMessage(ctx, message, "消息消费超过最大重试次数")
+		c.service.FinalizeFailedMessage(consumerCtx, message, "消息消费超过最大重试次数")
+		metrics.MQMessagesConsumed.WithLabelValues("dead_letter").Inc()
 		return delivery.Ack(false)
 	}
 
 	headers := cloneHeaders(delivery.Headers)
 	headers["x-retry-count"] = retryCount + 1
+	copyTraceHeaders(headers, apptelemetry.InjectAMQP(consumerCtx))
 	if err := channel.PublishWithContext(
-		ctx, "", c.retryQueueName, true, false,
+		consumerCtx, "", c.retryQueueName, true, false,
 		amqp.Publishing{
 			ContentType:  "application/json",
 			Body:         delivery.Body,
@@ -171,5 +191,29 @@ func (c *TicketOrderConsumer) handle(
 	); err != nil {
 		return err
 	}
+	metrics.MQMessagesConsumed.WithLabelValues("retry").Inc()
 	return delivery.Ack(false)
+}
+
+func startTicketOrderConsumerSpan(
+	ctx context.Context,
+	delivery amqp.Delivery,
+	message TicketOrderMessage,
+) (context.Context, trace.Span) {
+	parentCtx := apptelemetry.ExtractAMQP(ctx, delivery.Headers, message.TraceContext)
+	return otel.Tracer("fuchang-ticketing/order").Start(
+		parentCtx,
+		"ticket.order.consume",
+		trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(
+			attribute.Int64("ticket.order.id", message.OrderID),
+			attribute.Int("messaging.retry_count", readRetryCount(delivery.Headers)),
+		),
+	)
+}
+
+func copyTraceHeaders(target, source amqp.Table) {
+	for key, value := range source {
+		target[key] = value
+	}
 }

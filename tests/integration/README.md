@@ -11,6 +11,7 @@
 - Redis：`127.0.0.1:16379`
 - RabbitMQ AMQP：`127.0.0.1:25672`
 - RabbitMQ Management：`127.0.0.1:35672`
+- Elasticsearch：`127.0.0.1:19201`（活动关键词检索；失败自动降级 MySQL LIKE）
 
 配置中的密码是隔离测试专用固定值，不能用于开发或生产环境。
 浏览器跨域允许来源仅包含本地开发端口 `5173` 和隔离预览端口 `15173`。
@@ -42,6 +43,19 @@ $env:RUSH_CAMPAIGN_ID='1'
 node tests/integration/rush_idempotency.mjs
 ```
 
+抢票并发验收套件（自举 campaign，无需手工造数；面试证据优先跑这个）：
+
+```powershell
+$env:BASE_URL='http://127.0.0.1:18080/api/v1'
+node tests/integration/rush_concurrency.mjs
+```
+
+覆盖：
+
+1. 同用户同幂等键 8 路并发 → 只有一单  
+2. 同用户超限购并发 → 成功数 = `per_user_limit`  
+3. 12 人抢 `total_quota=3` → 恰好 3 成功，其余 4xx  
+
 如果希望在宿主机直接运行后端，可以改用：
 
 ```powershell
@@ -56,7 +70,7 @@ go run . -config ../tests/integration/backend.ticketing.yaml
 1. 创建主办方、场馆、活动、场次、票档并发布。
 2. 普通购票重复提交相同 `X-Idempotency-Key`，订单 ID 必须相同。
 3. 消费完成后 MySQL 与 `fuchang:ticket:stock:<tierID>` 必须一致。
-4. 限时开售重复消费令牌或超过个人限购必须失败。
+4. 限时开售同幂等键重复提交只建一单；超过个人限购必须失败。
 5. 待支付订单超时后，MySQL 与 Redis 票额必须同时归还。
 6. 停止后端并注入 queued 订单，重启后只能扣减一次，三个 RabbitMQ 队列最终应清空。
 

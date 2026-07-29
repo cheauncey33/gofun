@@ -9,12 +9,14 @@ import (
 	"WHU_Snack_GO/pkg/logger"
 	"WHU_Snack_GO/pkg/middleware"
 	"WHU_Snack_GO/pkg/response"
+	apptelemetry "WHU_Snack_GO/pkg/telemetry"
 	"WHU_Snack_GO/pkg/validator"
 	"WHU_Snack_GO/service"
 	"context"
 	"flag"
 	"fmt"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -22,6 +24,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 )
@@ -49,6 +52,11 @@ func main() {
 	logger.Log.Info("赴场票务服务启动中...")
 	gin.SetMode(cfg.Server.Mode)
 
+	shutdownTelemetry, err := apptelemetry.Setup(context.Background(), cfg.Telemetry)
+	if err != nil {
+		panic(fmt.Errorf("初始化 OpenTelemetry 失败: %v", err))
+	}
+
 	// 创建 DI 容器（内部同时设置 common 全局变量兼容 middleware）
 	cont, err := container.NewContainer(cfg)
 	if err != nil {
@@ -66,8 +74,14 @@ func main() {
 	userSvc := service.NewUserService(cont, cfg.JWT.ExpireSecs, cfg.JWT.RefreshExpireSecs)
 	ticketCatalogSvc := service.NewTicketCatalogService(cont)
 	ticketOrderSvc := service.NewTicketOrderService(cont, timeoutMinutes)
+	ticketOrderSvc.ConfigureOutboxWriter(cfg.OrderOutbox)
 	ticketVerificationSvc := service.NewTicketVerificationService(cont)
-	rushSaleSvc := service.NewRushSaleService(cont, ticketCatalogSvc, ticketOrderSvc)
+	rushSaleSvc := service.NewRushSaleService(
+		cont,
+		ticketCatalogSvc,
+		ticketOrderSvc,
+		time.Duration(cfg.RushSale.CampaignCacheTTLMS)*time.Millisecond,
+	)
 	ticketOrderConsumer := service.NewTicketOrderConsumer(
 		cont.NewMQChannel,
 		cont.MQQueueName,
@@ -86,7 +100,29 @@ func main() {
 	eventCommentSvc := service.NewEventCommentService(cont)
 	eventCommentCtrl := controller.NewEventCommentController(eventCommentSvc)
 	ticketCompensationSvc := service.NewTicketCompensationService(cont)
-	writeLimiter := common.NewIPRateLimiter(rate.Limit(5), 10)
+	eventSearchCompensationSvc := service.NewEventSearchCompensationService(
+		ticketCatalogSvc,
+		cont.RDB,
+		time.Duration(cfg.Elasticsearch.SyncIntervalMinutes)*time.Minute,
+		time.Duration(cfg.Elasticsearch.SyncLockTimeoutSec)*time.Second,
+	)
+	var writeLimit gin.HandlerFunc
+	if cfg.RateLimit.DistributedWriteEnabled {
+		writeLimit = common.DistributedWriteRateLimitMiddleware(
+			common.NewRedisSlidingWindowLimiter(
+				cont.RDB,
+				time.Duration(cfg.RateLimit.WriteWindowMS)*time.Millisecond,
+				cfg.RateLimit.WriteMaxPerWindow,
+				cfg.RateLimit.WriteFailOpen,
+			),
+		)
+	} else {
+		writeLimiter := common.NewIPRateLimiter(
+			rate.Limit(cfg.RateLimit.WriteRate),
+			cfg.RateLimit.WriteBurst,
+		)
+		writeLimit = writeLimitMiddleware(writeLimiter)
+	}
 
 	// MySQL 是最终票额来源，启动时将票档剩余量写入赴场独立 Redis 命名空间。
 	if err := ticketOrderSvc.WarmTicketQuota(context.Background()); err != nil {
@@ -98,10 +134,19 @@ func main() {
 	if err := ticketOrderSvc.BackfillPaidAdmissionTickets(context.Background()); err != nil {
 		logger.Log.Fatal("历史已支付订单补签电子票失败", zap.Error(err))
 	}
+	if err := ticketOrderSvc.SetupPaymentTimeoutInfrastructure(); err != nil {
+		logger.Log.Fatal("票务支付超时延时队列初始化失败", zap.Error(err))
+	}
+	if err := ticketCatalogSvc.ReindexPublishedEvents(context.Background()); err != nil {
+		logger.Log.Warn("活动 ES 索引重建失败（已忽略，检索可降级 MySQL）", zap.Error(err))
+	}
 
 	// 创建路由
 	r := gin.Default()
 	r.Use(middleware.RequestIDMiddleware())
+	if cfg.Telemetry.Enabled {
+		r.Use(otelgin.Middleware(cfg.Telemetry.ServiceName))
+	}
 	r.Use(metrics.PrometheusMiddleware())
 	r.Use(common.GlobalRateLimitMiddleware(
 		rate.Limit(cfg.RateLimit.GlobalRate),
@@ -138,16 +183,15 @@ func main() {
 		auth := v1.Group("/")
 		auth.Use(common.AuthMiddleware())
 		{
-			auth.POST("/orders", writeLimitMiddleware(writeLimiter), ticketOrderCtrl.CreateOrder)
+			auth.POST("/orders", writeLimit, ticketOrderCtrl.CreateOrder)
 			auth.GET("/orders", ticketOrderCtrl.ListOrders)
 			auth.GET("/orders/:id", ticketOrderCtrl.GetOrder)
 			auth.POST("/orders/:id/cancel", ticketOrderCtrl.CancelOrder)
 			auth.POST("/orders/:id/pay", ticketOrderCtrl.PayOrder)
-			auth.POST("/rush-sales/:id/token", writeLimitMiddleware(writeLimiter), rushSaleCtrl.IssueToken)
-			auth.POST("/rush-sales/:id/execute", writeLimitMiddleware(writeLimiter), rushSaleCtrl.Execute)
-			auth.POST("/events/:id/comments", writeLimitMiddleware(writeLimiter), eventCommentCtrl.Create)
+			auth.POST("/rush-sales/:id/execute", writeLimit, rushSaleCtrl.Execute)
+			auth.POST("/events/:id/comments", writeLimit, eventCommentCtrl.Create)
 			auth.DELETE("/comments/:id", eventCommentCtrl.Delete)
-			auth.POST("/comments/:id/like", writeLimitMiddleware(writeLimiter), eventCommentCtrl.Like)
+			auth.POST("/comments/:id/like", writeLimit, eventCommentCtrl.Like)
 
 			auth.GET("/user/info", userCtrl.GetUserInfo)
 			auth.PUT("/user/info", userCtrl.UpdateUserInfo)
@@ -189,14 +233,32 @@ func main() {
 	// 后台 goroutine
 	mainCtx, cancel := context.WithCancel(context.Background())
 	go ticketOrderConsumer.Start(mainCtx, cfg.OrderConsumer)
+	go ticketOrderSvc.StartPaymentTimeoutConsumer(mainCtx, 2)
 	go ticketOrderSvc.StartTimeoutScanner(mainCtx)
-	go ticketOrderSvc.StartOutboxPublisher(mainCtx)
+	go ticketOrderSvc.StartOutboxPublisher(mainCtx, cfg.OrderOutbox)
+	ticketOrderSvc.StartOutboxWriter(mainCtx)
+	go ticketOrderSvc.StartOutboxRecoverScanner(mainCtx)
 	go ticketCompensationSvc.Start(mainCtx)
+	go eventSearchCompensationSvc.Start(mainCtx)
 	go eventCommentSvc.StartLikeCountFlusher(mainCtx)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
 		Handler: r,
+	}
+	var pprofSrv *http.Server
+	if cfg.Pprof.Enabled {
+		pprofSrv = &http.Server{
+			Addr:              fmt.Sprintf("%s:%d", cfg.Pprof.Host, cfg.Pprof.Port),
+			Handler:           http.DefaultServeMux,
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		go func() {
+			logger.Log.Info("pprof 服务启动", zap.String("addr", pprofSrv.Addr))
+			if err := pprofSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Log.Error("pprof 服务异常退出", zap.Error(err))
+			}
+		}()
 	}
 
 	go func() {
@@ -232,6 +294,16 @@ func main() {
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Log.Error("Server Shutdown Error", zap.Error(err))
+	}
+	if pprofSrv != nil {
+		if err := pprofSrv.Shutdown(shutdownCtx); err != nil {
+			logger.Log.Error("pprof Shutdown Error", zap.Error(err))
+		}
+	}
+	traceShutdownCtx, traceShutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer traceShutdownCancel()
+	if err := shutdownTelemetry(traceShutdownCtx); err != nil {
+		logger.Log.Error("OpenTelemetry Shutdown Error", zap.Error(err))
 	}
 	logger.Log.Info("程序退出成功")
 }

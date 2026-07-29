@@ -42,18 +42,73 @@ log:
   max_backups: 7
   max_age: 30     # days
 
+# 性能剖析仅允许监听本机回环地址，生产环境默认关闭。
+pprof:
+  enabled: false
+  host: "127.0.0.1"
+  port: 6060
+
+telemetry:
+  enabled: false
+  service_name: "fuchang-ticketing"
+  otlp_endpoint: "127.0.0.1:4317"
+  insecure: true
+  sample_ratio: 0.05
+
 ratelimit:
   global_rate: 1000
   global_burst: 1200
   ip_rate: 10
   ip_burst: 20
+  # 核心写接口默认使用 Redis 滑动窗口，多实例共享同一配额。
+  distributed_write_enabled: true
+  write_window_ms: 1000
+  write_max_per_window: 10
+  write_fail_open: false
+  # 关闭 distributed_write_enabled 时回退到单机 token bucket。
+  write_rate: 5
+  write_burst: 10
 
 order_consumer:
   worker_count: 4
   prefetch_count: 5
   max_retries: 3
 
+# Outbox 收敛配置：batch=订单同步落库，outbox 有界缓冲批量刷入（可用 sync 回退）。
+order_outbox:
+  write_mode: batch
+  publish_workers: 4
+  publish_batch: 200
+  tick_interval_ms: 200
+  buffer_batch_size: 50
+  flush_interval_ms: 8
+  max_buffer: 4000
+  recover_interval_sec: 2
+
+# 抢票活动元数据短缓存；0 可用于性能基线对照。
+rush_sale:
+  campaign_cache_ttl_ms: 3000
+
+# 支付窗口（分钟）。进入 pending_payment 后投递 RabbitMQ 延时关单（消息级 TTL + DLX）；
+# DB 扫描器作兜底（默认约 2 分钟一次）。
+delayed_order:
+  timeout_minutes: 15
+  lock_timeout_sec: 10
+
 cors:
   allow_origins:
     - "http://127.0.0.1:5173"
     - "http://localhost:5173"
+
+# 活动目录全文检索（可选）。默认关闭，不影响无 ES 环境。
+# enabled=true 且 search_engine=auto|elasticsearch 时，有 keyword 走倒排；失败降级 MySQL LIKE。
+elasticsearch:
+  enabled: false
+  addresses:
+    - "http://127.0.0.1:9200"
+  username: ""
+  password: ""
+  index: "fuchang_events"
+  search_engine: "auto"  # mysql | elasticsearch | auto
+  sync_interval_minutes: 15  # 0 表示关闭周期对账
+  sync_lock_timeout_sec: 300

@@ -1,4 +1,6 @@
 import { performance } from "node:perf_hooks";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 
 export const cfg = {
   baseUrl: process.env.BASE_URL || "http://127.0.0.1:8080/api/v1",
@@ -10,6 +12,7 @@ export const cfg = {
   durationSeconds: Number(process.env.DURATION_SECONDS || 60),
   concurrency: Number(process.env.CONCURRENCY || 50),
   thinkMs: Number(process.env.THINK_MS || 0),
+  resultFile: process.env.RESULT_FILE || "",
 };
 
 export class Metrics {
@@ -21,17 +24,24 @@ export class Metrics {
     this.failed = 0;
     this.byLabel = new Map();
     this.byStatus = new Map();
+    this.byOutcome = new Map();
+    this.durationsByLabel = new Map();
     this.durations = [];
     this.errors = new Map();
   }
 
-  record(label, status, ms, ok, error = "") {
+  record(label, status, ms, ok, error = "", outcome = "") {
     this.total += 1;
     if (ok) this.ok += 1;
     else this.failed += 1;
     this.durations.push(ms);
     this.byLabel.set(label, (this.byLabel.get(label) || 0) + 1);
     this.byStatus.set(String(status), (this.byStatus.get(String(status)) || 0) + 1);
+    const resolvedOutcome = outcome || classifyOutcome(status);
+    this.byOutcome.set(resolvedOutcome, (this.byOutcome.get(resolvedOutcome) || 0) + 1);
+    const labelDurations = this.durationsByLabel.get(label) || [];
+    labelDurations.push(ms);
+    this.durationsByLabel.set(label, labelDurations);
     if (error) this.errors.set(error, (this.errors.get(error) || 0) + 1);
   }
 
@@ -59,11 +69,38 @@ export class Metrics {
         max: round(sorted.at(-1) || 0),
       },
       labels: Object.fromEntries(this.byLabel.entries()),
+      label_latency_ms: Object.fromEntries(
+        [...this.durationsByLabel.entries()].map(([label, values]) => [label, latencySummary(values)]),
+      ),
       statuses: Object.fromEntries(this.byStatus.entries()),
+      outcomes: Object.fromEntries(this.byOutcome.entries()),
       top_errors: Object.fromEntries([...this.errors.entries()].slice(0, 10)),
       ...extra,
     };
   }
+}
+
+export function classifyOutcome(status) {
+  if (status === "network_error") return "network_error";
+  const code = Number(status);
+  if (code >= 200 && code < 300) return "success";
+  if (code === 429) return "rate_limited";
+  if (code >= 400 && code < 500) return "business_rejected";
+  if (code >= 500) return "server_error";
+  return "unknown";
+}
+
+function latencySummary(values) {
+  const sorted = values.slice().sort((a, b) => a - b);
+  const sum = sorted.reduce((acc, n) => acc + n, 0);
+  return {
+    count: sorted.length,
+    avg: round(sum / Math.max(sorted.length, 1)),
+    p50: round(percentile(sorted, 50)),
+    p95: round(percentile(sorted, 95)),
+    p99: round(percentile(sorted, 99)),
+    max: round(sorted.at(-1) || 0),
+  };
 }
 
 export function round(n) {
@@ -169,8 +206,13 @@ export function productID(product) {
   return Number(product.id);
 }
 
-export async function runWorkers(metrics, worker) {
+export async function runWorkers(metrics, worker, extra = {}) {
   const deadline = performance.now() + cfg.durationSeconds * 1000;
   await Promise.all(Array.from({ length: cfg.concurrency }, (_, index) => worker(index, deadline)));
-  console.log(JSON.stringify(metrics.summary(), null, 2));
+  const output = JSON.stringify(metrics.summary(extra), null, 2);
+  if (cfg.resultFile) {
+    await mkdir(dirname(cfg.resultFile), { recursive: true });
+    await writeFile(cfg.resultFile, `${output}\n`, "utf8");
+  }
+  console.log(output);
 }

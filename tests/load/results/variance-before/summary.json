@@ -1,0 +1,120 @@
+{
+  "run_label": "variance-before",
+  "created_at": "2026-07-23T10:51:54.944Z",
+  "campaign_id": "11",
+  "concurrency": 10,
+  "duration_seconds": 60,
+  "runs": 3,
+  "rounds": [
+    {
+      "round": 1,
+      "qps": 88.56,
+      "avg": 19.56,
+      "p50": 20.7,
+      "p95": 22.14,
+      "p99": 24.18,
+      "total": 5317,
+      "outcomes": {
+        "success": 24,
+        "business_rejected": 5292,
+        "server_error": 1
+      },
+      "statuses": {
+        "200": 24,
+        "400": 5292,
+        "500": 1
+      }
+    },
+    {
+      "round": 2,
+      "qps": 217.04,
+      "avg": 22.03,
+      "p50": 22.51,
+      "p95": 25.35,
+      "p99": 28.08,
+      "total": 13030,
+      "outcomes": {
+        "success": 60,
+        "business_rejected": 12970
+      },
+      "statuses": {
+        "200": 60,
+        "400": 12970
+      }
+    },
+    {
+      "round": 3,
+      "qps": 218.99,
+      "avg": 21.69,
+      "p50": 22.46,
+      "p95": 25.81,
+      "p99": 28.31,
+      "total": 13147,
+      "outcomes": {
+        "success": 60,
+        "business_rejected": 13087
+      },
+      "statuses": {
+        "200": 60,
+        "400": 13087
+      }
+    }
+  ],
+  "aggregate": {
+    "qps": {
+      "values": [
+        88.56,
+        217.04,
+        218.99
+      ],
+      "min": 88.56,
+      "max": 218.99,
+      "median": 217.04,
+      "range": 130.43
+    },
+    "avg_ms": {
+      "values": [
+        19.56,
+        21.69,
+        22.03
+      ],
+      "min": 19.56,
+      "max": 22.03,
+      "median": 21.69,
+      "range": 2.47
+    },
+    "p50_ms": {
+      "values": [
+        20.7,
+        22.46,
+        22.51
+      ],
+      "min": 20.7,
+      "max": 22.51,
+      "median": 22.46,
+      "range": 1.81
+    },
+    "p95_ms": {
+      "values": [
+        22.14,
+        25.35,
+        25.81
+      ],
+      "min": 22.14,
+      "max": 25.81,
+      "median": 25.35,
+      "range": 3.67
+    },
+    "p99_ms": {
+      "values": [
+        24.18,
+        28.08,
+        28.31
+      ],
+      "min": 24.18,
+      "max": 28.31,
+      "median": 28.08,
+      "range": 4.13
+    }
+  }
+}

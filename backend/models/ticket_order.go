@@ -116,9 +116,10 @@ func (TicketOrderAttendee) TableName() string {
 type TicketOrderOutboxStatus string
 
 const (
-	TicketOrderOutboxPending   TicketOrderOutboxStatus = "pending"
-	TicketOrderOutboxPublished TicketOrderOutboxStatus = "published"
-	TicketOrderOutboxFailed    TicketOrderOutboxStatus = "failed"
+	TicketOrderOutboxPending    TicketOrderOutboxStatus = "pending"
+	TicketOrderOutboxPublishing TicketOrderOutboxStatus = "publishing"
+	TicketOrderOutboxPublished  TicketOrderOutboxStatus = "published"
+	TicketOrderOutboxFailed     TicketOrderOutboxStatus = "failed"
 )
 
 // TicketOrderOutbox 将订单消息先落库，再由后台转发到 MQ，避免创建成功却投递失败。

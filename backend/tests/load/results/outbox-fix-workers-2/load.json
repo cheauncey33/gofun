@@ -1,0 +1,166 @@
+{
+  "scenario": "ticket_rush_success_path",
+  "run_label": "outbox-fix-workers-2",
+  "created_at": "2026-07-24T02:02:15.939Z",
+  "campaign_id": "16",
+  "prepared_users": 500,
+  "execute_seconds": 2.62,
+  "drain_seconds": 11.59,
+  "consume_qps": 43.14,
+  "worker_hint": "2",
+  "success_orders": 500,
+  "success_qps": 190.84,
+  "status_after_poll": {
+    "pending_payment": 500
+  },
+  "pending_or_paid": 500,
+  "still_queued": 0,
+  "execute": {
+    "scenario": "success_path_execute",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 218.91,
+    "concurrency": 50,
+    "think_ms": 0,
+    "total_requests": 500,
+    "requests_per_second": 2.28,
+    "ok": 500,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 153.48,
+      "p50": 150.55,
+      "p90": 209.49,
+      "p95": 230.82,
+      "p99": 252.95,
+      "max": 274.34
+    },
+    "labels": {
+      "rush_execute": 500
+    },
+    "label_latency_ms": {
+      "rush_execute": {
+        "count": 500,
+        "avg": 153.48,
+        "p50": 150.55,
+        "p95": 230.82,
+        "p99": 252.95,
+        "max": 274.34
+      }
+    },
+    "statuses": {
+      "200": 500
+    },
+    "outcomes": {
+      "success": 500
+    },
+    "top_errors": {}
+  },
+  "setup": {
+    "scenario": "success_path_setup",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 218.91,
+    "concurrency": 50,
+    "think_ms": 0,
+    "total_requests": 1500,
+    "requests_per_second": 6.85,
+    "ok": 1500,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 136.43,
+      "p50": 193.27,
+      "p90": 209.53,
+      "p95": 214.1,
+      "p99": 229.86,
+      "max": 284.37
+    },
+    "labels": {
+      "login_probe": 500,
+      "register": 500,
+      "login": 500
+    },
+    "label_latency_ms": {
+      "login_probe": {
+        "count": 500,
+        "avg": 8.9,
+        "p50": 7.78,
+        "p95": 17.89,
+        "p99": 19.17,
+        "max": 25.48
+      },
+      "register": {
+        "count": 500,
+        "avg": 200.13,
+        "p50": 198.98,
+        "p95": 215.7,
+        "p99": 232.3,
+        "max": 284.37
+      },
+      "login": {
+        "count": 500,
+        "avg": 200.27,
+        "p50": 198.81,
+        "p95": 217.98,
+        "p99": 232.86,
+        "max": 278.49
+      }
+    },
+    "statuses": {
+      "200": 1000,
+      "401": 500
+    },
+    "outcomes": {
+      "business_rejected": 500,
+      "success": 1000
+    },
+    "top_errors": {}
+  },
+  "poll": {
+    "scenario": "success_path_poll",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 218.91,
+    "concurrency": 50,
+    "think_ms": 0,
+    "total_requests": 1814,
+    "requests_per_second": 8.29,
+    "ok": 1814,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 29.6,
+      "p50": 29.28,
+      "p90": 40.76,
+      "p95": 42.87,
+      "p99": 46.81,
+      "max": 61.83
+    },
+    "labels": {
+      "order_poll": 1814
+    },
+    "label_latency_ms": {
+      "order_poll": {
+        "count": 1814,
+        "avg": 29.6,
+        "p50": 29.28,
+        "p95": 42.87,
+        "p99": 46.81,
+        "max": 61.83
+      }
+    },
+    "statuses": {
+      "200": 1814
+    },
+    "outcomes": {
+      "success": 1814
+    },
+    "top_errors": {}
+  },
+  "mq_metrics": {
+    "published_before": 0,
+    "published_after": 500,
+    "consumed_success_before": null,
+    "consumed_success_after": 500,
+    "published_delta": 500,
+    "consumed_success_delta": 500
+  }
+}

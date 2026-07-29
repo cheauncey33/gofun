@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strings"
 
@@ -15,14 +16,19 @@ type Config struct {
 	MySQL         MySQLConfig         `mapstructure:"mysql"`
 	Redis         RedisConfig         `mapstructure:"redis"`
 	RabbitMQ      RabbitMQConfig      `mapstructure:"rabbitmq"`
+	Elasticsearch ElasticsearchConfig `mapstructure:"elasticsearch"`
 	JWT           JWTConfig           `mapstructure:"jwt"`
 	TicketQR      TicketQRConfig      `mapstructure:"ticket_qr"`
 	Snowflake     SnowflakeConfig     `mapstructure:"snowflake"`
 	Log           LogConfig           `mapstructure:"log"`
+	Pprof         PprofConfig         `mapstructure:"pprof"`
+	Telemetry     TelemetryConfig     `mapstructure:"telemetry"`
 	RateLimit     RateLimitConfig     `mapstructure:"ratelimit"`
 	Cors          CorsConfig          `mapstructure:"cors"`
 	OrderConsumer OrderConsumerConfig `mapstructure:"order_consumer"`
+	OrderOutbox   OrderOutboxConfig   `mapstructure:"order_outbox"`
 	DelayedOrder  OrderDelayConfig    `mapstructure:"delayed_order"`
+	RushSale      RushSaleConfig      `mapstructure:"rush_sale"`
 }
 
 type ServerConfig struct {
@@ -53,6 +59,19 @@ type RabbitMQConfig struct {
 	DLQName        string `mapstructure:"dlq_name"`
 }
 
+// ElasticsearchConfig 活动目录全文检索（可选）。
+// enabled=false 时完全走 MySQL LIKE；enabled=true 且 search_engine 为 auto/elasticsearch 时关键词走 ES，失败降级 LIKE。
+type ElasticsearchConfig struct {
+	Enabled             bool     `mapstructure:"enabled"`
+	Addresses           []string `mapstructure:"addresses"`
+	Username            string   `mapstructure:"username"`
+	Password            string   `mapstructure:"password"`
+	Index               string   `mapstructure:"index"`
+	SearchEngine        string   `mapstructure:"search_engine"` // mysql | elasticsearch | auto
+	SyncIntervalMinutes int      `mapstructure:"sync_interval_minutes"`
+	SyncLockTimeoutSec  int      `mapstructure:"sync_lock_timeout_sec"`
+}
+
 type JWTConfig struct {
 	Secret            string `mapstructure:"secret"`
 	ExpireSecs        int    `mapstructure:"expire_secs"`
@@ -60,8 +79,8 @@ type JWTConfig struct {
 }
 
 type TicketQRConfig struct {
-	Secret           string   `mapstructure:"secret"`
-	PreviousSecrets  []string `mapstructure:"previous_secrets"`
+	Secret          string   `mapstructure:"secret"`
+	PreviousSecrets []string `mapstructure:"previous_secrets"`
 }
 
 type SnowflakeConfig struct {
@@ -76,11 +95,31 @@ type LogConfig struct {
 	MaxAge     int    `mapstructure:"max_age"`
 }
 
+type PprofConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Host    string `mapstructure:"host"`
+	Port    int    `mapstructure:"port"`
+}
+
+type TelemetryConfig struct {
+	Enabled      bool    `mapstructure:"enabled"`
+	ServiceName  string  `mapstructure:"service_name"`
+	OTLPEndpoint string  `mapstructure:"otlp_endpoint"`
+	Insecure     bool    `mapstructure:"insecure"`
+	SampleRatio  float64 `mapstructure:"sample_ratio"`
+}
+
 type RateLimitConfig struct {
-	GlobalRate  float64 `mapstructure:"global_rate"`
-	GlobalBurst int     `mapstructure:"global_burst"`
-	IPRate      float64 `mapstructure:"ip_rate"`
-	IPBurst     int     `mapstructure:"ip_burst"`
+	GlobalRate              float64 `mapstructure:"global_rate"`
+	GlobalBurst             int     `mapstructure:"global_burst"`
+	IPRate                  float64 `mapstructure:"ip_rate"`
+	IPBurst                 int     `mapstructure:"ip_burst"`
+	WriteRate               float64 `mapstructure:"write_rate"`
+	WriteBurst              int     `mapstructure:"write_burst"`
+	DistributedWriteEnabled bool    `mapstructure:"distributed_write_enabled"`
+	WriteWindowMS           int     `mapstructure:"write_window_ms"`
+	WriteMaxPerWindow       int64   `mapstructure:"write_max_per_window"`
+	WriteFailOpen           bool    `mapstructure:"write_fail_open"`
 }
 
 type CorsConfig struct {
@@ -93,9 +132,25 @@ type OrderConsumerConfig struct {
 	MaxRetries    int `mapstructure:"max_retries"`
 }
 
+// OrderOutboxConfig 控制 outbox 写入模式与后台投递。
+type OrderOutboxConfig struct {
+	WriteMode          string `mapstructure:"write_mode"` // sync | batch
+	PublishWorkers     int    `mapstructure:"publish_workers"`
+	PublishBatch       int    `mapstructure:"publish_batch"`
+	TickIntervalMS     int    `mapstructure:"tick_interval_ms"`
+	BufferBatchSize    int    `mapstructure:"buffer_batch_size"`
+	FlushIntervalMS    int    `mapstructure:"flush_interval_ms"`
+	MaxBuffer          int    `mapstructure:"max_buffer"`
+	RecoverIntervalSec int    `mapstructure:"recover_interval_sec"`
+}
+
 type OrderDelayConfig struct {
 	TimeoutMinutes int `mapstructure:"timeout_minutes"`
 	LockTimeoutSec int `mapstructure:"lock_timeout_sec"`
+}
+
+type RushSaleConfig struct {
+	CampaignCacheTTLMS int `mapstructure:"campaign_cache_ttl_ms"`
 }
 
 func Load(configPath string) (*Config, error) {
@@ -129,6 +184,13 @@ func Load(configPath string) (*Config, error) {
 		"rabbitmq.retry_queue_name",
 		"rabbitmq.dlx_name",
 		"rabbitmq.dlq_name",
+		"elasticsearch.enabled",
+		"elasticsearch.username",
+		"elasticsearch.password",
+		"elasticsearch.index",
+		"elasticsearch.search_engine",
+		"elasticsearch.sync_interval_minutes",
+		"elasticsearch.sync_lock_timeout_sec",
 		"jwt.secret",
 		"jwt.expire_secs",
 		"jwt.refresh_expire_secs",
@@ -139,15 +201,38 @@ func Load(configPath string) (*Config, error) {
 		"log.max_size",
 		"log.max_backups",
 		"log.max_age",
+		"pprof.enabled",
+		"pprof.host",
+		"pprof.port",
+		"telemetry.enabled",
+		"telemetry.service_name",
+		"telemetry.otlp_endpoint",
+		"telemetry.insecure",
+		"telemetry.sample_ratio",
 		"ratelimit.global_rate",
 		"ratelimit.global_burst",
 		"ratelimit.ip_rate",
 		"ratelimit.ip_burst",
+		"ratelimit.write_rate",
+		"ratelimit.write_burst",
+		"ratelimit.distributed_write_enabled",
+		"ratelimit.write_window_ms",
+		"ratelimit.write_max_per_window",
+		"ratelimit.write_fail_open",
 		"order_consumer.worker_count",
 		"order_consumer.prefetch_count",
 		"order_consumer.max_retries",
+		"order_outbox.write_mode",
+		"order_outbox.publish_workers",
+		"order_outbox.publish_batch",
+		"order_outbox.tick_interval_ms",
+		"order_outbox.buffer_batch_size",
+		"order_outbox.flush_interval_ms",
+		"order_outbox.max_buffer",
+		"order_outbox.recover_interval_sec",
 		"delayed_order.timeout_minutes",
 		"delayed_order.lock_timeout_sec",
+		"rush_sale.campaign_cache_ttl_ms",
 	)
 
 	if err := v.ReadInConfig(); err != nil {
@@ -160,6 +245,9 @@ func Load(configPath string) (*Config, error) {
 	}
 	if origins := os.Getenv("CORS_ALLOW_ORIGINS"); origins != "" {
 		cfg.Cors.AllowOrigins = splitCSV(origins)
+	}
+	if addrs := os.Getenv("ELASTICSEARCH_ADDRESSES"); addrs != "" {
+		cfg.Elasticsearch.Addresses = splitCSV(addrs)
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -219,17 +307,49 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("log.max_backups", 7)
 	v.SetDefault("log.max_age", 30)
 
+	v.SetDefault("pprof.enabled", false)
+	v.SetDefault("pprof.host", "127.0.0.1")
+	v.SetDefault("pprof.port", 6060)
+
+	v.SetDefault("telemetry.enabled", false)
+	v.SetDefault("telemetry.service_name", "fuchang-ticketing")
+	v.SetDefault("telemetry.otlp_endpoint", "127.0.0.1:4317")
+	v.SetDefault("telemetry.insecure", true)
+	v.SetDefault("telemetry.sample_ratio", 0.05)
+
 	v.SetDefault("ratelimit.global_rate", 1000.0)
 	v.SetDefault("ratelimit.global_burst", 1200)
 	v.SetDefault("ratelimit.ip_rate", 10.0)
 	v.SetDefault("ratelimit.ip_burst", 20)
+	v.SetDefault("ratelimit.write_rate", 5.0)
+	v.SetDefault("ratelimit.write_burst", 10)
+	v.SetDefault("ratelimit.distributed_write_enabled", true)
+	v.SetDefault("ratelimit.write_window_ms", 1000)
+	v.SetDefault("ratelimit.write_max_per_window", 10)
+	v.SetDefault("ratelimit.write_fail_open", false)
 
 	v.SetDefault("order_consumer.worker_count", 4)
 	v.SetDefault("order_consumer.prefetch_count", 5)
 	v.SetDefault("order_consumer.max_retries", 3)
+	v.SetDefault("order_outbox.write_mode", "batch")
+	v.SetDefault("order_outbox.publish_workers", 4)
+	v.SetDefault("order_outbox.publish_batch", 200)
+	v.SetDefault("order_outbox.tick_interval_ms", 200)
+	v.SetDefault("order_outbox.buffer_batch_size", 50)
+	v.SetDefault("order_outbox.flush_interval_ms", 8)
+	v.SetDefault("order_outbox.max_buffer", 4000)
+	v.SetDefault("order_outbox.recover_interval_sec", 2)
 
 	v.SetDefault("delayed_order.timeout_minutes", 15)
 	v.SetDefault("delayed_order.lock_timeout_sec", 10)
+	v.SetDefault("rush_sale.campaign_cache_ttl_ms", 3000)
+
+	v.SetDefault("elasticsearch.enabled", false)
+	v.SetDefault("elasticsearch.index", "fuchang_events")
+	v.SetDefault("elasticsearch.search_engine", "auto")
+	v.SetDefault("elasticsearch.addresses", []string{"http://127.0.0.1:9200"})
+	v.SetDefault("elasticsearch.sync_interval_minutes", 15)
+	v.SetDefault("elasticsearch.sync_lock_timeout_sec", 300)
 }
 
 func (c *Config) Validate() error {
@@ -251,6 +371,47 @@ func (c *Config) Validate() error {
 	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port 必须在 1-65535 之间")
 	}
+	if c.Pprof.Enabled {
+		ip := net.ParseIP(c.Pprof.Host)
+		if c.Pprof.Host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return fmt.Errorf("pprof.host 必须是回环地址")
+		}
+		if c.Pprof.Port <= 0 || c.Pprof.Port > 65535 {
+			return fmt.Errorf("pprof.port 必须在 1-65535 之间")
+		}
+	}
+	if c.Telemetry.Enabled {
+		if strings.TrimSpace(c.Telemetry.ServiceName) == "" {
+			return fmt.Errorf("telemetry.service_name 不能为空")
+		}
+		if strings.TrimSpace(c.Telemetry.OTLPEndpoint) == "" {
+			return fmt.Errorf("telemetry.otlp_endpoint 不能为空")
+		}
+		if c.Telemetry.SampleRatio < 0 || c.Telemetry.SampleRatio > 1 {
+			return fmt.Errorf("telemetry.sample_ratio 必须在0到1之间")
+		}
+	}
+	if c.RateLimit.GlobalRate == 0 && c.RateLimit.GlobalBurst == 0 {
+		c.RateLimit.GlobalRate, c.RateLimit.GlobalBurst = 1000, 1200
+	}
+	if c.RateLimit.IPRate == 0 && c.RateLimit.IPBurst == 0 {
+		c.RateLimit.IPRate, c.RateLimit.IPBurst = 10, 20
+	}
+	if c.RateLimit.WriteRate == 0 && c.RateLimit.WriteBurst == 0 {
+		c.RateLimit.WriteRate, c.RateLimit.WriteBurst = 5, 10
+	}
+	if c.RateLimit.GlobalRate <= 0 || c.RateLimit.GlobalBurst <= 0 ||
+		c.RateLimit.IPRate <= 0 || c.RateLimit.IPBurst <= 0 ||
+		c.RateLimit.WriteRate <= 0 || c.RateLimit.WriteBurst <= 0 {
+		return fmt.Errorf("ratelimit 速率和 burst 必须大于0")
+	}
+	if c.RateLimit.DistributedWriteEnabled &&
+		(c.RateLimit.WriteWindowMS <= 0 || c.RateLimit.WriteMaxPerWindow <= 0) {
+		return fmt.Errorf("分布式写限流窗口和配额必须大于0")
+	}
+	if c.RushSale.CampaignCacheTTLMS < 0 {
+		return fmt.Errorf("rush_sale.campaign_cache_ttl_ms 必须大于等于0")
+	}
 	if c.OrderConsumer.WorkerCount == 0 {
 		c.OrderConsumer.WorkerCount = 4
 	}
@@ -269,5 +430,90 @@ func (c *Config) Validate() error {
 	if c.OrderConsumer.MaxRetries < 0 {
 		return fmt.Errorf("order_consumer.max_retries 必须大于等于0")
 	}
+	if c.OrderOutbox.PublishWorkers == 0 {
+		c.OrderOutbox.PublishWorkers = 4
+	}
+	if c.OrderOutbox.PublishBatch == 0 {
+		c.OrderOutbox.PublishBatch = 200
+	}
+	if c.OrderOutbox.TickIntervalMS == 0 {
+		c.OrderOutbox.TickIntervalMS = 200
+	}
+	if strings.TrimSpace(c.OrderOutbox.WriteMode) == "" {
+		c.OrderOutbox.WriteMode = "batch"
+	}
+	mode := strings.ToLower(strings.TrimSpace(c.OrderOutbox.WriteMode))
+	c.OrderOutbox.WriteMode = mode
+	if mode != "sync" && mode != "batch" {
+		return fmt.Errorf("order_outbox.write_mode 必须是 sync|batch")
+	}
+	if c.OrderOutbox.BufferBatchSize == 0 {
+		c.OrderOutbox.BufferBatchSize = 50
+	}
+	if c.OrderOutbox.FlushIntervalMS == 0 {
+		c.OrderOutbox.FlushIntervalMS = 8
+	}
+	if c.OrderOutbox.MaxBuffer == 0 {
+		c.OrderOutbox.MaxBuffer = 4000
+	}
+	if c.OrderOutbox.RecoverIntervalSec == 0 {
+		c.OrderOutbox.RecoverIntervalSec = 2
+	}
+	if c.OrderOutbox.PublishWorkers < 0 {
+		return fmt.Errorf("order_outbox.publish_workers 必须大于0")
+	}
+	if c.OrderOutbox.PublishBatch < 0 {
+		return fmt.Errorf("order_outbox.publish_batch 必须大于0")
+	}
+	if c.OrderOutbox.TickIntervalMS < 0 {
+		return fmt.Errorf("order_outbox.tick_interval_ms 必须大于0")
+	}
+	if c.OrderOutbox.BufferBatchSize < 0 {
+		return fmt.Errorf("order_outbox.buffer_batch_size 必须大于0")
+	}
+	if c.OrderOutbox.FlushIntervalMS < 0 {
+		return fmt.Errorf("order_outbox.flush_interval_ms 必须大于0")
+	}
+	if c.OrderOutbox.MaxBuffer < 0 {
+		return fmt.Errorf("order_outbox.max_buffer 必须大于0")
+	}
+	if c.OrderOutbox.MaxBuffer > 0 && c.OrderOutbox.BufferBatchSize > c.OrderOutbox.MaxBuffer {
+		return fmt.Errorf("order_outbox.buffer_batch_size 不能大于 max_buffer")
+	}
+	if c.OrderOutbox.RecoverIntervalSec < 0 {
+		return fmt.Errorf("order_outbox.recover_interval_sec 必须大于等于0")
+	}
+	engine := strings.ToLower(strings.TrimSpace(c.Elasticsearch.SearchEngine))
+	if engine == "" {
+		engine = "auto"
+		c.Elasticsearch.SearchEngine = engine
+	}
+	switch engine {
+	case "mysql", "elasticsearch", "auto":
+	default:
+		return fmt.Errorf("elasticsearch.search_engine 必须是 mysql|elasticsearch|auto")
+	}
+	if c.Elasticsearch.Index == "" {
+		c.Elasticsearch.Index = "fuchang_events"
+	}
+	if c.Elasticsearch.SyncIntervalMinutes < 0 {
+		return fmt.Errorf("elasticsearch.sync_interval_minutes 必须大于等于0")
+	}
+	if c.Elasticsearch.SyncLockTimeoutSec <= 0 {
+		c.Elasticsearch.SyncLockTimeoutSec = 300
+	}
 	return nil
+}
+
+// PreferElasticsearch 是否对关键词检索优先走 ES（失败可由调用方降级）。
+func (c ElasticsearchConfig) PreferElasticsearch() bool {
+	if !c.Enabled {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(c.SearchEngine)) {
+	case "elasticsearch", "auto":
+		return true
+	default:
+		return false
+	}
 }

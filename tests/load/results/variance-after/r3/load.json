@@ -1,0 +1,106 @@
+{
+  "scenario": "ticket_rush_spike",
+  "baseUrl": "http://127.0.0.1:18080/api/v1",
+  "duration_seconds": 60.04,
+  "concurrency": 10,
+  "think_ms": 20,
+  "total_requests": 13073,
+  "requests_per_second": 217.75,
+  "ok": 13071,
+  "failed": 2,
+  "failure_rate": 0.0002,
+  "latency_ms": {
+    "avg": 21.01,
+    "p50": 21.48,
+    "p90": 24.02,
+    "p95": 24.82,
+    "p99": 34.97,
+    "max": 100.96
+  },
+  "labels": {
+    "rush_execute": 13073
+  },
+  "label_latency_ms": {
+    "rush_execute": {
+      "count": 13073,
+      "avg": 21.01,
+      "p50": 21.48,
+      "p95": 24.82,
+      "p99": 34.97,
+      "max": 100.96
+    }
+  },
+  "statuses": {
+    "200": 60,
+    "400": 13011,
+    "500": 2
+  },
+  "outcomes": {
+    "success": 60,
+    "business_rejected": 13011,
+    "server_error": 2
+  },
+  "top_errors": {
+    "票务订单处理失败": 2
+  },
+  "setup": {
+    "scenario": "ticket_rush_setup",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 0.64,
+    "concurrency": 10,
+    "think_ms": 20,
+    "total_requests": 30,
+    "requests_per_second": 47.19,
+    "ok": 30,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 196.15,
+      "p50": 260.24,
+      "p90": 313.69,
+      "p95": 326.96,
+      "p99": 331.16,
+      "max": 331.16
+    },
+    "labels": {
+      "login_probe": 10,
+      "register": 10,
+      "login": 10
+    },
+    "label_latency_ms": {
+      "login_probe": {
+        "count": 10,
+        "avg": 28.04,
+        "p50": 26.67,
+        "p95": 39.39,
+        "p99": 39.39,
+        "max": 39.39
+      },
+      "register": {
+        "count": 10,
+        "avg": 259.81,
+        "p50": 260.24,
+        "p95": 267.07,
+        "p99": 267.07,
+        "max": 267.07
+      },
+      "login": {
+        "count": 10,
+        "avg": 300.61,
+        "p50": 284.36,
+        "p95": 331.16,
+        "p99": 331.16,
+        "max": 331.16
+      }
+    },
+    "statuses": {
+      "200": 20,
+      "401": 10
+    },
+    "outcomes": {
+      "business_rejected": 10,
+      "success": 20
+    },
+    "top_errors": {}
+  }
+}

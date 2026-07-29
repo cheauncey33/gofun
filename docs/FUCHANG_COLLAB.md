@@ -30,6 +30,7 @@
 | P1 | campaign DB 瞬时错误被标成不可重试 | 已修 | `ProcessOrderTask` 仅 `ErrRecordNotFound` 不可重试 |
 | P2 | 已发布活动仍可加票档且不预热 Redis | 已修 | `CreateTicketTier` 拒绝 published |
 | P2 | 支付超时从入队起算，排队吃掉窗口 | 已修 | 转入 `pending_payment` 时重写 `expires_at` |
+| P2b | 超时仅靠 DB 扫描，关单滞后 | 已修 | 延时队列主路径 + 扫描兜底 |
 | P2 | 归还票额强制 `on_sale`，复活已下架票档 | 已修 | `restoreTierQuota` 仅 sold_out→on_sale |
 | P2 | disabled 主办方仍可写操作/核销 | 已修 | catalog + verification 门禁查 organizer.status |
 | P2 | 异常 queued 明细恢复时 Redis 不归还 | 已修 | `RecoverQueuedOrders` 按明细回滚 |

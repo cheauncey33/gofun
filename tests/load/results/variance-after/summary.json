@@ -1,0 +1,122 @@
+{
+  "run_label": "variance-after",
+  "created_at": "2026-07-23T10:55:46.070Z",
+  "campaign_id": "11",
+  "concurrency": 10,
+  "duration_seconds": 60,
+  "runs": 3,
+  "rounds": [
+    {
+      "round": 1,
+      "qps": 217.21,
+      "avg": 21.01,
+      "p50": 21.5,
+      "p95": 24.74,
+      "p99": 29.56,
+      "total": 13034,
+      "outcomes": {
+        "success": 60,
+        "business_rejected": 12974
+      },
+      "statuses": {
+        "200": 60,
+        "400": 12974
+      }
+    },
+    {
+      "round": 2,
+      "qps": 217.75,
+      "avg": 21.09,
+      "p50": 21.57,
+      "p95": 24.75,
+      "p99": 28.08,
+      "total": 13066,
+      "outcomes": {
+        "success": 60,
+        "business_rejected": 13005,
+        "server_error": 1
+      },
+      "statuses": {
+        "200": 60,
+        "400": 13005,
+        "500": 1
+      }
+    },
+    {
+      "round": 3,
+      "qps": 217.75,
+      "avg": 21.01,
+      "p50": 21.48,
+      "p95": 24.82,
+      "p99": 34.97,
+      "total": 13073,
+      "outcomes": {
+        "success": 60,
+        "business_rejected": 13011,
+        "server_error": 2
+      },
+      "statuses": {
+        "200": 60,
+        "400": 13011,
+        "500": 2
+      }
+    }
+  ],
+  "aggregate": {
+    "qps": {
+      "values": [
+        217.21,
+        217.75,
+        217.75
+      ],
+      "min": 217.21,
+      "max": 217.75,
+      "median": 217.75,
+      "range": 0.54
+    },
+    "avg_ms": {
+      "values": [
+        21.01,
+        21.01,
+        21.09
+      ],
+      "min": 21.01,
+      "max": 21.09,
+      "median": 21.01,
+      "range": 0.08
+    },
+    "p50_ms": {
+      "values": [
+        21.48,
+        21.5,
+        21.57
+      ],
+      "min": 21.48,
+      "max": 21.57,
+      "median": 21.5,
+      "range": 0.09
+    },
+    "p95_ms": {
+      "values": [
+        24.74,
+        24.75,
+        24.82
+      ],
+      "min": 24.74,
+      "max": 24.82,
+      "median": 24.75,
+      "range": 0.08
+    },
+    "p99_ms": {
+      "values": [
+        28.08,
+        29.56,
+        34.97
+      ],
+      "min": 28.08,
+      "max": 34.97,
+      "median": 29.56,
+      "range": 6.89
+    }
+  }
+}

@@ -79,8 +79,7 @@ async function confirmRush() {
   }
   acting.value = sale.id
   try {
-    const tokenRes = await api.getRushSaleToken(sale.id)
-    const orderRes = await api.executeRushSale(sale.id, tokenRes.data.token, 1, {
+    const orderRes = await api.executeRushSale(sale.id, 1, {
       contact_name: form.contactName.trim(),
       contact_phone: form.contactPhone.trim(),
       terms_accepted: form.termsAccepted,
@@ -108,7 +107,7 @@ async function confirmRush() {
     <header>
       <p>RUSH SALE</p>
       <h1>限时开售</h1>
-      <span>先确认购票信息，再领取令牌并原子扣减票额。</span>
+      <span>到点直接抢：登录后一次提交，Redis Lua 原子扣减票额。</span>
     </header>
     <div v-if="loading" class="rush-state">正在同步开售信息…</div>
     <div v-else-if="!sales.length" class="rush-state">目前没有进行中的限时开售</div>

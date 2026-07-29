@@ -26,6 +26,7 @@ type TicketCatalogRepository interface {
 	FindEventByID(ctx context.Context, id int64) (*models.Event, error)
 	FindEventDetail(ctx context.Context, id int64) (*models.Event, error)
 	ListPublishedEvents(ctx context.Context, city string, categories []string, keyword string, page, pageSize int) ([]models.Event, int64, error)
+	ListPublishedEventsByIDs(ctx context.Context, ids []int64) ([]models.Event, error)
 	ListPublishedFacets(ctx context.Context) (cities []string, categories []string, err error)
 	ListEventsByOrganizer(ctx context.Context, organizerID int64, page, pageSize int) ([]models.Event, int64, error)
 
@@ -212,6 +213,45 @@ func (r *ticketCatalogRepo) ListPublishedEvents(
 		Limit(pageSize).Offset((page - 1) * pageSize).
 		Find(&events).Error
 	return events, total, err
+}
+
+func (r *ticketCatalogRepo) ListPublishedEventsByIDs(
+	ctx context.Context,
+	ids []int64,
+) ([]models.Event, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var events []models.Event
+	err := r.db.WithContext(ctx).
+		Where("id IN ? AND status = ?", ids, models.EventStatusPublished).
+		Preload("Organizer").
+		Preload("Sessions", func(db *gorm.DB) *gorm.DB {
+			return db.Where("status IN ?", []models.SessionStatus{
+				models.SessionStatusOnSale,
+				models.SessionStatusSoldOut,
+			}).Order("starts_at ASC")
+		}).
+		Preload("Sessions.Venue").
+		Preload("Sessions.TicketTiers", "status IN ?", []models.TicketTierStatus{
+			models.TicketTierStatusOnSale,
+			models.TicketTierStatusSoldOut,
+		}).
+		Find(&events).Error
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[int64]models.Event, len(events))
+	for _, event := range events {
+		byID[event.ID] = event
+	}
+	ordered := make([]models.Event, 0, len(ids))
+	for _, id := range ids {
+		if event, ok := byID[id]; ok {
+			ordered = append(ordered, event)
+		}
+	}
+	return ordered, nil
 }
 
 func (r *ticketCatalogRepo) ListPublishedFacets(

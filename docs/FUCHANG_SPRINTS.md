@@ -43,7 +43,7 @@
 - 启动时扫未投递记录
 
 ### B3 抢票限流 + 压测 + 指标
-- 对 `POST /rush-sales/:id/token|execute` 与 `POST /orders` 加更严 IP/用户限流配置
+- 对 `POST /rush-sales/:id/execute` 与 `POST /orders` 加更严 IP/用户限流配置
 - `tests/load/ticket_smoke.mjs` + `ticket_rush_spike.mjs`
 - metrics：ticket orders created/paid/failed、rush execute、compensation、outbox publish
 

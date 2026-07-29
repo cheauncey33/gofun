@@ -79,6 +79,12 @@ cors:
 	if len(cfg.Cors.AllowOrigins) != 1 {
 		t.Errorf("expected 1 allow origin, got %d", len(cfg.Cors.AllowOrigins))
 	}
+	if cfg.Pprof.Enabled || cfg.Pprof.Host != "127.0.0.1" || cfg.Pprof.Port != 6060 {
+		t.Errorf("unexpected pprof defaults: %#v", cfg.Pprof)
+	}
+	if !cfg.RateLimit.DistributedWriteEnabled || cfg.RateLimit.WriteMaxPerWindow != 10 {
+		t.Errorf("unexpected distributed rate limit defaults: %#v", cfg.RateLimit)
+	}
 }
 
 func TestLoad_MissingFile(t *testing.T) {
@@ -170,6 +176,21 @@ func TestValidate_InvalidPort(t *testing.T) {
 	}
 }
 
+func TestValidate_RejectsPublicPprofAddress(t *testing.T) {
+	cfg := &Config{
+		Server:   ServerConfig{Port: 8080},
+		MySQL:    MySQLConfig{DSN: "test"},
+		Redis:    RedisConfig{Addr: "localhost:6379"},
+		RabbitMQ: RabbitMQConfig{URL: "amqp://localhost"},
+		JWT:      JWTConfig{Secret: "test"},
+		TicketQR: TicketQRConfig{Secret: "test-ticket-qr-secret"},
+		Pprof:    PprofConfig{Enabled: true, Host: "0.0.0.0", Port: 6060},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected public pprof address to be rejected")
+	}
+}
+
 func TestValidate_ValidConfig(t *testing.T) {
 	cfg := &Config{
 		Server:   ServerConfig{Port: 8080},
@@ -181,6 +202,25 @@ func TestValidate_ValidConfig(t *testing.T) {
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
+func TestElasticsearchPreferModes(t *testing.T) {
+	cases := []struct {
+		enabled bool
+		engine  string
+		want    bool
+	}{
+		{false, "auto", false},
+		{true, "mysql", false},
+		{true, "auto", true},
+		{true, "elasticsearch", true},
+	}
+	for _, tc := range cases {
+		cfg := ElasticsearchConfig{Enabled: tc.enabled, SearchEngine: tc.engine}
+		if got := cfg.PreferElasticsearch(); got != tc.want {
+			t.Fatalf("enabled=%v engine=%s prefer=%v want=%v", tc.enabled, tc.engine, got, tc.want)
+		}
 	}
 }
 

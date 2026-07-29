@@ -5,8 +5,8 @@ server:
 
 mysql:
   dsn: "fuchang:fuchang-it-mysql@tcp(127.0.0.1:13306)/fuchang_ticketing_it?charset=utf8mb4&parseTime=True&loc=Local"
-  max_idle_conns: 5
-  max_open_conns: 20
+  max_idle_conns: 20
+  max_open_conns: 80
   conn_max_lifetime: 300
 
 redis:
@@ -40,20 +40,60 @@ log:
   max_backups: 1
   max_age: 1
 
+pprof:
+  enabled: true
+  host: "127.0.0.1"
+  port: 16060
+
+telemetry:
+  enabled: true
+  service_name: "fuchang-ticketing-it"
+  otlp_endpoint: "127.0.0.1:4317"
+  insecure: true
+  sample_ratio: 0.01
+
 ratelimit:
   global_rate: 1000
   global_burst: 1200
   ip_rate: 100
   ip_burst: 120
+  distributed_write_enabled: true
+  write_window_ms: 1000
+  write_max_per_window: 100000
+  write_fail_open: false
+  write_rate: 100000
+  write_burst: 100000
 
 order_consumer:
   worker_count: 2
   prefetch_count: 2
   max_retries: 2
 
+order_outbox:
+  write_mode: batch
+  publish_workers: 4
+  publish_batch: 200
+  tick_interval_ms: 200
+  buffer_batch_size: 50
+  flush_interval_ms: 8
+  max_buffer: 4000
+  recover_interval_sec: 2
+
+rush_sale:
+  campaign_cache_ttl_ms: 3000
+
 delayed_order:
   timeout_minutes: 1
   lock_timeout_sec: 5
+
+elasticsearch:
+  enabled: true
+  addresses:
+    - "http://127.0.0.1:19201"
+  index: "fuchang_events"
+  search_engine: "auto"
+  sync_interval_minutes: 1
+  sync_lock_timeout_sec: 60
 
 cors:
   allow_origins:

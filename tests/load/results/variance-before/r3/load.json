@@ -1,0 +1,102 @@
+{
+  "scenario": "ticket_rush_spike",
+  "baseUrl": "http://127.0.0.1:18080/api/v1",
+  "duration_seconds": 60.04,
+  "concurrency": 10,
+  "think_ms": 20,
+  "total_requests": 13147,
+  "requests_per_second": 218.99,
+  "ok": 13147,
+  "failed": 0,
+  "failure_rate": 0,
+  "latency_ms": {
+    "avg": 21.69,
+    "p50": 22.46,
+    "p90": 25.14,
+    "p95": 25.81,
+    "p99": 28.31,
+    "max": 91.34
+  },
+  "labels": {
+    "rush_execute": 13147
+  },
+  "label_latency_ms": {
+    "rush_execute": {
+      "count": 13147,
+      "avg": 21.69,
+      "p50": 22.46,
+      "p95": 25.81,
+      "p99": 28.31,
+      "max": 91.34
+    }
+  },
+  "statuses": {
+    "200": 60,
+    "400": 13087
+  },
+  "outcomes": {
+    "success": 60,
+    "business_rejected": 13087
+  },
+  "top_errors": {},
+  "setup": {
+    "scenario": "ticket_rush_setup",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 0.6,
+    "concurrency": 10,
+    "think_ms": 20,
+    "total_requests": 30,
+    "requests_per_second": 50.2,
+    "ok": 30,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 185.04,
+      "p50": 257.75,
+      "p90": 271.3,
+      "p95": 293.65,
+      "p99": 294.26,
+      "max": 294.26
+    },
+    "labels": {
+      "login_probe": 10,
+      "register": 10,
+      "login": 10
+    },
+    "label_latency_ms": {
+      "login_probe": {
+        "count": 10,
+        "avg": 24.71,
+        "p50": 22.99,
+        "p95": 37.59,
+        "p99": 37.59,
+        "max": 37.59
+      },
+      "register": {
+        "count": 10,
+        "avg": 259.82,
+        "p50": 258.73,
+        "p95": 265.12,
+        "p99": 265.12,
+        "max": 265.12
+      },
+      "login": {
+        "count": 10,
+        "avg": 270.58,
+        "p50": 269.32,
+        "p95": 294.26,
+        "p99": 294.26,
+        "max": 294.26
+      }
+    },
+    "statuses": {
+      "200": 20,
+      "401": 10
+    },
+    "outcomes": {
+      "business_rejected": 10,
+      "success": 20
+    },
+    "top_errors": {}
+  }
+}

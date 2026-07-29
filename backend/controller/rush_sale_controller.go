@@ -49,23 +49,6 @@ func (ctrl *RushSaleController) CreateCampaign(c *gin.Context) {
 	response.Success(c, campaign)
 }
 
-func (ctrl *RushSaleController) IssueToken(c *gin.Context) {
-	userID, ok := ticketUserID(c)
-	if !ok {
-		return
-	}
-	campaignID, ok := parseTicketID(c, "id")
-	if !ok {
-		return
-	}
-	token, err := ctrl.service.IssueToken(c.Request.Context(), userID, campaignID)
-	if err != nil {
-		writeTicketOrderError(c, err)
-		return
-	}
-	response.Success(c, gin.H{"token": token, "expires_in": 60})
-}
-
 func (ctrl *RushSaleController) Execute(c *gin.Context) {
 	userID, ok := ticketUserID(c)
 	if !ok {
@@ -81,8 +64,7 @@ func (ctrl *RushSaleController) Execute(c *gin.Context) {
 		return
 	}
 	var input struct {
-		Token    string `json:"token" binding:"required"`
-		Quantity int    `json:"quantity" binding:"required"`
+		Quantity int `json:"quantity" binding:"required"`
 		service.PurchaseInfoInput
 	}
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -94,7 +76,6 @@ func (ctrl *RushSaleController) Execute(c *gin.Context) {
 		c.Request.Context(),
 		userID,
 		campaignID,
-		input.Token,
 		idempotencyKey,
 		stringifyRequestID(requestID),
 		input.Quantity,

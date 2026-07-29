@@ -9,11 +9,43 @@ import (
 	"github.com/bwmarrin/snowflake"
 )
 
-func TestTicketStockKeyUsesFuchangNamespace(t *testing.T) {
-	if got, want := ticketStockKey(42), "fuchang:ticket:stock:42"; got != want {
-		t.Fatalf("ticket stock key = %q, want %q", got, want)
+func TestNotifyOutboxPublisherCoalesces(t *testing.T) {
+	s := &TicketOrderService{outboxNotify: make(chan struct{}, 1)}
+	s.notifyOutboxPublisher()
+	s.notifyOutboxPublisher()
+	s.notifyOutboxPublisher()
+	if len(s.outboxNotify) != 1 {
+		t.Fatalf("expected coalesced notify depth 1, got %d", len(s.outboxNotify))
+	}
+	select {
+	case <-s.outboxNotify:
+	default:
+		t.Fatal("expected one pending notify")
+	}
+	if len(s.outboxNotify) != 0 {
+		t.Fatalf("notify channel should be empty after receive, got %d", len(s.outboxNotify))
 	}
 }
+
+func TestNotifyOutboxPublisherNilSafe(t *testing.T) {
+	s := &TicketOrderService{}
+	s.notifyOutboxPublisher() // must not panic
+}
+
+func TestOutboxWriteBufferTakeRespectsLimit(t *testing.T) {
+	b := &outboxWriteBuffer{
+		items: []outboxDraft{
+			{OrderID: 1}, {OrderID: 2}, {OrderID: 3},
+		},
+		batchSize: 2,
+		maxBuffer: 10,
+	}
+	got := b.takeLocked(2)
+	if len(got) != 2 || got[0].OrderID != 1 || len(b.items) != 1 || b.items[0].OrderID != 3 {
+		t.Fatalf("unexpected take result: got=%v remain=%v", got, b.items)
+	}
+}
+
 
 func TestTicketOrderReceiptKeepsQueuedState(t *testing.T) {
 	order := &models.TicketOrder{

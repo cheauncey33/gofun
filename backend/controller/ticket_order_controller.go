@@ -4,6 +4,7 @@ import (
 	"WHU_Snack_GO/pkg/response"
 	"WHU_Snack_GO/service"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -137,6 +138,7 @@ func writeTicketOrderError(c *gin.Context, err error) {
 		errors.Is(err, service.ErrInvalidTicketCatalog):
 		response.Error(c, http.StatusBadRequest, response.CodeInvalidOrderStatus, err.Error())
 	default:
+		log.Printf("ticket order request failed: %v", err)
 		response.Error(c, http.StatusInternalServerError, response.CodeOrderCreateFailed, "票务订单处理失败")
 	}
 }

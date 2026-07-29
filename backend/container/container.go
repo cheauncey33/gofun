@@ -2,6 +2,8 @@ package container
 
 import (
 	"WHU_Snack_GO/repository"
+	"WHU_Snack_GO/search"
+	"context"
 	"sync"
 
 	"github.com/bwmarrin/snowflake"
@@ -21,17 +23,20 @@ type Container struct {
 	MQDLXName        string
 	MQDLQName        string
 	SnowflakeNode    *snowflake.Node
-	JWTSecret         []byte
-	TicketQRSecret    []byte
-	TicketQRSecrets   [][]byte
-	LocalCache        *gocache.Cache
+	JWTSecret        []byte
+	TicketQRSecret   []byte
+	TicketQRSecrets  [][]byte
+	LocalCache       *gocache.Cache
+	EventSearcher    search.EventSearcher
+	SearchPreferES   bool
 
 	ProductRepo       repository.ProductRepository
 	OrderRepo         repository.OrderRepository
 	CategoryRepo      repository.CategoryRepository
 	TicketCatalogRepo repository.TicketCatalogRepository
 
-	publishMu         sync.Mutex
-	PublishPersistent func(body []byte) error
-	NewMQChannel      func() (*amqp.Channel, error)
+	publishMu                    sync.Mutex
+	PublishPersistent            func(body []byte) error
+	PublishPersistentWithHeaders func(ctx context.Context, body []byte, headers amqp.Table) error
+	NewMQChannel                 func() (*amqp.Channel, error)
 }

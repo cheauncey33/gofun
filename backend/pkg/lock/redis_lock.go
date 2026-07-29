@@ -2,12 +2,15 @@ package lock
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
+
+var ErrAlreadyHeld = errors.New("lock is held by another process")
 
 type Lock struct {
 	client *redis.Client
@@ -23,7 +26,7 @@ func Acquire(ctx context.Context, client *redis.Client, key string, ttl time.Dur
 		return nil, fmt.Errorf("lock acquire failed: %w", err)
 	}
 	if !ok {
-		return nil, fmt.Errorf("lock %s is held by another process", key)
+		return nil, fmt.Errorf("%w: %s", ErrAlreadyHeld, key)
 	}
 	return &Lock{client: client, key: key, value: value, ttl: ttl}, nil
 }

@@ -1,5 +1,5 @@
 /**
- * 抢票幂等回归：同幂等键 + 换新 token 连续/并发 Execute，
+ * 抢票幂等回归：同幂等键连续/并发 Execute，
  * 应只产生一笔订单，且不应永久多扣 Redis 票额。
  *
  * 用法（fuchang-it 已启动）:
@@ -47,21 +47,11 @@ async function ensureUser() {
   return token;
 }
 
-async function issueToken(token) {
-  const res = await http("POST", `/rush-sales/${campaignID}/token`, { token });
-  const rushToken = res.data?.data?.token;
-  if (!rushToken) {
-    throw new Error(`token failed: ${JSON.stringify(res.data)}`);
-  }
-  return rushToken;
-}
-
-async function execute(token, rushToken, idempotencyKey) {
+async function execute(token, idempotencyKey) {
   return http("POST", `/rush-sales/${campaignID}/execute`, {
     token,
     headers: { "X-Idempotency-Key": idempotencyKey },
     body: {
-      token: rushToken,
       quantity: 1,
       contact_name: "幂等测试",
       contact_phone: "13800138000",
@@ -74,18 +64,15 @@ async function execute(token, rushToken, idempotencyKey) {
 const auth = await ensureUser();
 const idempotencyKey = randomUUID();
 
-const tokenA = await issueToken(auth);
-const first = await execute(auth, tokenA, idempotencyKey);
+const first = await execute(auth, idempotencyKey);
 if (first.status !== 200 || !first.data?.data?.order_id) {
   throw new Error(`first execute failed: ${JSON.stringify(first)}`);
 }
 const orderID = String(first.data.data.order_id);
 
-const tokenB = await issueToken(auth);
-const tokenC = await issueToken(auth);
 const [second, third] = await Promise.all([
-  execute(auth, tokenB, idempotencyKey),
-  execute(auth, tokenC, idempotencyKey),
+  execute(auth, idempotencyKey),
+  execute(auth, idempotencyKey),
 ]);
 
 const ids = [second, third]

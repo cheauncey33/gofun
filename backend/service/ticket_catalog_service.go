@@ -4,9 +4,11 @@ import (
 	"WHU_Snack_GO/container"
 	"WHU_Snack_GO/models"
 	"WHU_Snack_GO/repository"
+	"WHU_Snack_GO/search"
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -20,6 +22,7 @@ var (
 	ErrOrganizerForbidden     = errors.New("无权管理该主办方")
 	ErrInvalidTicketCatalog   = errors.New("票务目录参数不合法")
 	ErrOrganizerUnavailable   = errors.New("主办方尚未通过审核或已停用")
+	errESProjectionIncomplete = errors.New("ES 活动投影不完整")
 )
 
 var organizerSlugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`)
@@ -127,13 +130,25 @@ type OrganizerOverview struct {
 }
 
 type TicketCatalogService struct {
-	repo repository.TicketCatalogRepository
-	db   *gorm.DB
-	rdb  *redis.Client
+	repo     repository.TicketCatalogRepository
+	db       *gorm.DB
+	rdb      *redis.Client
+	searcher search.EventSearcher
+	preferES bool
 }
 
 func NewTicketCatalogService(c *container.Container) *TicketCatalogService {
-	return &TicketCatalogService{repo: c.TicketCatalogRepo, db: c.DB, rdb: c.RDB}
+	searcher := c.EventSearcher
+	if searcher == nil {
+		searcher = search.NoopEventSearcher{}
+	}
+	return &TicketCatalogService{
+		repo:     c.TicketCatalogRepo,
+		db:       c.DB,
+		rdb:      c.RDB,
+		searcher: searcher,
+		preferES: c.SearchPreferES && searcher.Enabled(),
+	}
 }
 
 func (s *TicketCatalogService) CreateOrganizer(
@@ -360,6 +375,7 @@ func (s *TicketCatalogService) PublishEvent(
 	if err := s.repo.SaveEvent(ctx, event); err != nil {
 		return nil, err
 	}
+	s.upsertEventSearchIndex(ctx, event)
 	return event, nil
 }
 
@@ -411,6 +427,7 @@ func (s *TicketCatalogService) CancelEvent(
 	if err := s.repo.SaveEvent(ctx, event); err != nil {
 		return nil, err
 	}
+	s.removeEventSearchIndex(ctx, event.ID)
 	return event, nil
 }
 
@@ -456,6 +473,7 @@ func (s *TicketCatalogService) UnpublishEvent(
 	if err := s.repo.SaveEvent(ctx, event); err != nil {
 		return nil, err
 	}
+	s.removeEventSearchIndex(ctx, event.ID)
 	return event, nil
 }
 
@@ -590,9 +608,178 @@ func (s *TicketCatalogService) ListPublishedEvents(
 	query TicketCatalogListQuery,
 ) ([]models.Event, int64, error) {
 	query.Normalize()
+	if query.Keyword != "" && s.preferES {
+		events, total, err := s.listPublishedViaES(ctx, query)
+		if err == nil {
+			return events, total, nil
+		}
+		log.Printf("[catalog] ES 检索不可用或结果不完整，降级 MySQL LIKE: %v", err)
+	}
 	return s.repo.ListPublishedEvents(
 		ctx, query.City, query.Categories(), query.Keyword, query.Page, query.PageSize,
 	)
+}
+
+func (s *TicketCatalogService) listPublishedViaES(
+	ctx context.Context,
+	query TicketCatalogListQuery,
+) ([]models.Event, int64, error) {
+	ids, total, err := s.searcher.Search(ctx, search.Query{
+		Keyword:    query.Keyword,
+		City:       query.City,
+		Categories: query.Categories(),
+		Page:       query.Page,
+		PageSize:   query.PageSize,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(ids) == 0 {
+		return nil, 0, fmt.Errorf("%w: ES 未返回当前页 ID（total=%d）", errESProjectionIncomplete, total)
+	}
+	events, err := s.repo.ListPublishedEventsByIDs(ctx, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(events) != len(ids) {
+		return nil, 0, fmt.Errorf(
+			"%w: ES 返回 %d 个 ID，MySQL 仅确认 %d 个已发布活动",
+			errESProjectionIncomplete, len(ids), len(events),
+		)
+	}
+	return events, total, nil
+}
+
+// ReindexPublishedEvents 启动时全量重建 ES 投影（best-effort）。
+func (s *TicketCatalogService) ReindexPublishedEvents(ctx context.Context) (err error) {
+	if !s.searcher.Enabled() {
+		return nil
+	}
+	defer func() {
+		if err != nil {
+			// ResetIndex 后若只写入部分文档，继续使用 ES 会产生无法检测的漏检。
+			s.preferES = false
+		}
+	}()
+	if err := s.searcher.ResetIndex(ctx); err != nil {
+		return err
+	}
+	_, err = s.SyncPublishedEvents(ctx)
+	return err
+}
+
+type EventSearchSyncResult struct {
+	Indexed int
+	Missing int
+	Deleted int
+}
+
+// SyncPublishedEvents 以 MySQL 为准修复 ES 投影，并清理已取消、下架或删除的孤儿文档。
+func (s *TicketCatalogService) SyncPublishedEvents(ctx context.Context) (EventSearchSyncResult, error) {
+	var result EventSearchSyncResult
+	if !s.searcher.Enabled() {
+		return result, nil
+	}
+	indexedIDs, err := s.searcher.ListEventIDs(ctx)
+	if err != nil {
+		return result, err
+	}
+	existingIDs := make(map[int64]struct{}, len(indexedIDs))
+	for _, eventID := range indexedIDs {
+		existingIDs[eventID] = struct{}{}
+	}
+	publishedIDs := make(map[int64]struct{})
+	const pageSize = 50
+	page := 1
+	for {
+		events, total, err := s.repo.ListPublishedEvents(ctx, "", nil, "", page, pageSize)
+		if err != nil {
+			return result, err
+		}
+		for i := range events {
+			if err := s.indexEventSearchIndex(ctx, &events[i], false); err != nil {
+				return result, fmt.Errorf("同步 ES 活动 %d: %w", events[i].ID, err)
+			}
+			publishedIDs[events[i].ID] = struct{}{}
+			result.Indexed++
+			if _, ok := existingIDs[events[i].ID]; !ok {
+				result.Missing++
+			}
+		}
+		if int64(page*pageSize) >= total || len(events) == 0 {
+			break
+		}
+		page++
+	}
+
+	for _, eventID := range indexedIDs {
+		if _, ok := publishedIDs[eventID]; ok {
+			continue
+		}
+		event, findErr := s.repo.FindEventByID(ctx, eventID)
+		if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
+			return result, findErr
+		}
+		if findErr == nil && event.Status == models.EventStatusPublished {
+			// 活动可能在分页扫描后刚发布，不能误删。
+			continue
+		}
+		if err := s.searcher.DeleteEvent(ctx, eventID, false); err != nil {
+			return result, fmt.Errorf("清理 ES 孤儿活动 %d: %w", eventID, err)
+		}
+		result.Deleted++
+	}
+	if result.Indexed == 0 && result.Deleted == 0 {
+		return result, nil
+	}
+	if err := s.searcher.RefreshIndex(ctx); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (s *TicketCatalogService) upsertEventSearchIndex(ctx context.Context, event *models.Event) {
+	if !s.searcher.Enabled() || event == nil {
+		return
+	}
+	if err := s.indexEventSearchIndex(ctx, event, true); err != nil {
+		log.Printf("[catalog] ES 索引活动 %d 失败: %v", event.ID, err)
+	}
+}
+
+func (s *TicketCatalogService) indexEventSearchIndex(
+	ctx context.Context,
+	event *models.Event,
+	refresh bool,
+) error {
+	cities := make([]string, 0)
+	venues := make([]string, 0)
+	seenCity := map[string]struct{}{}
+	for _, session := range event.Sessions {
+		if session.Venue.City != "" {
+			if _, ok := seenCity[session.Venue.City]; !ok {
+				seenCity[session.Venue.City] = struct{}{}
+				cities = append(cities, session.Venue.City)
+			}
+		}
+		if session.Venue.Name != "" {
+			venues = append(venues, session.Venue.Name)
+		}
+	}
+	doc := search.BuildEventDoc(
+		event.ID, event.Title, event.Subtitle, event.Category, string(event.Status),
+		event.PublishedAt, cities, venues,
+	)
+	return s.searcher.IndexEvent(ctx, doc, refresh)
+}
+
+func (s *TicketCatalogService) removeEventSearchIndex(ctx context.Context, eventID int64) {
+	if !s.searcher.Enabled() {
+		return
+	}
+	if err := s.searcher.DeleteEvent(ctx, eventID, true); err != nil {
+		log.Printf("[catalog] ES 删除活动 %d 失败: %v", eventID, err)
+	}
 }
 
 type CatalogMeta struct {

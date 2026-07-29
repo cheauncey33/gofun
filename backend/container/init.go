@@ -6,6 +6,7 @@ import (
 	"WHU_Snack_GO/migrations"
 	"WHU_Snack_GO/models"
 	"WHU_Snack_GO/repository"
+	"WHU_Snack_GO/search"
 	"context"
 	"fmt"
 	"log"
@@ -16,20 +17,22 @@ import (
 	"github.com/bwmarrin/snowflake"
 	gocache "github.com/patrickmn/go-cache"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
+	otelgorm "gorm.io/plugin/opentelemetry/tracing"
 )
 
 func NewContainer(cfg *config.Config) (*Container, error) {
-	db, err := initDB(cfg.MySQL)
+	db, err := initDB(cfg.MySQL, cfg.Telemetry.Enabled)
 	if err != nil {
 		return nil, fmt.Errorf("init db: %w", err)
 	}
 
-	rdb, err := initRedis(cfg.Redis)
+	rdb, err := initRedis(cfg.Redis, cfg.Telemetry.Enabled)
 	if err != nil {
 		return nil, fmt.Errorf("init redis: %w", err)
 	}
@@ -45,6 +48,7 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	}
 
 	lc := initLocalCache()
+	eventSearcher, preferES := initEventSearcher(cfg.Elasticsearch)
 
 	c := &Container{
 		DB:                db,
@@ -60,6 +64,8 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 		TicketQRSecret:    []byte(cfg.TicketQR.Secret),
 		TicketQRSecrets:   ticketQRSecrets(cfg),
 		LocalCache:        lc,
+		EventSearcher:     eventSearcher,
+		SearchPreferES:    preferES,
 		ProductRepo:       repository.NewProductRepository(db),
 		OrderRepo:         repository.NewOrderRepository(db),
 		CategoryRepo:      repository.NewCategoryRepository(db),
@@ -67,7 +73,10 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	}
 
 	// 闭包捕获 container 状态
-	c.PublishPersistent = c.publishPersistent
+	c.PublishPersistent = func(body []byte) error {
+		return c.publishPersistent(context.Background(), body, nil)
+	}
+	c.PublishPersistentWithHeaders = c.publishPersistent
 	c.NewMQChannel = c.newMQChannel
 
 	// 兼容旧代码: 设置 common 全局变量
@@ -86,7 +95,7 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	return c, nil
 }
 
-func initDB(cfg config.MySQLConfig) (*gorm.DB, error) {
+func initDB(cfg config.MySQLConfig, tracingEnabled bool) (*gorm.DB, error) {
 	db, err := gorm.Open(mysql.Open(cfg.DSN), &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{
 			SingularTable: true,
@@ -94,6 +103,11 @@ func initDB(cfg config.MySQLConfig) (*gorm.DB, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	if tracingEnabled {
+		if err := db.Use(otelgorm.NewPlugin()); err != nil {
+			return nil, fmt.Errorf("启用 GORM tracing: %w", err)
+		}
 	}
 
 	sqlDB, err := db.DB()
@@ -159,13 +173,18 @@ func ticketingSchemaModels() []interface{} {
 	}
 }
 
-func initRedis(cfg config.RedisConfig) (*redis.Client, error) {
+func initRedis(cfg config.RedisConfig, tracingEnabled bool) (*redis.Client, error) {
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     cfg.Addr,
 		Password: cfg.Password,
 		DB:       cfg.DB,
 		PoolSize: cfg.PoolSize,
 	})
+	if tracingEnabled {
+		if err := redisotel.InstrumentTracing(rdb); err != nil {
+			return nil, fmt.Errorf("启用 Redis tracing: %w", err)
+		}
+	}
 	ctx := context.Background()
 	pong, err := rdb.Ping(ctx).Result()
 	if err != nil {
@@ -207,14 +226,38 @@ func initLocalCache() *gocache.Cache {
 	return gocache.New(30*time.Second, 1*time.Minute)
 }
 
-func (c *Container) publishPersistent(body []byte) error {
+func initEventSearcher(cfg config.ElasticsearchConfig) (search.EventSearcher, bool) {
+	prefer := cfg.PreferElasticsearch()
+	if !cfg.Enabled {
+		log.Println("Elasticsearch 未启用，活动关键词检索走 MySQL LIKE")
+		return search.NoopEventSearcher{}, false
+	}
+	addrs := cfg.Addresses
+	if len(addrs) == 0 {
+		addrs = []string{"http://127.0.0.1:9200"}
+	}
+	es, err := search.NewESEventSearcher(addrs, cfg.Username, cfg.Password, cfg.Index)
+	if err != nil {
+		log.Printf("Elasticsearch 客户端初始化失败，降级 MySQL LIKE: %v", err)
+		return search.NoopEventSearcher{}, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := es.EnsureIndex(ctx); err != nil {
+		log.Printf("Elasticsearch EnsureIndex 失败，降级 MySQL LIKE: %v", err)
+		return search.NoopEventSearcher{}, false
+	}
+	log.Printf("Elasticsearch 已启用 index=%s prefer=%v", cfg.Index, prefer)
+	return es, prefer
+}
+
+func (c *Container) publishPersistent(ctx context.Context, body []byte, headers amqp.Table) error {
 	if c.MQChannel == nil {
 		return fmt.Errorf("rabbitMQ publish channel is not initialized")
 	}
 	c.publishMu.Lock()
 	defer c.publishMu.Unlock()
 
-	ctx := context.Background()
 	confirm, err := c.MQChannel.PublishWithDeferredConfirmWithContext(
 		ctx,
 		"",
@@ -225,6 +268,7 @@ func (c *Container) publishPersistent(body []byte) error {
 			ContentType:  "application/json",
 			Body:         body,
 			DeliveryMode: amqp.Persistent,
+			Headers:      headers,
 		},
 	)
 	if err != nil {

@@ -32,6 +32,17 @@ services:
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/whu_snack_overview.json
     restart: unless-stopped
 
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: whu_jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    restart: unless-stopped
+
 volumes:
   prometheus_data:
   grafana_data:

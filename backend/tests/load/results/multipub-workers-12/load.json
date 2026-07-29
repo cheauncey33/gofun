@@ -1,0 +1,166 @@
+{
+  "scenario": "ticket_rush_success_path",
+  "run_label": "multipub-workers-12",
+  "created_at": "2026-07-24T17:04:10.587Z",
+  "campaign_id": "19",
+  "prepared_users": 500,
+  "execute_seconds": 4.75,
+  "drain_seconds": 9.74,
+  "consume_qps": 51.33,
+  "worker_hint": "12",
+  "success_orders": 500,
+  "success_qps": 105.33,
+  "status_after_poll": {
+    "pending_payment": 500
+  },
+  "pending_or_paid": 500,
+  "still_queued": 0,
+  "execute": {
+    "scenario": "success_path_execute",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 221.65,
+    "concurrency": 50,
+    "think_ms": 0,
+    "total_requests": 500,
+    "requests_per_second": 2.26,
+    "ok": 500,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 245.2,
+      "p50": 235.82,
+      "p90": 353.99,
+      "p95": 396.7,
+      "p99": 458.52,
+      "max": 481.05
+    },
+    "labels": {
+      "rush_execute": 500
+    },
+    "label_latency_ms": {
+      "rush_execute": {
+        "count": 500,
+        "avg": 245.2,
+        "p50": 235.82,
+        "p95": 396.7,
+        "p99": 458.52,
+        "max": 481.05
+      }
+    },
+    "statuses": {
+      "200": 500
+    },
+    "outcomes": {
+      "success": 500
+    },
+    "top_errors": {}
+  },
+  "setup": {
+    "scenario": "success_path_setup",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 221.65,
+    "concurrency": 50,
+    "think_ms": 0,
+    "total_requests": 1500,
+    "requests_per_second": 6.77,
+    "ok": 1500,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 138.09,
+      "p50": 196.11,
+      "p90": 214.12,
+      "p95": 224.8,
+      "p99": 254.3,
+      "max": 556.27
+    },
+    "labels": {
+      "login_probe": 500,
+      "register": 500,
+      "login": 500
+    },
+    "label_latency_ms": {
+      "login_probe": {
+        "count": 500,
+        "avg": 3.65,
+        "p50": 3.32,
+        "p95": 5.63,
+        "p99": 7.02,
+        "max": 33.48
+      },
+      "register": {
+        "count": 500,
+        "avg": 203.41,
+        "p50": 199.05,
+        "p95": 232,
+        "p99": 263,
+        "max": 327.41
+      },
+      "login": {
+        "count": 500,
+        "avg": 207.19,
+        "p50": 203.09,
+        "p95": 231.01,
+        "p99": 256.15,
+        "max": 556.27
+      }
+    },
+    "statuses": {
+      "200": 1000,
+      "401": 500
+    },
+    "outcomes": {
+      "business_rejected": 500,
+      "success": 1000
+    },
+    "top_errors": {}
+  },
+  "poll": {
+    "scenario": "success_path_poll",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 221.65,
+    "concurrency": 50,
+    "think_ms": 0,
+    "total_requests": 1328,
+    "requests_per_second": 5.99,
+    "ok": 1328,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 62.56,
+      "p50": 41.12,
+      "p90": 133.83,
+      "p95": 194,
+      "p99": 311.2,
+      "max": 342.89
+    },
+    "labels": {
+      "order_poll": 1328
+    },
+    "label_latency_ms": {
+      "order_poll": {
+        "count": 1328,
+        "avg": 62.56,
+        "p50": 41.12,
+        "p95": 194,
+        "p99": 311.2,
+        "max": 342.89
+      }
+    },
+    "statuses": {
+      "200": 1328
+    },
+    "outcomes": {
+      "success": 1328
+    },
+    "top_errors": {}
+  },
+  "mq_metrics": {
+    "published_before": 0,
+    "published_after": 500,
+    "consumed_success_before": null,
+    "consumed_success_after": 500,
+    "published_delta": 500,
+    "consumed_success_delta": 500
+  }
+}

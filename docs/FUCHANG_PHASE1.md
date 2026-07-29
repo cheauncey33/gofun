@@ -47,8 +47,8 @@ POST /api/v1/orders
 ### 限时开售
 
 ```text
-领取 60 秒一次性令牌
--> Lua 同时检查令牌、活动票额、票档票额、个人限购
+到点一次 POST /rush-sales/:id/execute
+-> Lua 同时检查活动票额、票档票额、个人限购
 -> 创建 rush_sale 来源的 queued 订单
 -> 复用普通订单消费者
 ```
@@ -81,7 +81,6 @@ paid 取消 -> 退款余额并归还票额
 - `GET /api/v1/orders/:id`
 - `POST /api/v1/orders/:id/pay`
 - `POST /api/v1/orders/:id/cancel`
-- `POST /api/v1/rush-sales/:id/token`
 - `POST /api/v1/rush-sales/:id/execute`
 
 主办方成员：
@@ -104,7 +103,7 @@ paid 取消 -> 退款余额并归还票额
 - 旧零食代码暂时保留但不注册运行路由，便于逐步核对与回滚；验证稳定后再删除。
 - 当前 queued 恢复属于轻量恢复策略，不是完整事务 Outbox。若要追求更强的消息投递证明，
   下一阶段应增加 outbox 表、投递状态和独立转发器。
-- 超时取消当前使用数据库扫描，保留 RabbitMQ 给下单削峰。若规模扩大，再评估延迟队列。
+- 支付超时：进入 `pending_payment` 后投递 RabbitMQ 延时消息（消息级 TTL + DLX），到期条件取消；DB 扫描器作兜底。
 - 前端管理台尚未实现；第一阶段先验证用户购票主链路和管理 API。
 
 ## 7. 验证与回滚
@@ -123,7 +122,7 @@ npm.cmd run build
 创建主办方 -> 创建场馆/活动/场次/票档 -> 发布
 -> 普通购票 -> queued -> pending_payment -> 支付
 -> 超时取消并核对 MySQL/Redis 票额
--> 限时开售个人限购和重复令牌
+-> 限时开售个人限购与幂等键
 -> 重启后 queued 重投且不重复扣减
 ```
 

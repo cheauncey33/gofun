@@ -1,0 +1,128 @@
+{
+  "scenario": "ticket_rush_spike",
+  "baseUrl": "http://127.0.0.1:18080/api/v1",
+  "duration_seconds": 60.04,
+  "concurrency": 10,
+  "think_ms": 20,
+  "total_requests": 5317,
+  "requests_per_second": 88.56,
+  "ok": 5316,
+  "failed": 1,
+  "failure_rate": 0.0002,
+  "latency_ms": {
+    "avg": 19.56,
+    "p50": 20.7,
+    "p90": 21.74,
+    "p95": 22.14,
+    "p99": 24.18,
+    "max": 95.33
+  },
+  "labels": {
+    "rush_execute": 5317
+  },
+  "label_latency_ms": {
+    "rush_execute": {
+      "count": 5317,
+      "avg": 19.56,
+      "p50": 20.7,
+      "p95": 22.14,
+      "p99": 24.18,
+      "max": 95.33
+    }
+  },
+  "statuses": {
+    "200": 24,
+    "400": 5292,
+    "500": 1
+  },
+  "outcomes": {
+    "success": 24,
+    "business_rejected": 5292,
+    "server_error": 1
+  },
+  "top_errors": {
+    "票务订单处理失败": 1
+  },
+  "setup": {
+    "scenario": "ticket_rush_setup",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 0.51,
+    "concurrency": 10,
+    "think_ms": 20,
+    "total_requests": 36,
+    "requests_per_second": 71.04,
+    "ok": 17,
+    "failed": 19,
+    "failure_rate": 0.5278,
+    "latency_ms": {
+      "avg": 64.63,
+      "p50": 28.78,
+      "p90": 219.09,
+      "p95": 224.85,
+      "p99": 230.33,
+      "max": 230.33
+    },
+    "labels": {
+      "login_probe": 10,
+      "register": 10,
+      "login": 10,
+      "ensure_user": 6
+    },
+    "label_latency_ms": {
+      "login_probe": {
+        "count": 10,
+        "avg": 36.27,
+        "p50": 35.07,
+        "p95": 50.95,
+        "p99": 50.95,
+        "max": 50.95
+      },
+      "register": {
+        "count": 10,
+        "avg": 104.5,
+        "p50": 29.62,
+        "p95": 230.33,
+        "p99": 230.33,
+        "max": 230.33
+      },
+      "login": {
+        "count": 10,
+        "avg": 91.88,
+        "p50": 11.12,
+        "p95": 219.09,
+        "p99": 219.09,
+        "max": 219.09
+      },
+      "ensure_user": {
+        "count": 6,
+        "avg": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      }
+    },
+    "statuses": {
+      "200": 8,
+      "401": 14,
+      "network_error": 8,
+      "error": 6
+    },
+    "outcomes": {
+      "network_error": 8,
+      "business_rejected": 14,
+      "unknown": 6,
+      "success": 8
+    },
+    "top_errors": {
+      "fetch failed": 8,
+      "login failed for v0_1_rush_8": 1,
+      "用户不存在": 5,
+      "login failed for v0_1_rush_0": 1,
+      "login failed for v0_1_rush_1": 1,
+      "login failed for v0_1_rush_5": 1,
+      "login failed for v0_1_rush_4": 1,
+      "login failed for v0_1_rush_2": 1
+    }
+  }
+}

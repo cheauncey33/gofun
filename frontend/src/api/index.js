@@ -97,10 +97,9 @@ export default {
   updateUserInfo: (data) => put('/user/info', data),
   changePassword: (old_password, new_password) => put('/user/password', { old_password, new_password }),
 
-  // Rush sale
-  getRushSaleToken: (id) => post(`/rush-sales/${id}/token`),
-  executeRushSale: (id, token, quantity, purchaseInfo = {}, idempotencyKey = newIdempotencyKey()) =>
-    post(`/rush-sales/${id}/execute`, { token, quantity, ...purchaseInfo }, {
+  // Rush sale — 到点直抢，一次 execute（无需前置 token）
+  executeRushSale: (id, quantity, purchaseInfo = {}, idempotencyKey = newIdempotencyKey()) =>
+    post(`/rush-sales/${id}/execute`, { quantity, ...purchaseInfo }, {
       headers: { 'X-Idempotency-Key': idempotencyKey },
     }),
 

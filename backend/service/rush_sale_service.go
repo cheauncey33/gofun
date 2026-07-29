@@ -5,43 +5,44 @@ import (
 	"WHU_Snack_GO/metrics"
 	"WHU_Snack_GO/models"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	gocache "github.com/patrickmn/go-cache"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
 
 const rushSaleKeyPrefix = "fuchang:rush:"
 
+// 读侧本地缓存极短 TTL：挡住开售瞬间对同一 Redis stock key 的读风暴（hotkey），
+// 允许展示短暂滞后；真正扣减仍只走 Redis Lua。
+const rushStockLocalTTL = 300 * time.Millisecond
+
+// 秒杀直抢：无候场、无前置 token。闸门靠登录 + 写限流 + 幂等键 + Lua 原子扣减/限购。
 var executeRushSaleScript = redis.NewScript(`
-if redis.call('GET', KEYS[1]) ~= ARGV[1] then
-  return -3
-end
-local rushStock = tonumber(redis.call('GET', KEYS[2]))
-local ticketStock = tonumber(redis.call('GET', KEYS[3]))
+local rushStock = tonumber(redis.call('GET', KEYS[1]))
+local ticketStock = tonumber(redis.call('GET', KEYS[2]))
 if rushStock == nil or ticketStock == nil then
   return -2
 end
-local quantity = tonumber(ARGV[2])
-local limit = tonumber(ARGV[3])
-local bought = tonumber(redis.call('GET', KEYS[4]) or '0')
+local quantity = tonumber(ARGV[1])
+local limit = tonumber(ARGV[2])
+local bought = tonumber(redis.call('GET', KEYS[3]) or '0')
 if bought + quantity > limit then
   return -4
 end
 if rushStock < quantity or ticketStock < quantity then
   return -1
 end
-redis.call('DEL', KEYS[1])
+redis.call('DECRBY', KEYS[1], quantity)
 redis.call('DECRBY', KEYS[2], quantity)
-redis.call('DECRBY', KEYS[3], quantity)
-redis.call('INCRBY', KEYS[4], quantity)
-redis.call('EXPIRE', KEYS[4], tonumber(ARGV[4]))
+redis.call('INCRBY', KEYS[3], quantity)
+redis.call('EXPIRE', KEYS[3], tonumber(ARGV[3]))
 return rushStock - quantity
 `)
 
@@ -56,18 +57,29 @@ type CreateRushSaleInput struct {
 }
 
 type RushSaleService struct {
-	db      *gorm.DB
-	rdb     *redis.Client
-	catalog *TicketCatalogService
-	order   *TicketOrderService
+	db               *gorm.DB
+	rdb              *redis.Client
+	localCache       *gocache.Cache
+	catalog          *TicketCatalogService
+	order            *TicketOrderService
+	stockSF          singleflight.Group
+	campaignCacheTTL time.Duration
 }
 
 func NewRushSaleService(
 	c *container.Container,
 	catalog *TicketCatalogService,
 	order *TicketOrderService,
+	campaignCacheTTL time.Duration,
 ) *RushSaleService {
-	return &RushSaleService{db: c.DB, rdb: c.RDB, catalog: catalog, order: order}
+	return &RushSaleService{
+		db:               c.DB,
+		rdb:              c.RDB,
+		localCache:       c.LocalCache,
+		catalog:          catalog,
+		order:            order,
+		campaignCacheTTL: campaignCacheTTL,
+	}
 }
 
 func (s *RushSaleService) CreateCampaign(
@@ -122,6 +134,10 @@ func (s *RushSaleService) CreateCampaign(
 	).Err(); err != nil {
 		return nil, err
 	}
+	s.setRushStockLocal(campaign.ID, int64(campaign.RemainingQuota))
+	if s.localCache != nil && s.campaignCacheTTL > 0 {
+		s.localCache.Set(rushCampaignLocalKey(campaign.ID), *campaign, s.campaignCacheTTL)
+	}
 	return campaign, nil
 }
 
@@ -148,6 +164,10 @@ func (s *RushSaleService) ListCampaigns(
 	views := make([]RushSaleCampaignView, 0, len(campaigns))
 	for _, campaign := range campaigns {
 		view := RushSaleCampaignView{RushSaleCampaign: campaign}
+		// 展示余量优先读本地短缓存 → Redis，减轻开售热 key 读压力。
+		if stock, ok, err := s.loadRushStock(ctx, campaign.ID); err == nil && ok {
+			view.RemainingQuota = int(stock)
+		}
 		tier, err := s.catalog.repo.FindTicketTierByID(ctx, campaign.TicketTierID)
 		if err == nil {
 			session, sessionErr := s.catalog.repo.FindSessionByID(ctx, tier.SessionID)
@@ -165,34 +185,10 @@ func (s *RushSaleService) ListCampaigns(
 	return views, nil
 }
 
-func (s *RushSaleService) IssueToken(
-	ctx context.Context,
-	userID, campaignID int64,
-) (string, error) {
-	campaign, err := s.getAvailableCampaign(ctx, campaignID)
-	if err != nil {
-		return "", err
-	}
-	if time.Now().Before(campaign.StartsAt) {
-		return "", fmt.Errorf("%w: 限时开售尚未开始", ErrTicketOrderUnavailable)
-	}
-	tokenBytes := make([]byte, 24)
-	if _, err := rand.Read(tokenBytes); err != nil {
-		return "", err
-	}
-	token := hex.EncodeToString(tokenBytes)
-	if err := s.rdb.Set(
-		ctx, rushTokenKey(campaignID, userID), token, 60*time.Second,
-	).Err(); err != nil {
-		return "", err
-	}
-	return token, nil
-}
-
 func (s *RushSaleService) Execute(
 	ctx context.Context,
 	userID, campaignID int64,
-	token, idempotencyKey, requestID string,
+	idempotencyKey, requestID string,
 	quantity int,
 	purchase PurchaseInfoInput,
 ) (*TicketOrderReceipt, error) {
@@ -207,37 +203,33 @@ func (s *RushSaleService) Execute(
 	if quantity <= 0 || quantity > campaign.PerUserLimit {
 		return nil, fmt.Errorf("%w: 超过限购数量", ErrTicketOrderUnavailable)
 	}
-	var existing models.TicketOrder
-	err = s.db.WithContext(ctx).
-		Where("user_id = ? AND idempotency_key = ?", userID, strings.TrimSpace(idempotencyKey)).
-		First(&existing).Error
-	if err == nil {
-		return ticketOrderReceipt(&existing), nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+	if receipt, err := s.order.lookupIdempotentOrder(ctx, userID, idempotencyKey); err != nil {
 		return nil, err
+	} else if receipt != nil {
+		return receipt, nil
 	}
 
 	ttl := int64(time.Until(campaign.EndsAt).Seconds()) + 3600
 	result, err := executeRushSaleScript.Run(ctx, s.rdb, []string{
-		rushTokenKey(campaignID, userID),
 		rushStockKey(campaignID),
 		ticketStockKey(campaign.TicketTierID),
 		rushUserCountKey(campaignID, userID),
-	}, strings.TrimSpace(token), quantity, campaign.PerUserLimit, ttl).Int64()
+	}, quantity, campaign.PerUserLimit, ttl).Int64()
 	if err != nil {
 		return nil, err
 	}
 	switch result {
 	case -4:
 		return nil, fmt.Errorf("%w: 已达到限购数量", ErrTicketOrderUnavailable)
-	case -3:
-		return nil, fmt.Errorf("%w: 限时开售令牌无效", ErrTicketOrderUnavailable)
 	case -2:
 		return nil, fmt.Errorf("%w: 票额缓存尚未预热", ErrTicketOrderUnavailable)
 	case -1:
+		s.setRushStockLocal(campaignID, 0)
 		return nil, ErrTicketQuotaInsufficient
 	}
+
+	// Lua 返回扣减后余量：本节点本地缓存立即对齐，其它节点最多落后一个 TTL。
+	s.setRushStockLocal(campaignID, result)
 
 	receipt, rollback, err := s.order.createRushOrderAfterReservation(
 		ctx, userID, idempotencyKey, requestID, campaign, quantity, purchase,
@@ -252,19 +244,44 @@ func (s *RushSaleService) getAvailableCampaign(
 	ctx context.Context,
 	campaignID int64,
 ) (*models.RushSaleCampaign, error) {
-	var campaign models.RushSaleCampaign
-	err := s.db.WithContext(ctx).First(&campaign, campaignID).Error
+	cacheKey := rushCampaignLocalKey(campaignID)
+	if s.localCache != nil && s.campaignCacheTTL > 0 {
+		if cached, found := s.localCache.Get(cacheKey); found {
+			campaign := cached.(models.RushSaleCampaign)
+			return validateAvailableCampaign(&campaign)
+		}
+	}
+	value, err, _ := s.stockSF.Do(cacheKey, func() (interface{}, error) {
+		if s.localCache != nil && s.campaignCacheTTL > 0 {
+			if cached, found := s.localCache.Get(cacheKey); found {
+				return cached.(models.RushSaleCampaign), nil
+			}
+		}
+		var campaign models.RushSaleCampaign
+		if err := s.db.WithContext(ctx).First(&campaign, campaignID).Error; err != nil {
+			return models.RushSaleCampaign{}, err
+		}
+		if s.localCache != nil && s.campaignCacheTTL > 0 {
+			s.localCache.Set(cacheKey, campaign, s.campaignCacheTTL)
+		}
+		return campaign, nil
+	})
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrTicketResourceNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
+	campaign := value.(models.RushSaleCampaign)
+	return validateAvailableCampaign(&campaign)
+}
+
+func validateAvailableCampaign(campaign *models.RushSaleCampaign) (*models.RushSaleCampaign, error) {
 	if campaign.Status != models.RushSaleStatusScheduled &&
 		campaign.Status != models.RushSaleStatusActive {
 		return nil, ErrTicketOrderUnavailable
 	}
-	return &campaign, nil
+	return campaign, nil
 }
 
 func (s *RushSaleService) rollbackRushReservation(
@@ -278,6 +295,60 @@ func (s *RushSaleService) rollbackRushReservation(
 	pipe.IncrBy(ctx, ticketStockKey(campaign.TicketTierID), int64(quantity))
 	pipe.DecrBy(ctx, rushUserCountKey(campaign.ID, userID), int64(quantity))
 	_, _ = pipe.Exec(ctx)
+	s.invalidateRushStockLocal(campaign.ID)
+}
+
+// loadRushStock 读路径：local(短 TTL) → singleflight → Redis。
+// ok=false 表示 Redis 尚无预热 key，调用方应回退 MySQL 字段。
+func (s *RushSaleService) loadRushStock(
+	ctx context.Context,
+	campaignID int64,
+) (stock int64, ok bool, err error) {
+	localKey := rushStockLocalKey(campaignID)
+	if s.localCache != nil {
+		if v, found := s.localCache.Get(localKey); found {
+			return v.(int64), true, nil
+		}
+	}
+
+	v, err, _ := s.stockSF.Do(localKey, func() (interface{}, error) {
+		if s.localCache != nil {
+			if cached, found := s.localCache.Get(localKey); found {
+				return cached.(int64), nil
+			}
+		}
+		n, err := s.rdb.Get(ctx, rushStockKey(campaignID)).Int64()
+		if err == redis.Nil {
+			return int64(-1), nil
+		}
+		if err != nil {
+			return int64(0), err
+		}
+		s.setRushStockLocal(campaignID, n)
+		return n, nil
+	})
+	if err != nil {
+		return 0, false, err
+	}
+	n := v.(int64)
+	if n < 0 {
+		return 0, false, nil
+	}
+	return n, true, nil
+}
+
+func (s *RushSaleService) setRushStockLocal(campaignID int64, stock int64) {
+	if s.localCache == nil {
+		return
+	}
+	s.localCache.Set(rushStockLocalKey(campaignID), stock, rushStockLocalTTL)
+}
+
+func (s *RushSaleService) invalidateRushStockLocal(campaignID int64) {
+	if s.localCache == nil {
+		return
+	}
+	s.localCache.Delete(rushStockLocalKey(campaignID))
 }
 
 // createRushOrderAfterReservation 在 Redis 已预扣后创建订单。
@@ -294,17 +365,7 @@ func (s *TicketOrderService) createRushOrderAfterReservation(
 	if len(idempotencyKey) < 8 || len(idempotencyKey) > 64 {
 		return nil, true, ErrInvalidTicketCatalog
 	}
-	var existing models.TicketOrder
-	err = s.db.WithContext(ctx).
-		Where("user_id = ? AND idempotency_key = ?", userID, idempotencyKey).
-		First(&existing).Error
-	if err == nil {
-		// Lua 已扣库存，但订单已由并发请求创建：归还本次多余预扣，返回已有凭据。
-		return ticketOrderReceipt(&existing), true, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, true, err
-	}
+	// 入口已做过幂等短路；此处依赖唯一索引处理并发双写，避免再查一次 MySQL。
 	tier, session, event, venue, err := s.loadPurchasableTier(ctx, campaign.TicketTierID)
 	if err != nil {
 		return nil, true, err
@@ -336,8 +397,7 @@ func (s *TicketOrderService) createRushOrderAfterReservation(
 		TermsAcceptedAt:       &acceptedAt,
 		IdempotencyKey:        idempotencyKey,
 		RequestID:             requestID,
-		// 支付窗口在消费者转入 pending_payment 时写入，避免排队耗尽超时。
-		ExpiresAt: time.Now().Add(s.paymentTimeout),
+		ExpiresAt:             time.Now().Add(s.paymentTimeout),
 		Items: []models.TicketOrderItem{{
 			TicketTierID:            tier.ID,
 			Quantity:                quantity,
@@ -348,15 +408,9 @@ func (s *TicketOrderService) createRushOrderAfterReservation(
 			VenueAddressSnapshot:    venue.Address,
 			TierNameSnapshot:        tier.Name,
 		}},
-		Attendees: s.buildAttendeeSnapshots(orderID, purchase.Attendees, event.RealNameRequired),
 	}
-	if err := s.db.WithContext(ctx).Create(order).Error; err != nil {
-		if lookupErr := s.db.WithContext(ctx).
-			Where("user_id = ? AND idempotency_key = ?", userID, idempotencyKey).
-			First(&existing).Error; lookupErr == nil {
-			return ticketOrderReceipt(&existing), true, nil
-		}
-		return nil, true, err
+	if attendees := s.buildAttendeeSnapshots(orderID, purchase.Attendees, event.RealNameRequired); len(attendees) > 0 {
+		order.Attendees = attendees
 	}
 	message := TicketOrderMessage{
 		OrderID:            orderID,
@@ -365,21 +419,34 @@ func (s *TicketOrderService) createRushOrderAfterReservation(
 		Quantity:           quantity,
 		RushSaleCampaignID: &campaign.ID,
 	}
-	if err := s.enqueueOutbox(ctx, orderID, message); err != nil {
-		_ = s.markQueuedOrderFailed(ctx, orderID, "订单 outbox 写入失败")
+	if err := s.createOrderAndOutbox(ctx, order, message); err != nil {
+		var existing models.TicketOrder
+		if lookupErr := s.db.WithContext(ctx).
+			Where("user_id = ? AND idempotency_key = ?", userID, idempotencyKey).
+			First(&existing).Error; lookupErr == nil {
+			got := ticketOrderReceipt(&existing)
+			s.rememberIdempotentOrder(ctx, userID, idempotencyKey, got)
+			return got, true, nil
+		}
 		return nil, true, err
 	}
+	s.notifyOutboxPublisher()
+	got := ticketOrderReceipt(order)
+	s.rememberIdempotentOrder(ctx, userID, idempotencyKey, got)
 	metrics.OrdersCreated.Inc()
-	return ticketOrderReceipt(order), false, nil
+	return got, false, nil
 }
 
 func rushStockKey(campaignID int64) string {
 	return rushSaleKeyPrefix + "stock:" + strconv.FormatInt(campaignID, 10)
 }
 
-func rushTokenKey(campaignID, userID int64) string {
-	return rushSaleKeyPrefix + "token:" +
-		strconv.FormatInt(campaignID, 10) + ":" + strconv.FormatInt(userID, 10)
+func rushStockLocalKey(campaignID int64) string {
+	return "local:rush:stock:" + strconv.FormatInt(campaignID, 10)
+}
+
+func rushCampaignLocalKey(campaignID int64) string {
+	return "local:rush:campaign:" + strconv.FormatInt(campaignID, 10)
 }
 
 func rushUserCountKey(campaignID, userID int64) string {
