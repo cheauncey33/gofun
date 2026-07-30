@@ -1,0 +1,150 @@
+{
+  "label": "capacity-baseline-batch-20260731-500-r3",
+  "size": 500,
+  "round": 3,
+  "campaign_id": "6",
+  "execute_seconds": 1.04,
+  "drain_seconds": 8.41,
+  "success_orders": 500,
+  "success_rate": 1,
+  "success_qps": 481.95,
+  "still_queued": 0,
+  "status_after_poll": {
+    "pending_payment": 500
+  },
+  "execute": {
+    "scenario": "staircase_execute",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 13.41,
+    "concurrency": 50,
+    "think_ms": 0,
+    "total_requests": 500,
+    "requests_per_second": 37.28,
+    "ok": 500,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 84.2,
+      "p50": 67.49,
+      "p90": 181.19,
+      "p95": 219.92,
+      "p99": 231.54,
+      "max": 232.66
+    },
+    "labels": {
+      "rush_execute": 500
+    },
+    "label_latency_ms": {
+      "rush_execute": {
+        "count": 500,
+        "avg": 84.2,
+        "p50": 67.49,
+        "p95": 219.92,
+        "p99": 231.54,
+        "max": 232.66
+      }
+    },
+    "statuses": {
+      "200": 500
+    },
+    "outcomes": {
+      "success": 500
+    },
+    "top_errors": {}
+  },
+  "poll": {
+    "scenario": "staircase_poll",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 13.41,
+    "concurrency": 50,
+    "think_ms": 0,
+    "total_requests": 1713,
+    "requests_per_second": 127.73,
+    "ok": 1713,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 20.29,
+      "p50": 18.45,
+      "p90": 30.98,
+      "p95": 32.18,
+      "p99": 34.74,
+      "max": 36.84
+    },
+    "labels": {
+      "order_poll": 1713
+    },
+    "label_latency_ms": {
+      "order_poll": {
+        "count": 1713,
+        "avg": 20.29,
+        "p50": 18.45,
+        "p95": 32.18,
+        "p99": 34.74,
+        "max": 36.84
+      }
+    },
+    "statuses": {
+      "200": 1713
+    },
+    "outcomes": {
+      "success": 1713
+    },
+    "top_errors": {}
+  },
+  "mq_metrics": {
+    "published_delta": 500,
+    "consumed_success_delta": 500
+  },
+  "resources": {
+    "containers": {
+      "whu-snack-go-capacity-backend-load": {
+        "cpu_pct_avg": 34.26,
+        "cpu_pct_max": 64.05,
+        "memory_bytes_max": 32547799.04,
+        "pids_max": 23
+      },
+      "whu-snack-go-capacity-mysql-1": {
+        "cpu_pct_avg": 37.94,
+        "cpu_pct_max": 63.09,
+        "memory_bytes_max": 540226355.2,
+        "pids_max": 60
+      },
+      "whu-snack-go-capacity-redis-1": {
+        "cpu_pct_avg": 0.88,
+        "cpu_pct_max": 2.29,
+        "memory_bytes_max": 7847542.784,
+        "pids_max": 6
+      },
+      "whu-snack-go-capacity-rabbitmq-1": {
+        "cpu_pct_avg": 134.96,
+        "cpu_pct_max": 180.48,
+        "memory_bytes_max": 150051225.6,
+        "pids_max": 48
+      }
+    },
+    "mysql": {
+      "threads_connected_max": 15,
+      "threads_running_max": 10,
+      "row_lock_current_waits_max": 3,
+      "row_lock_waits_delta": 501,
+      "deadlocks_delta": 0,
+      "aborted_connects_delta": 0
+    },
+    "redis": {
+      "ops_per_sec_max": 4951,
+      "latency_avg_ms_max": 0.18,
+      "latency_max_ms": 1,
+      "commands_delta": 8468,
+      "rejected_connections_delta": 0
+    },
+    "rabbitmq": {
+      "messages_ready_max": 2250,
+      "messages_unacknowledged_max": 20,
+      "order_queue_ready_max": 423,
+      "order_queue_unacked_max": 20,
+      "delay_queue_ready_end": 2250,
+      "consumers_max": 10
+    }
+  }
+}

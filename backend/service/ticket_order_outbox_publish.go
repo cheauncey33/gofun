@@ -6,6 +6,7 @@ import (
 	"WHU_Snack_GO/models"
 	apptelemetry "WHU_Snack_GO/pkg/telemetry"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -156,7 +157,7 @@ func (s *TicketOrderService) claimOutboxBatch(
 			return res.Error
 		}
 		return nil
-	})
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return nil, err
 	}

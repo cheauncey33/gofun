@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -21,8 +22,9 @@ import (
 )
 
 const (
-	ticketIdempotencyTTL      = 10 * time.Minute
+	ticketIdempotencyTTL       = 10 * time.Minute
 	purchasableContextLocalTTL = 3 * time.Second
+	ticketOrderTxMaxAttempts   = 3
 )
 
 func ticketIdempotencyRedisKey(userID int64, idempotencyKey string) string {
@@ -163,10 +165,41 @@ func (s *TicketOrderService) createOrderAndOutbox(
 		}
 		return nil
 	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(order).Error; err != nil {
+
+	for attempt := 1; attempt <= ticketOrderTxMaxAttempts; attempt++ {
+		err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(order).Error; err != nil {
+				return err
+			}
+			return s.enqueueOutboxInTx(ctx, tx, order.ID, message)
+		})
+		if err == nil || !isRetryableMySQLTransactionError(err) ||
+			attempt == ticketOrderTxMaxAttempts {
 			return err
 		}
-		return s.enqueueOutboxInTx(ctx, tx, order.ID, message)
-	})
+		delay := time.Duration(attempt*10+int(order.ID%7)) * time.Millisecond
+		log.Printf(
+			"ticket order transaction retry: order=%d attempt=%d delay=%s err=%v",
+			order.ID,
+			attempt,
+			delay,
+			err,
+		)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil
+}
+
+func isRetryableMySQLTransactionError(err error) bool {
+	var mysqlErr *mysqlDriver.MySQLError
+	if !errors.As(err, &mysqlErr) {
+		return false
+	}
+	return mysqlErr.Number == 1213 || mysqlErr.Number == 1205
 }

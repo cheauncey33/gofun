@@ -1,0 +1,366 @@
+# HELP active_http_connections Current number of active HTTP connections
+# TYPE active_http_connections gauge
+active_http_connections 1
+# HELP distributed_rate_limit_requests_total Total requests evaluated by the distributed write rate limiter
+# TYPE distributed_rate_limit_requests_total counter
+distributed_rate_limit_requests_total{result="allowed"} 500
+# HELP go_gc_duration_seconds A summary of the wall-time pause (stop-the-world) duration in garbage collection cycles.
+# TYPE go_gc_duration_seconds summary
+go_gc_duration_seconds{quantile="0"} 3.1593e-05
+go_gc_duration_seconds{quantile="0.25"} 9.2637e-05
+go_gc_duration_seconds{quantile="0.5"} 0.000216256
+go_gc_duration_seconds{quantile="0.75"} 0.00038537
+go_gc_duration_seconds{quantile="1"} 0.01143463
+go_gc_duration_seconds_sum 0.036145485
+go_gc_duration_seconds_count 85
+# HELP go_gc_gogc_percent Heap size target percentage configured by the user, otherwise 100. This value is set by the GOGC environment variable, and the runtime/debug.SetGCPercent function. Sourced from /gc/gogc:percent.
+# TYPE go_gc_gogc_percent gauge
+go_gc_gogc_percent 100
+# HELP go_gc_gomemlimit_bytes Go runtime memory limit configured by the user, otherwise math.MaxInt64. This value is set by the GOMEMLIMIT environment variable, and the runtime/debug.SetMemoryLimit function. Sourced from /gc/gomemlimit:bytes.
+# TYPE go_gc_gomemlimit_bytes gauge
+go_gc_gomemlimit_bytes 9.223372036854776e+18
+# HELP go_goroutines Number of goroutines that currently exist.
+# TYPE go_goroutines gauge
+go_goroutines 102
+# HELP go_info Information about the Go environment.
+# TYPE go_info gauge
+go_info{version="go1.25.12"} 1
+# HELP go_memstats_alloc_bytes Number of bytes allocated in heap and currently in use. Equals to /memory/classes/heap/objects:bytes.
+# TYPE go_memstats_alloc_bytes gauge
+go_memstats_alloc_bytes 6.589336e+06
+# HELP go_memstats_alloc_bytes_total Total number of bytes allocated in heap until now, even if released already. Equals to /gc/heap/allocs:bytes.
+# TYPE go_memstats_alloc_bytes_total counter
+go_memstats_alloc_bytes_total 2.82832872e+08
+# HELP go_memstats_buck_hash_sys_bytes Number of bytes used by the profiling bucket hash table. Equals to /memory/classes/profiling/buckets:bytes.
+# TYPE go_memstats_buck_hash_sys_bytes gauge
+go_memstats_buck_hash_sys_bytes 1.5656e+06
+# HELP go_memstats_frees_total Total number of heap objects frees. Equals to /gc/heap/frees:objects + /gc/heap/tiny/allocs:objects.
+# TYPE go_memstats_frees_total counter
+go_memstats_frees_total 2.920654e+06
+# HELP go_memstats_gc_sys_bytes Number of bytes used for garbage collection system metadata. Equals to /memory/classes/metadata/other:bytes.
+# TYPE go_memstats_gc_sys_bytes gauge
+go_memstats_gc_sys_bytes 3.416336e+06
+# HELP go_memstats_heap_alloc_bytes Number of heap bytes allocated and currently in use, same as go_memstats_alloc_bytes. Equals to /memory/classes/heap/objects:bytes.
+# TYPE go_memstats_heap_alloc_bytes gauge
+go_memstats_heap_alloc_bytes 6.589336e+06
+# HELP go_memstats_heap_idle_bytes Number of heap bytes waiting to be used. Equals to /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.
+# TYPE go_memstats_heap_idle_bytes gauge
+go_memstats_heap_idle_bytes 1.3426688e+07
+# HELP go_memstats_heap_inuse_bytes Number of heap bytes that are in use. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes
+# TYPE go_memstats_heap_inuse_bytes gauge
+go_memstats_heap_inuse_bytes 1.1968512e+07
+# HELP go_memstats_heap_objects Number of currently allocated objects. Equals to /gc/heap/objects:objects.
+# TYPE go_memstats_heap_objects gauge
+go_memstats_heap_objects 19199
+# HELP go_memstats_heap_released_bytes Number of heap bytes released to OS. Equals to /memory/classes/heap/released:bytes.
+# TYPE go_memstats_heap_released_bytes gauge
+go_memstats_heap_released_bytes 8.585216e+06
+# HELP go_memstats_heap_sys_bytes Number of heap bytes obtained from system. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes + /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.
+# TYPE go_memstats_heap_sys_bytes gauge
+go_memstats_heap_sys_bytes 2.53952e+07
+# HELP go_memstats_last_gc_time_seconds Number of seconds since 1970 of last garbage collection.
+# TYPE go_memstats_last_gc_time_seconds gauge
+go_memstats_last_gc_time_seconds 1.7854313114106777e+09
+# HELP go_memstats_mallocs_total Total number of heap objects allocated, both live and gc-ed. Semantically a counter version for go_memstats_heap_objects gauge. Equals to /gc/heap/allocs:objects + /gc/heap/tiny/allocs:objects.
+# TYPE go_memstats_mallocs_total counter
+go_memstats_mallocs_total 2.939853e+06
+# HELP go_memstats_mcache_inuse_bytes Number of bytes in use by mcache structures. Equals to /memory/classes/metadata/mcache/inuse:bytes.
+# TYPE go_memstats_mcache_inuse_bytes gauge
+go_memstats_mcache_inuse_bytes 14496
+# HELP go_memstats_mcache_sys_bytes Number of bytes used for mcache structures obtained from system. Equals to /memory/classes/metadata/mcache/inuse:bytes + /memory/classes/metadata/mcache/free:bytes.
+# TYPE go_memstats_mcache_sys_bytes gauge
+go_memstats_mcache_sys_bytes 15704
+# HELP go_memstats_mspan_inuse_bytes Number of bytes in use by mspan structures. Equals to /memory/classes/metadata/mspan/inuse:bytes.
+# TYPE go_memstats_mspan_inuse_bytes gauge
+go_memstats_mspan_inuse_bytes 292960
+# HELP go_memstats_mspan_sys_bytes Number of bytes used for mspan structures obtained from system. Equals to /memory/classes/metadata/mspan/inuse:bytes + /memory/classes/metadata/mspan/free:bytes.
+# TYPE go_memstats_mspan_sys_bytes gauge
+go_memstats_mspan_sys_bytes 408000
+# HELP go_memstats_next_gc_bytes Number of heap bytes when next garbage collection will take place. Equals to /gc/heap/goal:bytes.
+# TYPE go_memstats_next_gc_bytes gauge
+go_memstats_next_gc_bytes 1.3873578e+07
+# HELP go_memstats_other_sys_bytes Number of bytes used for other system allocations. Equals to /memory/classes/other:bytes.
+# TYPE go_memstats_other_sys_bytes gauge
+go_memstats_other_sys_bytes 2.547008e+06
+# HELP go_memstats_stack_inuse_bytes Number of bytes obtained from system for stack allocator in non-CGO environments. Equals to /memory/classes/heap/stacks:bytes.
+# TYPE go_memstats_stack_inuse_bytes gauge
+go_memstats_stack_inuse_bytes 3.964928e+06
+# HELP go_memstats_stack_sys_bytes Number of bytes obtained from system for stack allocator. Equals to /memory/classes/heap/stacks:bytes + /memory/classes/os-stacks:bytes.
+# TYPE go_memstats_stack_sys_bytes gauge
+go_memstats_stack_sys_bytes 3.964928e+06
+# HELP go_memstats_sys_bytes Number of bytes obtained from system. Equals to /memory/classes/total:byte.
+# TYPE go_memstats_sys_bytes gauge
+go_memstats_sys_bytes 3.7312776e+07
+# HELP go_sched_gomaxprocs_threads The current runtime.GOMAXPROCS setting, or the number of operating system threads that can execute user-level Go code simultaneously. Sourced from /sched/gomaxprocs:threads.
+# TYPE go_sched_gomaxprocs_threads gauge
+go_sched_gomaxprocs_threads 12
+# HELP go_threads Number of OS threads created.
+# TYPE go_threads gauge
+go_threads 22
+# HELP http_request_duration_seconds HTTP request latency in seconds
+# TYPE http_request_duration_seconds histogram
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/events",le="0.005"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/events",le="0.01"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/events",le="0.025"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/events",le="0.05"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/events",le="0.1"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/events",le="0.25"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/events",le="0.5"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/events",le="1"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/events",le="2.5"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/events",le="5"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/events",le="+Inf"} 1
+http_request_duration_seconds_sum{method="GET",path="/api/v1/events"} 0.004224542
+http_request_duration_seconds_count{method="GET",path="/api/v1/events"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="0.005"} 870
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="0.01"} 1483
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="0.025"} 1673
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="0.05"} 1673
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="0.1"} 1673
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="0.25"} 1673
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="0.5"} 1673
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="1"} 1673
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="2.5"} 1673
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="5"} 1673
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="+Inf"} 1673
+http_request_duration_seconds_sum{method="GET",path="/api/v1/orders/:id"} 9.510920704000013
+http_request_duration_seconds_count{method="GET",path="/api/v1/orders/:id"} 1673
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/user/info",le="0.005"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/user/info",le="0.01"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/user/info",le="0.025"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/user/info",le="0.05"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/user/info",le="0.1"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/user/info",le="0.25"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/user/info",le="0.5"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/user/info",le="1"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/user/info",le="2.5"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/user/info",le="5"} 1
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/user/info",le="+Inf"} 1
+http_request_duration_seconds_sum{method="GET",path="/api/v1/user/info"} 0.001157399
+http_request_duration_seconds_count{method="GET",path="/api/v1/user/info"} 1
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="0.005"} 8
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="0.01"} 9
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="0.025"} 9
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="0.05"} 9
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="0.1"} 9
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="0.25"} 9
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="0.5"} 9
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="1"} 9
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="2.5"} 9
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="5"} 9
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="+Inf"} 9
+http_request_duration_seconds_sum{method="GET",path="/metrics"} 0.021768706000000002
+http_request_duration_seconds_count{method="GET",path="/metrics"} 9
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/admin/organizers",le="0.005"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/admin/organizers",le="0.01"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/admin/organizers",le="0.025"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/admin/organizers",le="0.05"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/admin/organizers",le="0.1"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/admin/organizers",le="0.25"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/admin/organizers",le="0.5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/admin/organizers",le="1"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/admin/organizers",le="2.5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/admin/organizers",le="5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/admin/organizers",le="+Inf"} 1
+http_request_duration_seconds_sum{method="POST",path="/api/v1/admin/organizers"} 0.014697798
+http_request_duration_seconds_count{method="POST",path="/api/v1/admin/organizers"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="0.005"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="0.01"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="0.025"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="0.05"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="0.1"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="0.25"} 499
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="0.5"} 502
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="1"} 502
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="2.5"} 502
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="5"} 502
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="+Inf"} 502
+http_request_duration_seconds_sum{method="POST",path="/api/v1/login"} 99.22847626599999
+http_request_duration_seconds_count{method="POST",path="/api/v1/login"} 502
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events",le="0.005"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events",le="0.01"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events",le="0.025"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events",le="0.05"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events",le="0.1"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events",le="0.25"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events",le="0.5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events",le="1"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events",le="2.5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events",le="5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events",le="+Inf"} 1
+http_request_duration_seconds_sum{method="POST",path="/api/v1/organizers/:organizer_id/events"} 0.014121764
+http_request_duration_seconds_count{method="POST",path="/api/v1/organizers/:organizer_id/events"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/publish",le="0.005"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/publish",le="0.01"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/publish",le="0.025"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/publish",le="0.05"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/publish",le="0.1"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/publish",le="0.25"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/publish",le="0.5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/publish",le="1"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/publish",le="2.5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/publish",le="5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/publish",le="+Inf"} 1
+http_request_duration_seconds_sum{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/publish"} 0.017278641
+http_request_duration_seconds_count{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/publish"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/sessions",le="0.005"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/sessions",le="0.01"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/sessions",le="0.025"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/sessions",le="0.05"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/sessions",le="0.1"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/sessions",le="0.25"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/sessions",le="0.5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/sessions",le="1"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/sessions",le="2.5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/sessions",le="5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/sessions",le="+Inf"} 1
+http_request_duration_seconds_sum{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/sessions"} 0.013261462
+http_request_duration_seconds_count{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/sessions"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/rush-sales",le="0.005"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/rush-sales",le="0.01"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/rush-sales",le="0.025"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/rush-sales",le="0.05"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/rush-sales",le="0.1"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/rush-sales",le="0.25"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/rush-sales",le="0.5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/rush-sales",le="1"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/rush-sales",le="2.5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/rush-sales",le="5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/rush-sales",le="+Inf"} 1
+http_request_duration_seconds_sum{method="POST",path="/api/v1/organizers/:organizer_id/rush-sales"} 0.013614611
+http_request_duration_seconds_count{method="POST",path="/api/v1/organizers/:organizer_id/rush-sales"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/sessions/:session_id/ticket-tiers",le="0.005"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/sessions/:session_id/ticket-tiers",le="0.01"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/sessions/:session_id/ticket-tiers",le="0.025"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/sessions/:session_id/ticket-tiers",le="0.05"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/sessions/:session_id/ticket-tiers",le="0.1"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/sessions/:session_id/ticket-tiers",le="0.25"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/sessions/:session_id/ticket-tiers",le="0.5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/sessions/:session_id/ticket-tiers",le="1"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/sessions/:session_id/ticket-tiers",le="2.5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/sessions/:session_id/ticket-tiers",le="5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/sessions/:session_id/ticket-tiers",le="+Inf"} 1
+http_request_duration_seconds_sum{method="POST",path="/api/v1/organizers/:organizer_id/sessions/:session_id/ticket-tiers"} 0.018635617
+http_request_duration_seconds_count{method="POST",path="/api/v1/organizers/:organizer_id/sessions/:session_id/ticket-tiers"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/venues",le="0.005"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/venues",le="0.01"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/venues",le="0.025"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/venues",le="0.05"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/venues",le="0.1"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/venues",le="0.25"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/venues",le="0.5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/venues",le="1"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/venues",le="2.5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/venues",le="5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizers/:organizer_id/venues",le="+Inf"} 1
+http_request_duration_seconds_sum{method="POST",path="/api/v1/organizers/:organizer_id/venues"} 0.012223779
+http_request_duration_seconds_count{method="POST",path="/api/v1/organizers/:organizer_id/venues"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="0.005"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="0.01"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="0.025"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="0.05"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="0.1"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="0.25"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="0.5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="1"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="2.5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="5"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="+Inf"} 1
+http_request_duration_seconds_sum{method="POST",path="/api/v1/register"} 0.199604509
+http_request_duration_seconds_count{method="POST",path="/api/v1/register"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="0.005"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="0.01"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="0.025"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="0.05"} 398
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="0.1"} 497
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="0.25"} 500
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="0.5"} 500
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="1"} 500
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="2.5"} 500
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="5"} 500
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="+Inf"} 500
+http_request_duration_seconds_sum{method="POST",path="/api/v1/rush-sales/:id/execute"} 21.888757079000015
+http_request_duration_seconds_count{method="POST",path="/api/v1/rush-sales/:id/execute"} 500
+# HELP http_requests_total Total HTTP requests handled
+# TYPE http_requests_total counter
+http_requests_total{method="GET",path="/api/v1/events",status="200"} 1
+http_requests_total{method="GET",path="/api/v1/orders/:id",status="200"} 1673
+http_requests_total{method="GET",path="/api/v1/user/info",status="200"} 1
+http_requests_total{method="GET",path="/metrics",status="200"} 9
+http_requests_total{method="POST",path="/api/v1/admin/organizers",status="200"} 1
+http_requests_total{method="POST",path="/api/v1/login",status="200"} 502
+http_requests_total{method="POST",path="/api/v1/organizers/:organizer_id/events",status="200"} 1
+http_requests_total{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/publish",status="200"} 1
+http_requests_total{method="POST",path="/api/v1/organizers/:organizer_id/events/:event_id/sessions",status="200"} 1
+http_requests_total{method="POST",path="/api/v1/organizers/:organizer_id/rush-sales",status="200"} 1
+http_requests_total{method="POST",path="/api/v1/organizers/:organizer_id/sessions/:session_id/ticket-tiers",status="200"} 1
+http_requests_total{method="POST",path="/api/v1/organizers/:organizer_id/venues",status="200"} 1
+http_requests_total{method="POST",path="/api/v1/register",status="200"} 1
+http_requests_total{method="POST",path="/api/v1/rush-sales/:id/execute",status="200"} 500
+# HELP mq_messages_consumed_total Total messages consumed from RabbitMQ
+# TYPE mq_messages_consumed_total counter
+mq_messages_consumed_total{result="success"} 500
+# HELP mq_messages_published_total Total messages published to RabbitMQ
+# TYPE mq_messages_published_total counter
+mq_messages_published_total 500
+# HELP orders_cancelled_total Total number of orders cancelled
+# TYPE orders_cancelled_total counter
+orders_cancelled_total 0
+# HELP orders_created_total Total number of orders created
+# TYPE orders_created_total counter
+orders_created_total 500
+# HELP outbox_buffer_len Current number of outbox drafts waiting in the process-local batch buffer
+# TYPE outbox_buffer_len gauge
+outbox_buffer_len 0
+# HELP outbox_flush_batch_size Number of outbox rows written per batch flush
+# TYPE outbox_flush_batch_size histogram
+outbox_flush_batch_size_bucket{le="1"} 0
+outbox_flush_batch_size_bucket{le="5"} 0
+outbox_flush_batch_size_bucket{le="10"} 0
+outbox_flush_batch_size_bucket{le="25"} 0
+outbox_flush_batch_size_bucket{le="50"} 0
+outbox_flush_batch_size_bucket{le="100"} 0
+outbox_flush_batch_size_bucket{le="200"} 0
+outbox_flush_batch_size_bucket{le="500"} 0
+outbox_flush_batch_size_bucket{le="1000"} 0
+outbox_flush_batch_size_bucket{le="+Inf"} 0
+outbox_flush_batch_size_sum 0
+outbox_flush_batch_size_count 0
+# HELP outbox_recover_backfill_total Total queued orders that received a backfilled outbox row
+# TYPE outbox_recover_backfill_total counter
+outbox_recover_backfill_total 0
+# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.
+# TYPE process_cpu_seconds_total counter
+process_cpu_seconds_total 101.2
+# HELP process_max_fds Maximum number of open file descriptors.
+# TYPE process_max_fds gauge
+process_max_fds 1.048576e+06
+# HELP process_network_receive_bytes_total Number of bytes received by the process over the network.
+# TYPE process_network_receive_bytes_total counter
+process_network_receive_bytes_total 4.2637973e+07
+# HELP process_network_transmit_bytes_total Number of bytes sent by the process over the network.
+# TYPE process_network_transmit_bytes_total counter
+process_network_transmit_bytes_total 1.3615382e+07
+# HELP process_open_fds Number of open file descriptors.
+# TYPE process_open_fds gauge
+process_open_fds 117
+# HELP process_resident_memory_bytes Resident memory size in bytes.
+# TYPE process_resident_memory_bytes gauge
+process_resident_memory_bytes 5.4296576e+07
+# HELP process_start_time_seconds Start time of the process since unix epoch in seconds.
+# TYPE process_start_time_seconds gauge
+process_start_time_seconds 1.78543119016e+09
+# HELP process_virtual_memory_bytes Virtual memory size in bytes.
+# TYPE process_virtual_memory_bytes gauge
+process_virtual_memory_bytes 1.318617088e+09
+# HELP process_virtual_memory_max_bytes Maximum amount of virtual memory available in bytes.
+# TYPE process_virtual_memory_max_bytes gauge
+process_virtual_memory_max_bytes 1.8446744073709552e+19
+# HELP promhttp_metric_handler_requests_in_flight Current number of scrapes being served.
+# TYPE promhttp_metric_handler_requests_in_flight gauge
+promhttp_metric_handler_requests_in_flight 1
+# HELP promhttp_metric_handler_requests_total Total number of scrapes by HTTP status code.
+# TYPE promhttp_metric_handler_requests_total counter
+promhttp_metric_handler_requests_total{code="200"} 9
+promhttp_metric_handler_requests_total{code="500"} 0
+promhttp_metric_handler_requests_total{code="503"} 0
