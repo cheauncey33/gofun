@@ -22,6 +22,7 @@ type Container struct {
 	MQRetryQueueName string
 	MQDLXName        string
 	MQDLQName        string
+	MQQueueType      string
 	SnowflakeNode    *snowflake.Node
 	JWTSecret        []byte
 	TicketQRSecret   []byte
@@ -36,6 +37,8 @@ type Container struct {
 	TicketCatalogRepo repository.TicketCatalogRepository
 
 	publishMu                    sync.Mutex
+	mqConnMu                     sync.Mutex
+	mqURL                        string
 	PublishPersistent            func(body []byte) error
 	PublishPersistentWithHeaders func(ctx context.Context, body []byte, headers amqp.Table) error
 	NewMQChannel                 func() (*amqp.Channel, error)

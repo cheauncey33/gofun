@@ -59,6 +59,7 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 		MQRetryQueueName:  retryQueueName,
 		MQDLXName:         dlxName,
 		MQDLQName:         dlqName,
+		MQQueueType:       cfg.RabbitMQ.QueueType,
 		SnowflakeNode:     node,
 		JWTSecret:         []byte(cfg.JWT.Secret),
 		TicketQRSecret:    []byte(cfg.TicketQR.Secret),
@@ -66,6 +67,7 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 		LocalCache:        lc,
 		EventSearcher:     eventSearcher,
 		SearchPreferES:    preferES,
+		mqURL:             cfg.RabbitMQ.URL,
 		ProductRepo:       repository.NewProductRepository(db),
 		OrderRepo:         repository.NewOrderRepository(db),
 		CategoryRepo:      repository.NewCategoryRepository(db),
@@ -174,12 +176,23 @@ func ticketingSchemaModels() []interface{} {
 }
 
 func initRedis(cfg config.RedisConfig, tracingEnabled bool) (*redis.Client, error) {
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     cfg.Addr,
-		Password: cfg.Password,
-		DB:       cfg.DB,
-		PoolSize: cfg.PoolSize,
-	})
+	var rdb *redis.Client
+	if strings.TrimSpace(cfg.MasterName) != "" {
+		rdb = redis.NewFailoverClient(&redis.FailoverOptions{
+			MasterName:    cfg.MasterName,
+			SentinelAddrs: cfg.SentinelAddrs,
+			Password:      cfg.Password,
+			DB:            cfg.DB,
+			PoolSize:      cfg.PoolSize,
+		})
+	} else {
+		rdb = redis.NewClient(&redis.Options{
+			Addr:     cfg.Addr,
+			Password: cfg.Password,
+			DB:       cfg.DB,
+			PoolSize: cfg.PoolSize,
+		})
+	}
 	if tracingEnabled {
 		if err := redisotel.InstrumentTracing(rdb); err != nil {
 			return nil, fmt.Errorf("启用 Redis tracing: %w", err)
@@ -203,7 +216,14 @@ func initRabbitMQ(cfg config.RabbitMQConfig) (*amqp.Connection, *amqp.Channel, s
 	if err != nil {
 		return nil, nil, "", "", "", "", fmt.Errorf("rabbit getting channel error: %w", err)
 	}
-	if err := declareOrderQueues(ch, cfg.QueueName, cfg.RetryQueueName, cfg.DLXName, cfg.DLQName); err != nil {
+	if err := declareOrderQueues(
+		ch,
+		cfg.QueueName,
+		cfg.RetryQueueName,
+		cfg.DLXName,
+		cfg.DLQName,
+		cfg.QueueType,
+	); err != nil {
 		return nil, nil, "", "", "", "", err
 	}
 	if err := ch.Confirm(false); err != nil {
@@ -252,12 +272,21 @@ func initEventSearcher(cfg config.ElasticsearchConfig) (search.EventSearcher, bo
 }
 
 func (c *Container) publishPersistent(ctx context.Context, body []byte, headers amqp.Table) error {
-	if c.MQChannel == nil {
-		return fmt.Errorf("rabbitMQ publish channel is not initialized")
-	}
 	c.publishMu.Lock()
 	defer c.publishMu.Unlock()
 
+	if c.MQChannel == nil || c.MQChannel.IsClosed() {
+		ch, err := c.newMQChannel()
+		if err != nil {
+			return err
+		}
+		if err := ch.Confirm(false); err != nil {
+			_ = ch.Close()
+			return fmt.Errorf("开启发布确认失败: %w", err)
+		}
+		c.MQChannel = ch
+		common.MQChannel = ch
+	}
 	confirm, err := c.MQChannel.PublishWithDeferredConfirmWithContext(
 		ctx,
 		"",
@@ -272,6 +301,8 @@ func (c *Container) publishPersistent(ctx context.Context, body []byte, headers 
 		},
 	)
 	if err != nil {
+		_ = c.MQChannel.Close()
+		c.MQChannel = nil
 		return err
 	}
 	if confirm == nil {
@@ -290,21 +321,44 @@ func (c *Container) publishPersistent(ctx context.Context, body []byte, headers 
 }
 
 func (c *Container) newMQChannel() (*amqp.Channel, error) {
-	if c.MQConn == nil {
-		return nil, fmt.Errorf("rabbitMQ connection is not initialized")
+	c.mqConnMu.Lock()
+	defer c.mqConnMu.Unlock()
+
+	for attempt := 0; attempt < 2; attempt++ {
+		if c.MQConn == nil || c.MQConn.IsClosed() {
+			conn, err := amqp.Dial(c.mqURL)
+			if err != nil {
+				return nil, fmt.Errorf("rabbitMQ reconnect: %w", err)
+			}
+			c.MQConn = conn
+			common.MQConn = conn
+		}
+		ch, err := c.MQConn.Channel()
+		if err != nil {
+			_ = c.MQConn.Close()
+			c.MQConn = nil
+			continue
+		}
+		if err := declareOrderQueues(
+			ch,
+			c.MQQueueName,
+			c.MQRetryQueueName,
+			c.MQDLXName,
+			c.MQDLQName,
+			c.MQQueueType,
+		); err != nil {
+			_ = ch.Close()
+			return nil, err
+		}
+		return ch, nil
 	}
-	ch, err := c.MQConn.Channel()
-	if err != nil {
-		return nil, fmt.Errorf("rabbit getting channel error: %w", err)
-	}
-	if err := declareOrderQueues(ch, c.MQQueueName, c.MQRetryQueueName, c.MQDLXName, c.MQDLQName); err != nil {
-		_ = ch.Close()
-		return nil, err
-	}
-	return ch, nil
+	return nil, fmt.Errorf("rabbit getting channel error after reconnect")
 }
 
-func declareOrderQueues(ch *amqp.Channel, queueName, retryQueueName, dlxName, dlqName string) error {
+func declareOrderQueues(
+	ch *amqp.Channel,
+	queueName, retryQueueName, dlxName, dlqName, queueType string,
+) error {
 	if queueName == "" {
 		return fmt.Errorf("rabbitMQ queue name is empty")
 	}
@@ -320,19 +374,31 @@ func declareOrderQueues(ch *amqp.Channel, queueName, retryQueueName, dlxName, dl
 	if err := ch.ExchangeDeclare(dlxName, "direct", true, false, false, false, nil); err != nil {
 		return fmt.Errorf("声明死信交换机失败: %w", err)
 	}
-	if _, err := ch.QueueDeclare(dlqName, true, false, false, false, nil); err != nil {
+	args := rabbitQueueArgs(queueType, nil)
+	if _, err := ch.QueueDeclare(dlqName, true, false, false, false, args); err != nil {
 		return fmt.Errorf("声明死信队列失败: %w", err)
 	}
 	if err := ch.QueueBind(dlqName, dlqName, dlxName, false, nil); err != nil {
 		return fmt.Errorf("绑定死信队列失败: %w", err)
 	}
-	if _, err := ch.QueueDeclare(queueName, true, false, false, false, nil); err != nil {
+	if _, err := ch.QueueDeclare(queueName, true, false, false, false, args); err != nil {
 		return fmt.Errorf("声明队列失败: %w", err)
 	}
-	if _, err := ch.QueueDeclare(retryQueueName, true, false, false, false, nil); err != nil {
+	if _, err := ch.QueueDeclare(retryQueueName, true, false, false, false, args); err != nil {
 		return fmt.Errorf("声明重试队列失败: %w", err)
 	}
 	return nil
+}
+
+func rabbitQueueArgs(queueType string, base amqp.Table) amqp.Table {
+	if queueType != "quorum" {
+		return base
+	}
+	args := amqp.Table{"x-queue-type": "quorum"}
+	for key, value := range base {
+		args[key] = value
+	}
+	return args
 }
 
 func ticketQRSecrets(cfg *config.Config) [][]byte {

@@ -206,6 +206,7 @@ func (s *TicketOrderService) publishClaimedOutboxBatch(
 		)
 		if pubErr != nil {
 			_ = s.markOutboxPublishResult(ctx, row, pubErr)
+			_ = s.releaseClaimedOutboxRows(ctx, rows)
 			return 0, pubErr
 		}
 		if confirm == nil {
@@ -230,11 +231,28 @@ func (s *TicketOrderService) publishClaimedOutboxBatch(
 			return 0, err
 		}
 		if publishErr != nil {
+			_ = s.releaseClaimedOutboxRows(ctx, rows)
 			return 0, publishErr
 		}
 		metrics.MQMessagesPublished.Inc()
 	}
 	return len(rows), nil
+}
+
+func (s *TicketOrderService) releaseClaimedOutboxRows(
+	ctx context.Context,
+	rows []models.TicketOrderOutbox,
+) error {
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return s.db.WithContext(ctx).Model(&models.TicketOrderOutbox{}).
+		Where("id IN ? AND status = ?", ids, models.TicketOrderOutboxPublishing).
+		Update("status", models.TicketOrderOutboxPending).Error
 }
 
 func (s *TicketOrderService) markOutboxPublishResult(

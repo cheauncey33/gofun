@@ -4,6 +4,8 @@ import (
 	"WHU_Snack_GO/models"
 	"reflect"
 	"testing"
+
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func TestTicketingSchemaModelsExcludeLegacyCommerceTables(t *testing.T) {
@@ -38,5 +40,20 @@ func TestTicketingSchemaModelsExcludeLegacyCommerceTables(t *testing.T) {
 		if actual[reflect.TypeOf(model)] {
 			t.Fatalf("legacy commerce model %T must not be auto-migrated", model)
 		}
+	}
+}
+
+func TestRabbitQueueArgs(t *testing.T) {
+	base := amqp.Table{"x-dead-letter-exchange": "orders.dlx"}
+	if got := rabbitQueueArgs("classic", base); !reflect.DeepEqual(got, base) {
+		t.Fatalf("classic queue args changed: %#v", got)
+	}
+
+	got := rabbitQueueArgs("quorum", base)
+	if got["x-queue-type"] != "quorum" {
+		t.Fatalf("missing quorum queue type: %#v", got)
+	}
+	if got["x-dead-letter-exchange"] != "orders.dlx" {
+		t.Fatalf("base queue args lost: %#v", got)
 	}
 }

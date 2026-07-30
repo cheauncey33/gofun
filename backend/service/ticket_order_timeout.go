@@ -66,10 +66,10 @@ func (s *TicketOrderService) timeoutInfra() ticketTimeoutInfra {
 
 // SetupPaymentTimeoutInfrastructure 声明延时队 + 超时队（消息级 TTL，避免队头阻塞）。
 func (s *TicketOrderService) SetupPaymentTimeoutInfrastructure() error {
-	if s.mqConn == nil {
-		return fmt.Errorf("rabbitMQ connection is not initialized")
+	if s.newMQChannel == nil {
+		return fmt.Errorf("rabbitMQ channel factory is not initialized")
 	}
-	ch, err := s.mqConn.Channel()
+	ch, err := s.newMQChannel()
 	if err != nil {
 		return fmt.Errorf("ticket timeout setup: channel: %w", err)
 	}
@@ -83,10 +83,17 @@ func (s *TicketOrderService) SetupPaymentTimeoutInfrastructure() error {
 		"x-dead-letter-exchange":    infra.exchange,
 		"x-dead-letter-routing-key": infra.routingKey,
 	}
+	if s.mqQueueType == "quorum" {
+		args["x-queue-type"] = "quorum"
+	}
 	if _, err := ch.QueueDeclare(infra.delayQueue, true, false, false, false, args); err != nil {
 		return fmt.Errorf("ticket timeout setup: delay queue: %w", err)
 	}
-	if _, err := ch.QueueDeclare(infra.timeoutQ, true, false, false, false, nil); err != nil {
+	timeoutArgs := amqp.Table(nil)
+	if s.mqQueueType == "quorum" {
+		timeoutArgs = amqp.Table{"x-queue-type": "quorum"}
+	}
+	if _, err := ch.QueueDeclare(infra.timeoutQ, true, false, false, false, timeoutArgs); err != nil {
 		return fmt.Errorf("ticket timeout setup: timeout queue: %w", err)
 	}
 	if err := ch.QueueBind(infra.timeoutQ, infra.routingKey, infra.exchange, false, nil); err != nil {
@@ -104,10 +111,10 @@ func paymentTimeoutExpirationMs(d time.Duration) string {
 
 // PublishPaymentTimeout 在订单进入 pending_payment 后投递延时关单消息。
 func (s *TicketOrderService) PublishPaymentTimeout(ctx context.Context, orderID, userID int64) error {
-	if s.mqConn == nil {
-		return fmt.Errorf("rabbitMQ connection is not initialized")
+	if s.newMQChannel == nil {
+		return fmt.Errorf("rabbitMQ channel factory is not initialized")
 	}
-	ch, err := s.mqConn.Channel()
+	ch, err := s.newMQChannel()
 	if err != nil {
 		return err
 	}
@@ -186,7 +193,7 @@ func (s *TicketOrderService) runPaymentTimeoutWorker(ctx context.Context, worker
 }
 
 func (s *TicketOrderService) consumePaymentTimeoutLoop(ctx context.Context, workerID int) error {
-	ch, err := s.mqConn.Channel()
+	ch, err := s.newMQChannel()
 	if err != nil {
 		return err
 	}

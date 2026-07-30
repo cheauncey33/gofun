@@ -301,3 +301,37 @@ ticket_qr:
 		t.Errorf("unexpected CORS origins: %#v", cfg.Cors.AllowOrigins)
 	}
 }
+
+func TestLoad_RedisSentinelEnvironment(t *testing.T) {
+	t.Setenv("REDIS_MASTER_NAME", "mymaster")
+	t.Setenv("REDIS_SENTINEL_ADDRS", "sentinel-1:26379, sentinel-2:26379")
+
+	dir := t.TempDir()
+	content := `
+mysql:
+  dsn: "test:test@tcp(mysql)/db"
+redis:
+  addr: ""
+rabbitmq:
+  url: "amqp://localhost"
+jwt:
+  secret: "test"
+ticket_qr:
+  secret: "test-ticket-qr-secret"
+`
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.Redis.MasterName != "mymaster" {
+		t.Fatalf("unexpected master name: %s", cfg.Redis.MasterName)
+	}
+	if len(cfg.Redis.SentinelAddrs) != 2 {
+		t.Fatalf("unexpected sentinel addresses: %#v", cfg.Redis.SentinelAddrs)
+	}
+}

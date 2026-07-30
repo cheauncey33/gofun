@@ -101,11 +101,11 @@ type TicketOrderService struct {
 	db                *gorm.DB
 	rdb               *redis.Client
 	node              *snowflake.Node
-	mqConn         *amqp.Connection
-	newMQChannel   func() (*amqp.Channel, error)
-	mqQueueName    string
-	localCache     *gocache.Cache
-	paymentTimeout time.Duration
+	newMQChannel      func() (*amqp.Channel, error)
+	mqQueueName       string
+	mqQueueType       string
+	localCache        *gocache.Cache
+	paymentTimeout    time.Duration
 	payment           PaymentGateway
 	credentialSigner  *TicketCredentialSigner
 	identityHashKey   []byte
@@ -126,19 +126,19 @@ func NewTicketOrderService(c *container.Container, timeoutMinutes int) *TicketOr
 		timeoutMinutes = 15
 	}
 	return &TicketOrderService{
-		db:                c.DB,
-		rdb:               c.RDB,
-		node:              c.SnowflakeNode,
-		mqConn:            c.MQConn,
+		db:               c.DB,
+		rdb:              c.RDB,
+		node:             c.SnowflakeNode,
 		newMQChannel:     c.NewMQChannel,
 		mqQueueName:      c.MQQueueName,
+		mqQueueType:      c.MQQueueType,
 		localCache:       c.LocalCache,
 		paymentTimeout:   time.Duration(timeoutMinutes) * time.Minute,
-		payment:           NewBalancePaymentGateway(),
-		credentialSigner:  NewTicketCredentialSigner(c.TicketQRSecrets...),
-		identityHashKey:   append([]byte(nil), c.TicketQRSecret...),
-		scannerInterval:   2 * time.Minute,
-		outboxNotify:      make(chan struct{}, 1),
+		payment:          NewBalancePaymentGateway(),
+		credentialSigner: NewTicketCredentialSigner(c.TicketQRSecrets...),
+		identityHashKey:  append([]byte(nil), c.TicketQRSecret...),
+		scannerInterval:  2 * time.Minute,
+		outboxNotify:     make(chan struct{}, 1),
 	}
 }
 

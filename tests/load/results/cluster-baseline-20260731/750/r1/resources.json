@@ -1,0 +1,1612 @@
+{
+  "sample_count": 150,
+  "containers": {
+    "whu-snack-go-cluster-frontend-1": {
+      "cpu_pct_avg": 2.21,
+      "cpu_pct_max": 3.55,
+      "memory_bytes_max": 14040432.64,
+      "pids_max": 13
+    },
+    "whu-snack-go-cluster-backend-1-1": {
+      "cpu_pct_avg": 20.9,
+      "cpu_pct_max": 42.18,
+      "memory_bytes_max": 23949475.84,
+      "pids_max": 20
+    },
+    "whu-snack-go-cluster-backend-2-1": {
+      "cpu_pct_avg": 21.8,
+      "cpu_pct_max": 35.59,
+      "memory_bytes_max": 27304919.04,
+      "pids_max": 22
+    },
+    "whu-snack-go-cluster-backend-3-1": {
+      "cpu_pct_avg": 20.34,
+      "cpu_pct_max": 33.55,
+      "memory_bytes_max": 24243077.12,
+      "pids_max": 21
+    },
+    "whu-snack-go-cluster-mysql-primary-1": {
+      "cpu_pct_avg": 49.09,
+      "cpu_pct_max": 75.04,
+      "memory_bytes_max": 558576435.2,
+      "pids_max": 94
+    },
+    "whu-snack-go-cluster-mysql-replica-1": {
+      "cpu_pct_avg": 43.03,
+      "cpu_pct_max": 105.49,
+      "memory_bytes_max": 478884659.2,
+      "pids_max": 44
+    },
+    "whu-snack-go-cluster-redis-primary-1": {
+      "cpu_pct_avg": 1.04,
+      "cpu_pct_max": 3.68,
+      "memory_bytes_max": 18832424.96,
+      "pids_max": 12
+    },
+    "whu-snack-go-cluster-redis-replica-1": {
+      "cpu_pct_avg": 0.52,
+      "cpu_pct_max": 2.15,
+      "memory_bytes_max": 8371830.784,
+      "pids_max": 6
+    },
+    "whu-snack-go-cluster-rabbitmq-1-1": {
+      "cpu_pct_avg": 105.81,
+      "cpu_pct_max": 251.79,
+      "memory_bytes_max": 211392921.6,
+      "pids_max": 91
+    },
+    "whu-snack-go-cluster-rabbitmq-2-1": {
+      "cpu_pct_avg": 32.29,
+      "cpu_pct_max": 134.4,
+      "memory_bytes_max": 207408332.8,
+      "pids_max": 88
+    },
+    "whu-snack-go-cluster-rabbitmq-3-1": {
+      "cpu_pct_avg": 35.26,
+      "cpu_pct_max": 129.14,
+      "memory_bytes_max": 208142336,
+      "pids_max": 88
+    },
+    "whu-snack-go-cluster-rabbitmq-lb-1": {
+      "cpu_pct_avg": 1.37,
+      "cpu_pct_max": 2.15,
+      "memory_bytes_max": 80195092.48,
+      "pids_max": 13
+    }
+  },
+  "mysql": {
+    "threads_connected_max": 43,
+    "threads_running_max": 18,
+    "row_lock_current_waits_max": 5,
+    "row_lock_waits_delta": 750,
+    "deadlocks_delta": 0,
+    "aborted_connects_delta": 0
+  },
+  "redis": {
+    "ops_per_sec_max": 4001,
+    "latency_avg_ms_max": 0.18,
+    "latency_max_ms": 1,
+    "commands_delta": 9094,
+    "rejected_connections_delta": 0
+  },
+  "rabbitmq": {
+    "messages_ready_max": 3000,
+    "messages_unacknowledged_max": 30,
+    "order_queue_ready_max": 602,
+    "order_queue_unacked_max": 30,
+    "delay_queue_ready_end": 3000,
+    "consumers_max": 18
+  },
+  "samples": [
+    {
+      "at": "2026-07-30T18:15:08.397Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-frontend-1",
+      "cpu_pct": 0,
+      "memory_bytes": 12341739.52,
+      "pids": 13,
+      "block_io": "0B / 8.19kB",
+      "net_io": "30.3MB / 32.7MB"
+    },
+    {
+      "at": "2026-07-30T18:15:08.397Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-1-1",
+      "cpu_pct": 1.97,
+      "memory_bytes": 22271754.24,
+      "pids": 20,
+      "block_io": "0B / 0B",
+      "net_io": "86.3MB / 27.1MB"
+    },
+    {
+      "at": "2026-07-30T18:15:08.397Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-2-1",
+      "cpu_pct": 1.94,
+      "memory_bytes": 22240296.96,
+      "pids": 21,
+      "block_io": "0B / 0B",
+      "net_io": "86MB / 27MB"
+    },
+    {
+      "at": "2026-07-30T18:15:08.397Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-3-1",
+      "cpu_pct": 2.07,
+      "memory_bytes": 21831352.32,
+      "pids": 20,
+      "block_io": "4.1kB / 0B",
+      "net_io": "85.7MB / 26.8MB"
+    },
+    {
+      "at": "2026-07-30T18:15:08.397Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "cpu_pct": 3.78,
+      "memory_bytes": 547566387.2,
+      "pids": 77,
+      "block_io": "3.79MB / 639MB",
+      "net_io": "64MB / 282MB"
+    },
+    {
+      "at": "2026-07-30T18:15:08.397Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "cpu_pct": 0.69,
+      "memory_bytes": 472802918.4,
+      "pids": 44,
+      "block_io": "1.78MB / 654MB",
+      "net_io": "13.8MB / 437kB"
+    },
+    {
+      "at": "2026-07-30T18:15:08.397Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-primary-1",
+      "cpu_pct": 0.29,
+      "memory_bytes": 16179527.68,
+      "pids": 6,
+      "block_io": "8.81MB / 2.94MB",
+      "net_io": "4.66MB / 5.55MB"
+    },
+    {
+      "at": "2026-07-30T18:15:08.397Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-replica-1",
+      "cpu_pct": 0.28,
+      "memory_bytes": 7540310.016,
+      "pids": 6,
+      "block_io": "418kB / 864kB",
+      "net_io": "3.25MB / 3.06MB"
+    },
+    {
+      "at": "2026-07-30T18:15:08.397Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "cpu_pct": 1,
+      "memory_bytes": 149946368,
+      "pids": 49,
+      "block_io": "102kB / 27.1MB",
+      "net_io": "11MB / 14MB"
+    },
+    {
+      "at": "2026-07-30T18:15:08.397Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "cpu_pct": 1.13,
+      "memory_bytes": 148373504,
+      "pids": 46,
+      "block_io": "20.5kB / 28MB",
+      "net_io": "8.73MB / 6.95MB"
+    },
+    {
+      "at": "2026-07-30T18:15:08.397Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "cpu_pct": 58.44,
+      "memory_bytes": 203843174.4,
+      "pids": 88,
+      "block_io": "655kB / 27.6MB",
+      "net_io": "8.66MB / 6.83MB"
+    },
+    {
+      "at": "2026-07-30T18:15:08.397Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "cpu_pct": 0.04,
+      "memory_bytes": 78873886.72,
+      "pids": 13,
+      "block_io": "0B / 954kB",
+      "net_io": "3.26MB / 3.27MB"
+    },
+    {
+      "at": "2026-07-30T18:15:08.397Z",
+      "type": "mysql",
+      "Aborted_connects": 0,
+      "Connections": 5258,
+      "Innodb_row_lock_current_waits": 0,
+      "Innodb_row_lock_waits": 2255,
+      "Threads_connected": 32,
+      "Threads_running": 3
+    },
+    {
+      "at": "2026-07-30T18:15:08.397Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 10,
+      "total_commands_processed": 36642,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.18,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-30T18:15:08.397Z",
+      "type": "rabbitmq",
+      "messages_ready": 2250,
+      "messages_unacknowledged": 0,
+      "consumers": 18,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 2250
+    },
+    {
+      "at": "2026-07-30T18:15:11.515Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-frontend-1",
+      "cpu_pct": 3.3,
+      "memory_bytes": 12803112.96,
+      "pids": 13,
+      "block_io": "0B / 8.19kB",
+      "net_io": "32MB / 34.5MB"
+    },
+    {
+      "at": "2026-07-30T18:15:11.515Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-1-1",
+      "cpu_pct": 21.36,
+      "memory_bytes": 22890414.08,
+      "pids": 20,
+      "block_io": "0B / 0B",
+      "net_io": "90.4MB / 29.2MB"
+    },
+    {
+      "at": "2026-07-30T18:15:11.515Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-2-1",
+      "cpu_pct": 33.77,
+      "memory_bytes": 24725422.08,
+      "pids": 21,
+      "block_io": "0B / 0B",
+      "net_io": "88.6MB / 28.6MB"
+    },
+    {
+      "at": "2026-07-30T18:15:11.515Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-3-1",
+      "cpu_pct": 30.87,
+      "memory_bytes": 24243077.12,
+      "pids": 20,
+      "block_io": "4.1kB / 0B",
+      "net_io": "90.1MB / 28.9MB"
+    },
+    {
+      "at": "2026-07-30T18:15:11.515Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "cpu_pct": 75.04,
+      "memory_bytes": 553648128,
+      "pids": 84,
+      "block_io": "3.79MB / 665MB",
+      "net_io": "68.6MB / 295MB"
+    },
+    {
+      "at": "2026-07-30T18:15:11.515Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "cpu_pct": 103.52,
+      "memory_bytes": 476682649.6,
+      "pids": 44,
+      "block_io": "1.78MB / 670MB",
+      "net_io": "15.3MB / 453kB"
+    },
+    {
+      "at": "2026-07-30T18:15:11.515Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-primary-1",
+      "cpu_pct": 0.35,
+      "memory_bytes": 16011755.52,
+      "pids": 6,
+      "block_io": "8.82MB / 3.26MB",
+      "net_io": "5.19MB / 6.07MB"
+    },
+    {
+      "at": "2026-07-30T18:15:11.515Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-replica-1",
+      "cpu_pct": 0.39,
+      "memory_bytes": 7376732.16,
+      "pids": 6,
+      "block_io": "418kB / 864kB",
+      "net_io": "3.61MB / 3.11MB"
+    },
+    {
+      "at": "2026-07-30T18:15:11.515Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "cpu_pct": 11.45,
+      "memory_bytes": 152043520,
+      "pids": 49,
+      "block_io": "102kB / 28.5MB",
+      "net_io": "11.5MB / 14.9MB"
+    },
+    {
+      "at": "2026-07-30T18:15:11.515Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "cpu_pct": 40.69,
+      "memory_bytes": 150680371.2,
+      "pids": 46,
+      "block_io": "20.5kB / 29.4MB",
+      "net_io": "9.24MB / 7.21MB"
+    },
+    {
+      "at": "2026-07-30T18:15:11.515Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "cpu_pct": 8.18,
+      "memory_bytes": 150575513.6,
+      "pids": 46,
+      "block_io": "655kB / 28.9MB",
+      "net_io": "9.15MB / 7.07MB"
+    },
+    {
+      "at": "2026-07-30T18:15:11.515Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "cpu_pct": 1.45,
+      "memory_bytes": 79398174.72,
+      "pids": 13,
+      "block_io": "0B / 954kB",
+      "net_io": "3.56MB / 3.56MB"
+    },
+    {
+      "at": "2026-07-30T18:15:11.515Z",
+      "type": "mysql",
+      "Aborted_connects": 0,
+      "Connections": 5576,
+      "Innodb_row_lock_current_waits": 4,
+      "Innodb_row_lock_waits": 2285,
+      "Threads_connected": 43,
+      "Threads_running": 18
+    },
+    {
+      "at": "2026-07-30T18:15:11.515Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 4001,
+      "total_commands_processed": 43140,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.18,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-30T18:15:11.515Z",
+      "type": "rabbitmq",
+      "messages_ready": 2250,
+      "messages_unacknowledged": 0,
+      "consumers": 18,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 2250
+    },
+    {
+      "at": "2026-07-30T18:15:14.542Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-frontend-1",
+      "cpu_pct": 2.79,
+      "memory_bytes": 13400801.28,
+      "pids": 13,
+      "block_io": "0B / 8.19kB",
+      "net_io": "32.8MB / 35.3MB"
+    },
+    {
+      "at": "2026-07-30T18:15:14.542Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-1-1",
+      "cpu_pct": 42.18,
+      "memory_bytes": 23949475.84,
+      "pids": 20,
+      "block_io": "0B / 0B",
+      "net_io": "95.2MB / 30.6MB"
+    },
+    {
+      "at": "2026-07-30T18:15:14.542Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-2-1",
+      "cpu_pct": 23.73,
+      "memory_bytes": 27304919.04,
+      "pids": 21,
+      "block_io": "0B / 0B",
+      "net_io": "94.8MB / 30.3MB"
+    },
+    {
+      "at": "2026-07-30T18:15:14.542Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-3-1",
+      "cpu_pct": 26.06,
+      "memory_bytes": 24117248,
+      "pids": 20,
+      "block_io": "4.1kB / 0B",
+      "net_io": "94.5MB / 30.2MB"
+    },
+    {
+      "at": "2026-07-30T18:15:14.542Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "cpu_pct": 70.42,
+      "memory_bytes": 555011276.8,
+      "pids": 94,
+      "block_io": "3.79MB / 674MB",
+      "net_io": "71.5MB / 308MB"
+    },
+    {
+      "at": "2026-07-30T18:15:14.542Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "cpu_pct": 105.49,
+      "memory_bytes": 477521510.4,
+      "pids": 44,
+      "block_io": "1.78MB / 682MB",
+      "net_io": "15.6MB / 463kB"
+    },
+    {
+      "at": "2026-07-30T18:15:14.542Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-primary-1",
+      "cpu_pct": 3.68,
+      "memory_bytes": 16536043.52,
+      "pids": 6,
+      "block_io": "8.82MB / 3.26MB",
+      "net_io": "5.26MB / 6.11MB"
+    },
+    {
+      "at": "2026-07-30T18:15:14.542Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-replica-1",
+      "cpu_pct": 0.34,
+      "memory_bytes": 7331643.392,
+      "pids": 6,
+      "block_io": "418kB / 864kB",
+      "net_io": "3.62MB / 3.12MB"
+    },
+    {
+      "at": "2026-07-30T18:15:14.542Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "cpu_pct": 146.56,
+      "memory_bytes": 152148377.6,
+      "pids": 49,
+      "block_io": "102kB / 29.3MB",
+      "net_io": "11.8MB / 15.2MB"
+    },
+    {
+      "at": "2026-07-30T18:15:14.542Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "cpu_pct": 9.68,
+      "memory_bytes": 150365798.4,
+      "pids": 46,
+      "block_io": "20.5kB / 30.2MB",
+      "net_io": "9.4MB / 7.34MB"
+    },
+    {
+      "at": "2026-07-30T18:15:14.542Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "cpu_pct": 9.63,
+      "memory_bytes": 150994944,
+      "pids": 46,
+      "block_io": "655kB / 29.8MB",
+      "net_io": "9.31MB / 7.2MB"
+    },
+    {
+      "at": "2026-07-30T18:15:14.542Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "cpu_pct": 1.56,
+      "memory_bytes": 79660318.72,
+      "pids": 13,
+      "block_io": "0B / 954kB",
+      "net_io": "3.63MB / 3.63MB"
+    },
+    {
+      "at": "2026-07-30T18:15:14.542Z",
+      "type": "mysql",
+      "Aborted_connects": 0,
+      "Connections": 5868,
+      "Innodb_row_lock_current_waits": 5,
+      "Innodb_row_lock_waits": 2379,
+      "Threads_connected": 35,
+      "Threads_running": 12
+    },
+    {
+      "at": "2026-07-30T18:15:14.542Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 280,
+      "total_commands_processed": 44653,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.18,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-30T18:15:14.542Z",
+      "type": "rabbitmq",
+      "messages_ready": 2975,
+      "messages_unacknowledged": 30,
+      "consumers": 18,
+      "order_queue_ready": 602,
+      "order_queue_unacked": 30,
+      "delay_queue_ready": 2373
+    },
+    {
+      "at": "2026-07-30T18:15:17.571Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-frontend-1",
+      "cpu_pct": 2.79,
+      "memory_bytes": 12886999.04,
+      "pids": 13,
+      "block_io": "0B / 8.19kB",
+      "net_io": "34.1MB / 36.7MB"
+    },
+    {
+      "at": "2026-07-30T18:15:17.571Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-1-1",
+      "cpu_pct": 28.74,
+      "memory_bytes": 23634903.04,
+      "pids": 20,
+      "block_io": "0B / 0B",
+      "net_io": "98.1MB / 31.4MB"
+    },
+    {
+      "at": "2026-07-30T18:15:17.571Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-2-1",
+      "cpu_pct": 35.59,
+      "memory_bytes": 24536678.4,
+      "pids": 22,
+      "block_io": "0B / 0B",
+      "net_io": "99.3MB / 31.6MB"
+    },
+    {
+      "at": "2026-07-30T18:15:17.571Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-3-1",
+      "cpu_pct": 19.13,
+      "memory_bytes": 22890414.08,
+      "pids": 21,
+      "block_io": "4.1kB / 0B",
+      "net_io": "97.4MB / 31MB"
+    },
+    {
+      "at": "2026-07-30T18:15:17.571Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "cpu_pct": 63.75,
+      "memory_bytes": 554067558.4,
+      "pids": 80,
+      "block_io": "3.79MB / 679MB",
+      "net_io": "73.3MB / 317MB"
+    },
+    {
+      "at": "2026-07-30T18:15:17.571Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "cpu_pct": 95.33,
+      "memory_bytes": 477940940.8,
+      "pids": 44,
+      "block_io": "1.78MB / 688MB",
+      "net_io": "15.9MB / 474kB"
+    },
+    {
+      "at": "2026-07-30T18:15:17.571Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-primary-1",
+      "cpu_pct": 0.77,
+      "memory_bytes": 16022241.28,
+      "pids": 6,
+      "block_io": "8.82MB / 3.26MB",
+      "net_io": "5.27MB / 6.13MB"
+    },
+    {
+      "at": "2026-07-30T18:15:17.571Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-replica-1",
+      "cpu_pct": 0.4,
+      "memory_bytes": 8371830.784,
+      "pids": 6,
+      "block_io": "418kB / 864kB",
+      "net_io": "3.62MB / 3.14MB"
+    },
+    {
+      "at": "2026-07-30T18:15:17.571Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "cpu_pct": 12.12,
+      "memory_bytes": 152882380.8,
+      "pids": 49,
+      "block_io": "102kB / 31MB",
+      "net_io": "12.3MB / 15.9MB"
+    },
+    {
+      "at": "2026-07-30T18:15:17.571Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "cpu_pct": 9.13,
+      "memory_bytes": 151728947.2,
+      "pids": 46,
+      "block_io": "20.5kB / 31.9MB",
+      "net_io": "9.75MB / 7.62MB"
+    },
+    {
+      "at": "2026-07-30T18:15:17.571Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "cpu_pct": 8.88,
+      "memory_bytes": 151204659.2,
+      "pids": 46,
+      "block_io": "655kB / 31MB",
+      "net_io": "9.57MB / 7.4MB"
+    },
+    {
+      "at": "2026-07-30T18:15:17.571Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "cpu_pct": 1.73,
+      "memory_bytes": 79167488,
+      "pids": 13,
+      "block_io": "0B / 954kB",
+      "net_io": "3.75MB / 3.75MB"
+    },
+    {
+      "at": "2026-07-30T18:15:17.571Z",
+      "type": "mysql",
+      "Aborted_connects": 0,
+      "Connections": 6142,
+      "Innodb_row_lock_current_waits": 4,
+      "Innodb_row_lock_waits": 2488,
+      "Threads_connected": 36,
+      "Threads_running": 11
+    },
+    {
+      "at": "2026-07-30T18:15:17.571Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 6,
+      "total_commands_processed": 44686,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 0,
+      "latency_avg_ms": 0,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-30T18:15:17.571Z",
+      "type": "rabbitmq",
+      "messages_ready": 2975,
+      "messages_unacknowledged": 30,
+      "consumers": 18,
+      "order_queue_ready": 602,
+      "order_queue_unacked": 30,
+      "delay_queue_ready": 2373
+    },
+    {
+      "at": "2026-07-30T18:15:20.604Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-frontend-1",
+      "cpu_pct": 2.81,
+      "memory_bytes": 13694402.56,
+      "pids": 13,
+      "block_io": "0B / 8.19kB",
+      "net_io": "35.4MB / 38.1MB"
+    },
+    {
+      "at": "2026-07-30T18:15:20.604Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-1-1",
+      "cpu_pct": 24.81,
+      "memory_bytes": 22764584.96,
+      "pids": 20,
+      "block_io": "0B / 0B",
+      "net_io": "103MB / 32.6MB"
+    },
+    {
+      "at": "2026-07-30T18:15:20.604Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-2-1",
+      "cpu_pct": 33.03,
+      "memory_bytes": 22963814.4,
+      "pids": 22,
+      "block_io": "0B / 0B",
+      "net_io": "102MB / 32.4MB"
+    },
+    {
+      "at": "2026-07-30T18:15:20.604Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-3-1",
+      "cpu_pct": 33.55,
+      "memory_bytes": 23477616.64,
+      "pids": 21,
+      "block_io": "4.1kB / 0B",
+      "net_io": "102MB / 32.3MB"
+    },
+    {
+      "at": "2026-07-30T18:15:20.604Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "cpu_pct": 66.75,
+      "memory_bytes": 557527859.2,
+      "pids": 81,
+      "block_io": "3.79MB / 685MB",
+      "net_io": "76MB / 331MB"
+    },
+    {
+      "at": "2026-07-30T18:15:20.604Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "cpu_pct": 69.72,
+      "memory_bytes": 477102080,
+      "pids": 44,
+      "block_io": "1.78MB / 695MB",
+      "net_io": "16.1MB / 483kB"
+    },
+    {
+      "at": "2026-07-30T18:15:20.604Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-primary-1",
+      "cpu_pct": 0.51,
+      "memory_bytes": 16273899.52,
+      "pids": 6,
+      "block_io": "8.82MB / 3.26MB",
+      "net_io": "5.4MB / 6.21MB"
+    },
+    {
+      "at": "2026-07-30T18:15:20.604Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-replica-1",
+      "cpu_pct": 0.33,
+      "memory_bytes": 7331643.392,
+      "pids": 6,
+      "block_io": "418kB / 864kB",
+      "net_io": "3.63MB / 3.15MB"
+    },
+    {
+      "at": "2026-07-30T18:15:20.604Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "cpu_pct": 151.69,
+      "memory_bytes": 151833804.8,
+      "pids": 49,
+      "block_io": "102kB / 31.8MB",
+      "net_io": "12.6MB / 16.2MB"
+    },
+    {
+      "at": "2026-07-30T18:15:20.604Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "cpu_pct": 8.7,
+      "memory_bytes": 151099801.6,
+      "pids": 46,
+      "block_io": "20.5kB / 32.7MB",
+      "net_io": "9.94MB / 7.77MB"
+    },
+    {
+      "at": "2026-07-30T18:15:20.604Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "cpu_pct": 110.64,
+      "memory_bytes": 208142336,
+      "pids": 88,
+      "block_io": "655kB / 32.3MB",
+      "net_io": "9.85MB / 7.63MB"
+    },
+    {
+      "at": "2026-07-30T18:15:20.604Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "cpu_pct": 1.81,
+      "memory_bytes": 78905344,
+      "pids": 13,
+      "block_io": "0B / 954kB",
+      "net_io": "3.89MB / 3.89MB"
+    },
+    {
+      "at": "2026-07-30T18:15:20.604Z",
+      "type": "mysql",
+      "Aborted_connects": 0,
+      "Connections": 6357,
+      "Innodb_row_lock_current_waits": 4,
+      "Innodb_row_lock_waits": 2618,
+      "Threads_connected": 37,
+      "Threads_running": 8
+    },
+    {
+      "at": "2026-07-30T18:15:20.604Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 558,
+      "total_commands_processed": 45607,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.09,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-30T18:15:20.604Z",
+      "type": "rabbitmq",
+      "messages_ready": 2978,
+      "messages_unacknowledged": 30,
+      "consumers": 18,
+      "order_queue_ready": 407,
+      "order_queue_unacked": 30,
+      "delay_queue_ready": 2571
+    },
+    {
+      "at": "2026-07-30T18:15:22.623Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-frontend-1",
+      "cpu_pct": 3.55,
+      "memory_bytes": 13662945.28,
+      "pids": 13,
+      "block_io": "0B / 8.19kB",
+      "net_io": "36.2MB / 38.9MB"
+    },
+    {
+      "at": "2026-07-30T18:15:22.623Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-1-1",
+      "cpu_pct": 28.82,
+      "memory_bytes": 23372759.04,
+      "pids": 20,
+      "block_io": "0B / 0B",
+      "net_io": "106MB / 33.4MB"
+    },
+    {
+      "at": "2026-07-30T18:15:22.623Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-2-1",
+      "cpu_pct": 28.75,
+      "memory_bytes": 23110615.04,
+      "pids": 22,
+      "block_io": "0B / 0B",
+      "net_io": "105MB / 33.1MB"
+    },
+    {
+      "at": "2026-07-30T18:15:22.623Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-3-1",
+      "cpu_pct": 30.33,
+      "memory_bytes": 23708303.36,
+      "pids": 21,
+      "block_io": "4.1kB / 0B",
+      "net_io": "105MB / 33MB"
+    },
+    {
+      "at": "2026-07-30T18:15:22.623Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "cpu_pct": 70.16,
+      "memory_bytes": 557318144,
+      "pids": 80,
+      "block_io": "3.79MB / 689MB",
+      "net_io": "77.5MB / 339MB"
+    },
+    {
+      "at": "2026-07-30T18:15:22.623Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "cpu_pct": 16.99,
+      "memory_bytes": 477311795.2,
+      "pids": 44,
+      "block_io": "1.78MB / 699MB",
+      "net_io": "16.3MB / 489kB"
+    },
+    {
+      "at": "2026-07-30T18:15:22.623Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-primary-1",
+      "cpu_pct": 0.5,
+      "memory_bytes": 16441671.68,
+      "pids": 6,
+      "block_io": "8.82MB / 3.26MB",
+      "net_io": "5.41MB / 6.21MB"
+    },
+    {
+      "at": "2026-07-30T18:15:22.623Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-replica-1",
+      "cpu_pct": 0.44,
+      "memory_bytes": 7597981.696,
+      "pids": 6,
+      "block_io": "418kB / 864kB",
+      "net_io": "3.63MB / 3.16MB"
+    },
+    {
+      "at": "2026-07-30T18:15:22.623Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "cpu_pct": 251.79,
+      "memory_bytes": 211392921.6,
+      "pids": 91,
+      "block_io": "102kB / 32.7MB",
+      "net_io": "12.8MB / 16.6MB"
+    },
+    {
+      "at": "2026-07-30T18:15:22.623Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "cpu_pct": 102.3,
+      "memory_bytes": 207408332.8,
+      "pids": 88,
+      "block_io": "20.5kB / 33.6MB",
+      "net_io": "10.1MB / 7.91MB"
+    },
+    {
+      "at": "2026-07-30T18:15:22.623Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "cpu_pct": 9.59,
+      "memory_bytes": 150680371.2,
+      "pids": 46,
+      "block_io": "655kB / 33.2MB",
+      "net_io": "10MB / 7.77MB"
+    },
+    {
+      "at": "2026-07-30T18:15:22.623Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "cpu_pct": 1.69,
+      "memory_bytes": 79146516.48,
+      "pids": 13,
+      "block_io": "0B / 954kB",
+      "net_io": "3.98MB / 3.98MB"
+    },
+    {
+      "at": "2026-07-30T18:15:22.623Z",
+      "type": "mysql",
+      "Aborted_connects": 0,
+      "Connections": 6504,
+      "Innodb_row_lock_current_waits": 5,
+      "Innodb_row_lock_waits": 2705,
+      "Threads_connected": 35,
+      "Threads_running": 9
+    },
+    {
+      "at": "2026-07-30T18:15:22.623Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 5,
+      "total_commands_processed": 45635,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.18,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-30T18:15:22.623Z",
+      "type": "rabbitmq",
+      "messages_ready": 2978,
+      "messages_unacknowledged": 30,
+      "consumers": 18,
+      "order_queue_ready": 407,
+      "order_queue_unacked": 30,
+      "delay_queue_ready": 2571
+    },
+    {
+      "at": "2026-07-30T18:15:24.642Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-frontend-1",
+      "cpu_pct": 2.65,
+      "memory_bytes": 12415139.84,
+      "pids": 13,
+      "block_io": "0B / 8.19kB",
+      "net_io": "37MB / 39.8MB"
+    },
+    {
+      "at": "2026-07-30T18:15:24.642Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-1-1",
+      "cpu_pct": 23.71,
+      "memory_bytes": 22124953.6,
+      "pids": 20,
+      "block_io": "0B / 0B",
+      "net_io": "108MB / 34.1MB"
+    },
+    {
+      "at": "2026-07-30T18:15:24.642Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-2-1",
+      "cpu_pct": 24,
+      "memory_bytes": 22638755.84,
+      "pids": 22,
+      "block_io": "0B / 0B",
+      "net_io": "108MB / 33.8MB"
+    },
+    {
+      "at": "2026-07-30T18:15:24.642Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-3-1",
+      "cpu_pct": 23.89,
+      "memory_bytes": 23372759.04,
+      "pids": 21,
+      "block_io": "4.1kB / 0B",
+      "net_io": "108MB / 33.7MB"
+    },
+    {
+      "at": "2026-07-30T18:15:24.642Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "cpu_pct": 57.25,
+      "memory_bytes": 558052147.2,
+      "pids": 80,
+      "block_io": "3.79MB / 693MB",
+      "net_io": "79.1MB / 347MB"
+    },
+    {
+      "at": "2026-07-30T18:15:24.642Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "cpu_pct": 10.12,
+      "memory_bytes": 478150656,
+      "pids": 44,
+      "block_io": "1.78MB / 704MB",
+      "net_io": "16.4MB / 495kB"
+    },
+    {
+      "at": "2026-07-30T18:15:24.642Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-primary-1",
+      "cpu_pct": 0.32,
+      "memory_bytes": 16452157.44,
+      "pids": 6,
+      "block_io": "8.82MB / 3.26MB",
+      "net_io": "5.41MB / 6.22MB"
+    },
+    {
+      "at": "2026-07-30T18:15:24.642Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-replica-1",
+      "cpu_pct": 0.31,
+      "memory_bytes": 7323254.784,
+      "pids": 6,
+      "block_io": "418kB / 864kB",
+      "net_io": "3.64MB / 3.16MB"
+    },
+    {
+      "at": "2026-07-30T18:15:24.642Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "cpu_pct": 134.04,
+      "memory_bytes": 152358092.8,
+      "pids": 49,
+      "block_io": "102kB / 33.6MB",
+      "net_io": "13.1MB / 16.9MB"
+    },
+    {
+      "at": "2026-07-30T18:15:24.642Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "cpu_pct": 8.06,
+      "memory_bytes": 150994944,
+      "pids": 46,
+      "block_io": "20.5kB / 34.5MB",
+      "net_io": "10.3MB / 8.06MB"
+    },
+    {
+      "at": "2026-07-30T18:15:24.642Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "cpu_pct": 9.7,
+      "memory_bytes": 151728947.2,
+      "pids": 46,
+      "block_io": "655kB / 34.1MB",
+      "net_io": "10.2MB / 7.93MB"
+    },
+    {
+      "at": "2026-07-30T18:15:24.642Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "cpu_pct": 1.93,
+      "memory_bytes": 79901491.2,
+      "pids": 13,
+      "block_io": "0B / 954kB",
+      "net_io": "4.07MB / 4.07MB"
+    },
+    {
+      "at": "2026-07-30T18:15:24.642Z",
+      "type": "mysql",
+      "Aborted_connects": 0,
+      "Connections": 6662,
+      "Innodb_row_lock_current_waits": 5,
+      "Innodb_row_lock_waits": 2786,
+      "Threads_connected": 34,
+      "Threads_running": 9
+    },
+    {
+      "at": "2026-07-30T18:15:24.642Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 4,
+      "total_commands_processed": 45658,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 0,
+      "latency_avg_ms": 0,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-30T18:15:24.642Z",
+      "type": "rabbitmq",
+      "messages_ready": 2977,
+      "messages_unacknowledged": 30,
+      "consumers": 18,
+      "order_queue_ready": 196,
+      "order_queue_unacked": 30,
+      "delay_queue_ready": 2781
+    },
+    {
+      "at": "2026-07-30T18:15:26.650Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-frontend-1",
+      "cpu_pct": 2.7,
+      "memory_bytes": 12729712.64,
+      "pids": 13,
+      "block_io": "0B / 8.19kB",
+      "net_io": "37.9MB / 40.8MB"
+    },
+    {
+      "at": "2026-07-30T18:15:26.650Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-1-1",
+      "cpu_pct": 20.6,
+      "memory_bytes": 22229811.2,
+      "pids": 20,
+      "block_io": "0B / 0B",
+      "net_io": "111MB / 34.8MB"
+    },
+    {
+      "at": "2026-07-30T18:15:26.650Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-2-1",
+      "cpu_pct": 20.52,
+      "memory_bytes": 22942842.88,
+      "pids": 22,
+      "block_io": "0B / 0B",
+      "net_io": "111MB / 34.5MB"
+    },
+    {
+      "at": "2026-07-30T18:15:26.650Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-3-1",
+      "cpu_pct": 21.43,
+      "memory_bytes": 23246929.92,
+      "pids": 21,
+      "block_io": "4.1kB / 0B",
+      "net_io": "110MB / 34.4MB"
+    },
+    {
+      "at": "2026-07-30T18:15:26.650Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "cpu_pct": 50.28,
+      "memory_bytes": 556793856,
+      "pids": 79,
+      "block_io": "3.79MB / 697MB",
+      "net_io": "80.4MB / 355MB"
+    },
+    {
+      "at": "2026-07-30T18:15:26.650Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "cpu_pct": 9.14,
+      "memory_bytes": 478465228.8,
+      "pids": 44,
+      "block_io": "1.78MB / 707MB",
+      "net_io": "16.6MB / 501kB"
+    },
+    {
+      "at": "2026-07-30T18:15:26.650Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-primary-1",
+      "cpu_pct": 2.1,
+      "memory_bytes": 15927869.44,
+      "pids": 6,
+      "block_io": "8.82MB / 3.26MB",
+      "net_io": "5.41MB / 6.22MB"
+    },
+    {
+      "at": "2026-07-30T18:15:26.650Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-replica-1",
+      "cpu_pct": 2.15,
+      "memory_bytes": 7585398.784,
+      "pids": 6,
+      "block_io": "418kB / 864kB",
+      "net_io": "3.64MB / 3.17MB"
+    },
+    {
+      "at": "2026-07-30T18:15:26.650Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "cpu_pct": 119.13,
+      "memory_bytes": 152567808,
+      "pids": 49,
+      "block_io": "102kB / 34.5MB",
+      "net_io": "13.4MB / 17.3MB"
+    },
+    {
+      "at": "2026-07-30T18:15:26.650Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "cpu_pct": 8.23,
+      "memory_bytes": 151728947.2,
+      "pids": 46,
+      "block_io": "20.5kB / 35.4MB",
+      "net_io": "10.5MB / 8.21MB"
+    },
+    {
+      "at": "2026-07-30T18:15:26.650Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "cpu_pct": 129.14,
+      "memory_bytes": 152148377.6,
+      "pids": 46,
+      "block_io": "655kB / 35MB",
+      "net_io": "10.4MB / 8.08MB"
+    },
+    {
+      "at": "2026-07-30T18:15:26.650Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "cpu_pct": 2.15,
+      "memory_bytes": 80195092.48,
+      "pids": 13,
+      "block_io": "0B / 954kB",
+      "net_io": "4.17MB / 4.17MB"
+    },
+    {
+      "at": "2026-07-30T18:15:26.650Z",
+      "type": "mysql",
+      "Aborted_connects": 0,
+      "Connections": 6801,
+      "Innodb_row_lock_current_waits": 4,
+      "Innodb_row_lock_waits": 2875,
+      "Threads_connected": 35,
+      "Threads_running": 8
+    },
+    {
+      "at": "2026-07-30T18:15:26.650Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 3,
+      "total_commands_processed": 45682,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.18,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-30T18:15:26.650Z",
+      "type": "rabbitmq",
+      "messages_ready": 2977,
+      "messages_unacknowledged": 30,
+      "consumers": 18,
+      "order_queue_ready": 196,
+      "order_queue_unacked": 30,
+      "delay_queue_ready": 2781
+    },
+    {
+      "at": "2026-07-30T18:15:28.668Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-frontend-1",
+      "cpu_pct": 1.49,
+      "memory_bytes": 14040432.64,
+      "pids": 13,
+      "block_io": "0B / 8.19kB",
+      "net_io": "38.6MB / 41.5MB"
+    },
+    {
+      "at": "2026-07-30T18:15:28.668Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-1-1",
+      "cpu_pct": 12.84,
+      "memory_bytes": 21139292.16,
+      "pids": 20,
+      "block_io": "0B / 0B",
+      "net_io": "113MB / 35.3MB"
+    },
+    {
+      "at": "2026-07-30T18:15:28.668Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-2-1",
+      "cpu_pct": 12.81,
+      "memory_bytes": 22166896.64,
+      "pids": 22,
+      "block_io": "0B / 0B",
+      "net_io": "113MB / 35MB"
+    },
+    {
+      "at": "2026-07-30T18:15:28.668Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-3-1",
+      "cpu_pct": 12.04,
+      "memory_bytes": 21967667.2,
+      "pids": 21,
+      "block_io": "4.1kB / 0B",
+      "net_io": "112MB / 34.9MB"
+    },
+    {
+      "at": "2026-07-30T18:15:28.668Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "cpu_pct": 30.42,
+      "memory_bytes": 558157004.8,
+      "pids": 77,
+      "block_io": "3.79MB / 700MB",
+      "net_io": "81.4MB / 361MB"
+    },
+    {
+      "at": "2026-07-30T18:15:28.668Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "cpu_pct": 9.5,
+      "memory_bytes": 478884659.2,
+      "pids": 44,
+      "block_io": "1.78MB / 712MB",
+      "net_io": "16.7MB / 506kB"
+    },
+    {
+      "at": "2026-07-30T18:15:28.668Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-primary-1",
+      "cpu_pct": 0.33,
+      "memory_bytes": 16190013.44,
+      "pids": 6,
+      "block_io": "8.82MB / 3.26MB",
+      "net_io": "5.42MB / 6.24MB"
+    },
+    {
+      "at": "2026-07-30T18:15:28.668Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-replica-1",
+      "cpu_pct": 0.32,
+      "memory_bytes": 7589593.088,
+      "pids": 6,
+      "block_io": "418kB / 864kB",
+      "net_io": "3.64MB / 3.19MB"
+    },
+    {
+      "at": "2026-07-30T18:15:28.668Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "cpu_pct": 229.9,
+      "memory_bytes": 152882380.8,
+      "pids": 49,
+      "block_io": "102kB / 35.3MB",
+      "net_io": "13.7MB / 17.6MB"
+    },
+    {
+      "at": "2026-07-30T18:15:28.668Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "cpu_pct": 134.4,
+      "memory_bytes": 151833804.8,
+      "pids": 46,
+      "block_io": "20.5kB / 36.2MB",
+      "net_io": "10.7MB / 8.35MB"
+    },
+    {
+      "at": "2026-07-30T18:15:28.668Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "cpu_pct": 7.95,
+      "memory_bytes": 151519232,
+      "pids": 46,
+      "block_io": "655kB / 35.8MB",
+      "net_io": "10.6MB / 8.23MB"
+    },
+    {
+      "at": "2026-07-30T18:15:28.668Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "cpu_pct": 1.3,
+      "memory_bytes": 79377203.2,
+      "pids": 13,
+      "block_io": "0B / 954kB",
+      "net_io": "4.24MB / 4.24MB"
+    },
+    {
+      "at": "2026-07-30T18:15:28.668Z",
+      "type": "mysql",
+      "Aborted_connects": 0,
+      "Connections": 6942,
+      "Innodb_row_lock_current_waits": 4,
+      "Innodb_row_lock_waits": 2966,
+      "Threads_connected": 36,
+      "Threads_running": 8
+    },
+    {
+      "at": "2026-07-30T18:15:28.668Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 5,
+      "total_commands_processed": 45711,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.09,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-30T18:15:28.668Z",
+      "type": "rabbitmq",
+      "messages_ready": 2977,
+      "messages_unacknowledged": 30,
+      "consumers": 18,
+      "order_queue_ready": 196,
+      "order_queue_unacked": 30,
+      "delay_queue_ready": 2781
+    },
+    {
+      "at": "2026-07-30T18:15:30.152Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-frontend-1",
+      "cpu_pct": 0.07,
+      "memory_bytes": 13075742.72,
+      "pids": 13,
+      "block_io": "0B / 8.19kB",
+      "net_io": "38.6MB / 41.5MB"
+    },
+    {
+      "at": "2026-07-30T18:15:30.152Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-1-1",
+      "cpu_pct": 4.01,
+      "memory_bytes": 20950548.48,
+      "pids": 20,
+      "block_io": "0B / 0B",
+      "net_io": "113MB / 35.3MB"
+    },
+    {
+      "at": "2026-07-30T18:15:30.152Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-2-1",
+      "cpu_pct": 3.84,
+      "memory_bytes": 22229811.2,
+      "pids": 22,
+      "block_io": "0B / 0B",
+      "net_io": "113MB / 35MB"
+    },
+    {
+      "at": "2026-07-30T18:15:30.152Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-backend-3-1",
+      "cpu_pct": 4.01,
+      "memory_bytes": 22502440.96,
+      "pids": 21,
+      "block_io": "4.1kB / 0B",
+      "net_io": "113MB / 34.9MB"
+    },
+    {
+      "at": "2026-07-30T18:15:30.152Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "cpu_pct": 3.01,
+      "memory_bytes": 558576435.2,
+      "pids": 77,
+      "block_io": "3.79MB / 702MB",
+      "net_io": "81.5MB / 362MB"
+    },
+    {
+      "at": "2026-07-30T18:15:30.152Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "cpu_pct": 9.84,
+      "memory_bytes": 478570086.4,
+      "pids": 44,
+      "block_io": "1.78MB / 716MB",
+      "net_io": "16.7MB / 506kB"
+    },
+    {
+      "at": "2026-07-30T18:15:30.152Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-primary-1",
+      "cpu_pct": 1.52,
+      "memory_bytes": 18832424.96,
+      "pids": 12,
+      "block_io": "8.82MB / 3.26MB",
+      "net_io": "5.42MB / 6.24MB"
+    },
+    {
+      "at": "2026-07-30T18:15:30.152Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-redis-replica-1",
+      "cpu_pct": 0.27,
+      "memory_bytes": 7581204.48,
+      "pids": 6,
+      "block_io": "418kB / 864kB",
+      "net_io": "3.65MB / 3.19MB"
+    },
+    {
+      "at": "2026-07-30T18:15:30.152Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "cpu_pct": 0.42,
+      "memory_bytes": 152253235.2,
+      "pids": 49,
+      "block_io": "102kB / 35.3MB",
+      "net_io": "13.7MB / 17.6MB"
+    },
+    {
+      "at": "2026-07-30T18:15:30.152Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "cpu_pct": 0.54,
+      "memory_bytes": 150785228.8,
+      "pids": 46,
+      "block_io": "20.5kB / 36.2MB",
+      "net_io": "10.7MB / 8.36MB"
+    },
+    {
+      "at": "2026-07-30T18:15:30.152Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "cpu_pct": 0.46,
+      "memory_bytes": 150994944,
+      "pids": 46,
+      "block_io": "655kB / 35.8MB",
+      "net_io": "10.6MB / 8.24MB"
+    },
+    {
+      "at": "2026-07-30T18:15:30.152Z",
+      "type": "container",
+      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "cpu_pct": 0.03,
+      "memory_bytes": 78873886.72,
+      "pids": 13,
+      "block_io": "0B / 954kB",
+      "net_io": "4.24MB / 4.25MB"
+    },
+    {
+      "at": "2026-07-30T18:15:30.152Z",
+      "type": "mysql",
+      "Aborted_connects": 0,
+      "Connections": 6968,
+      "Innodb_row_lock_current_waits": 0,
+      "Innodb_row_lock_waits": 3005,
+      "Threads_connected": 32,
+      "Threads_running": 3
+    },
+    {
+      "at": "2026-07-30T18:15:30.152Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 15,
+      "total_commands_processed": 45736,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 0,
+      "latency_avg_ms": 0,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-30T18:15:30.152Z",
+      "type": "rabbitmq",
+      "messages_ready": 3000,
+      "messages_unacknowledged": 3,
+      "consumers": 18,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 3,
+      "delay_queue_ready": 3000
+    }
+  ]
+}

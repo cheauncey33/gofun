@@ -14,9 +14,13 @@ redis:
   password: ""
   db: 0
   pool_size: 100
+  # Sentinel 模式下填写 master_name 和 sentinel_addrs，addr 仅用于直连模式。
+  master_name: ""
+  sentinel_addrs: []
 
 rabbitmq:
   url: "amqp://guest:guest@localhost:5672/"
+  queue_type: "classic"  # 集群部署使用 quorum
   queue_name: "fuchang.order.queue"
   retry_queue_name: "fuchang.order.retry"
   dlx_name: "fuchang.order.dlx"

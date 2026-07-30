@@ -45,14 +45,17 @@ type MySQLConfig struct {
 }
 
 type RedisConfig struct {
-	Addr     string `mapstructure:"addr"`
-	Password string `mapstructure:"password"`
-	DB       int    `mapstructure:"db"`
-	PoolSize int    `mapstructure:"pool_size"`
+	Addr          string   `mapstructure:"addr"`
+	Password      string   `mapstructure:"password"`
+	DB            int      `mapstructure:"db"`
+	PoolSize      int      `mapstructure:"pool_size"`
+	MasterName    string   `mapstructure:"master_name"`
+	SentinelAddrs []string `mapstructure:"sentinel_addrs"`
 }
 
 type RabbitMQConfig struct {
 	URL            string `mapstructure:"url"`
+	QueueType      string `mapstructure:"queue_type"`
 	QueueName      string `mapstructure:"queue_name"`
 	RetryQueueName string `mapstructure:"retry_queue_name"`
 	DLXName        string `mapstructure:"dlx_name"`
@@ -179,7 +182,9 @@ func Load(configPath string) (*Config, error) {
 		"redis.password",
 		"redis.db",
 		"redis.pool_size",
+		"redis.master_name",
 		"rabbitmq.url",
+		"rabbitmq.queue_type",
 		"rabbitmq.queue_name",
 		"rabbitmq.retry_queue_name",
 		"rabbitmq.dlx_name",
@@ -249,6 +254,9 @@ func Load(configPath string) (*Config, error) {
 	if addrs := os.Getenv("ELASTICSEARCH_ADDRESSES"); addrs != "" {
 		cfg.Elasticsearch.Addresses = splitCSV(addrs)
 	}
+	if addrs := os.Getenv("REDIS_SENTINEL_ADDRS"); addrs != "" {
+		cfg.Redis.SentinelAddrs = splitCSV(addrs)
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("配置校验失败: %w", err)
@@ -289,8 +297,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("redis.password", "")
 	v.SetDefault("redis.db", 0)
 	v.SetDefault("redis.pool_size", 100)
+	v.SetDefault("redis.master_name", "")
+	v.SetDefault("redis.sentinel_addrs", []string{})
 
 	v.SetDefault("rabbitmq.url", "amqp://guest:guest@localhost:5672/")
+	v.SetDefault("rabbitmq.queue_type", "classic")
 	v.SetDefault("rabbitmq.queue_name", "fuchang.order.queue")
 	v.SetDefault("rabbitmq.retry_queue_name", "fuchang.order.retry")
 	v.SetDefault("rabbitmq.dlx_name", "fuchang.order.dlx")
@@ -356,11 +367,21 @@ func (c *Config) Validate() error {
 	if c.MySQL.DSN == "" {
 		return fmt.Errorf("mysql.dsn 不能为空")
 	}
-	if c.Redis.Addr == "" {
+	if strings.TrimSpace(c.Redis.MasterName) == "" && strings.TrimSpace(c.Redis.Addr) == "" {
 		return fmt.Errorf("redis.addr 不能为空")
+	}
+	if strings.TrimSpace(c.Redis.MasterName) != "" && len(c.Redis.SentinelAddrs) == 0 {
+		return fmt.Errorf("redis.sentinel_addrs 不能为空")
 	}
 	if c.RabbitMQ.URL == "" {
 		return fmt.Errorf("rabbitmq.url 不能为空")
+	}
+	c.RabbitMQ.QueueType = strings.ToLower(strings.TrimSpace(c.RabbitMQ.QueueType))
+	if c.RabbitMQ.QueueType == "" {
+		c.RabbitMQ.QueueType = "classic"
+	}
+	if c.RabbitMQ.QueueType != "classic" && c.RabbitMQ.QueueType != "quorum" {
+		return fmt.Errorf("rabbitmq.queue_type 必须是 classic|quorum")
 	}
 	if c.JWT.Secret == "" {
 		return fmt.Errorf("jwt.secret 不能为空")
