@@ -460,48 +460,40 @@ func (s *TicketOrderService) ProcessOrderTask(
 			return fmt.Errorf("%w: 消息与订单凭据不一致", ErrTicketOrderNonRetryable)
 		}
 
-		var tier models.TicketTier
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			First(&tier, message.TicketTierID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return fmt.Errorf("%w: 票档不存在", ErrTicketOrderNonRetryable)
-			}
-			return err
-		}
-		if tier.RemainingQuota < message.Quantity {
-			return fmt.Errorf("%w: MySQL 票额不足", ErrTicketOrderNonRetryable)
-		}
+		// 票档/活动库存不再 SELECT FOR UPDATE：用条件 UPDATE 缩短持锁，
+		// 由 WHERE remaining_quota >= ? 保证不超卖；订单行仍加锁防同单并发消费。
 		if order.RushSaleCampaignID != nil {
-			var campaign models.RushSaleCampaign
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-				First(&campaign, *order.RushSaleCampaignID).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return fmt.Errorf("%w: 限时开售活动不存在", ErrTicketOrderNonRetryable)
-				}
-				return err
+			campaignResult := tx.Model(&models.RushSaleCampaign{}).
+				Where(
+					"id = ? AND ticket_tier_id = ? AND remaining_quota >= ?",
+					*order.RushSaleCampaignID, message.TicketTierID, message.Quantity,
+				).
+				Update("remaining_quota", gorm.Expr("remaining_quota - ?", message.Quantity))
+			if campaignResult.Error != nil {
+				return campaignResult.Error
 			}
-			if campaign.TicketTierID != tier.ID ||
-				campaign.RemainingQuota < message.Quantity {
-				return fmt.Errorf("%w: 限时开售票额不足", ErrTicketOrderNonRetryable)
-			}
-			if err := tx.Model(&models.RushSaleCampaign{}).
-				Where("id = ? AND remaining_quota >= ?", campaign.ID, message.Quantity).
-				Update("remaining_quota", gorm.Expr("remaining_quota - ?", message.Quantity)).Error; err != nil {
-				return err
+			if campaignResult.RowsAffected == 0 {
+				return classifyRushQuotaUpdateMiss(tx, *order.RushSaleCampaignID, message.TicketTierID, message.Quantity)
 			}
 		}
-		updates := map[string]interface{}{
-			"remaining_quota": gorm.Expr("remaining_quota - ?", message.Quantity),
-			"sold_count":      gorm.Expr("sold_count + ?", message.Quantity),
-			"version":         gorm.Expr("version + 1"),
+		tierResult := tx.Model(&models.TicketTier{}).
+			Where("id = ? AND remaining_quota >= ?", message.TicketTierID, message.Quantity).
+			Updates(map[string]interface{}{
+				"remaining_quota": gorm.Expr("remaining_quota - ?", message.Quantity),
+				"sold_count":      gorm.Expr("sold_count + ?", message.Quantity),
+				"version":         gorm.Expr("version + 1"),
+				"status": gorm.Expr(
+					"CASE WHEN remaining_quota <= ? AND status = ? THEN ? ELSE status END",
+					message.Quantity,
+					models.TicketTierStatusOnSale,
+					models.TicketTierStatusSoldOut,
+				),
+			})
+		if tierResult.Error != nil {
+			return tierResult.Error
 		}
-		if tier.RemainingQuota == message.Quantity {
-			updates["status"] = models.TicketTierStatusSoldOut
-		}
-		if err := tx.Model(&models.TicketTier{}).
-			Where("id = ? AND remaining_quota >= ?", tier.ID, message.Quantity).
-			Updates(updates).Error; err != nil {
-			return err
+		if tierResult.RowsAffected == 0 {
+			return classifyTierQuotaUpdateMiss(tx, message.TicketTierID, message.Quantity)
 		}
 		expiresAt := time.Now().Add(s.paymentTimeout)
 		result := tx.Model(&models.TicketOrder{}).
@@ -532,6 +524,36 @@ func (s *TicketOrderService) ProcessOrderTask(
 		}
 	}
 	return nil
+}
+
+func classifyTierQuotaUpdateMiss(tx *gorm.DB, tierID int64, quantity int) error {
+	var tier models.TicketTier
+	err := tx.Select("id", "remaining_quota").First(&tier, tierID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("%w: 票档不存在", ErrTicketOrderNonRetryable)
+	}
+	if err != nil {
+		return err
+	}
+	if tier.RemainingQuota < quantity {
+		return fmt.Errorf("%w: MySQL 票额不足", ErrTicketOrderNonRetryable)
+	}
+	return fmt.Errorf("%w: MySQL 票额不足", ErrTicketOrderNonRetryable)
+}
+
+func classifyRushQuotaUpdateMiss(tx *gorm.DB, campaignID, tierID int64, quantity int) error {
+	var campaign models.RushSaleCampaign
+	err := tx.Select("id", "ticket_tier_id", "remaining_quota").First(&campaign, campaignID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("%w: 限时开售活动不存在", ErrTicketOrderNonRetryable)
+	}
+	if err != nil {
+		return err
+	}
+	if campaign.TicketTierID != tierID || campaign.RemainingQuota < quantity {
+		return fmt.Errorf("%w: 限时开售票额不足", ErrTicketOrderNonRetryable)
+	}
+	return fmt.Errorf("%w: 限时开售票额不足", ErrTicketOrderNonRetryable)
 }
 
 func (s *TicketOrderService) FinalizeFailedMessage(
