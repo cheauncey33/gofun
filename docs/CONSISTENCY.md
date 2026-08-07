@@ -1,0 +1,74 @@
+# 一致性设计：从抢票入口到落单
+
+> 目标：在高并发抢票下，保证 **不超卖、不重复下单、消息不丢、最终一致**。
+> 本文描述赴场票务「Redis 预扣 → Outbox → MQ → MySQL → 补偿」全链路的可靠性假设与每步失败的处理。
+> 所有结论均可在 `backend/service/` 下找到对应实现。
+
+## 设计前提
+
+- **MySQL 是最终事实来源**；Redis 只是前置并发闸门，不承担正确性。
+- MQ 采用 **至少一次（at-least-once）投递**，因此「重复消费」是常态，不是异常——所有消费必须幂等。
+- 不要求强分布式事务（无 XA / Saga 编排）；用「同事务写 + 异步投递 + 幂等消费 + 周期对账」达到最终一致。
+
+## 全链路时序
+
+```text
+[用户] POST /rush-sales/:id/execute  (X-Idempotency-Key)
+   │
+   ▼ ① 入口：写限流 + 幂等键校验
+[TicketOrderService.CreateOrder / RushSaleService.Execute]
+   │  查幂等：Redis 缓存命中 → 直接返回已有凭据
+   ▼ ② Redis Lua 原子预扣
+   │  一次性校验并扣减：活动票额 + 票档库存 + 个人限购（分桶选桶）
+   │  失败 → 返回售罄/限购，不写库、不发消息
+   ▼ ③ MySQL 事务：写订单(queued) + Outbox 行
+   │  （batch 模式下订单先落库，Outbox 由 recover 扫描兜底补写）
+   ▼ ④ 返回「排队中」给用户
+   │
+   ▼ ⑤ Outbox publisher（多 worker）
+   │  SKIP LOCKED 抢占 pending 行 → 发 MQ → 等 broker confirm → 标记 published
+   ▼ ⑥ RabbitMQ（durable queue + persistent message）
+   ▼ ⑦ Consumer（手动 ack）
+   │  事务内：订单行 FOR UPDATE → 校验状态/消息一致性 → 分桶条件 UPDATE 扣 MySQL 库存
+   │        → 订单 queued → pending_payment
+   ▼ ⑧ 投递支付超时延时消息（失败由扫描器兜底）
+   ▼ ⑨ 支付 / 超时关单 → 出票 / 释放库存
+   ▼ ⑩ 补偿对账：周期对齐 Redis 与 MySQL 票额（只下调 / 补缺）
+```
+
+## 每一步的失败处理
+
+| 步骤 | 可能失败 | 处理 | 一致性保证 |
+|------|----------|------|-----------|
+| ① 幂等校验 | 重复提交 / 网络重试 | Redis 缓存 + DB `user_id+idempotency_key` 唯一约束，命中直接返回原凭据 | 同一幂等键只建一单 |
+| ② Redis 预扣 | 库存不足 / 超限 | Lua 原子返回失败码，不落库 | 入口层面挡住超卖 |
+| ③ 写订单+Outbox | 事务失败 | 回滚 Redis 预扣；若是并发同键，改查已有订单返回 | 预扣与凭据一致 |
+| ③b batch 模式 | Outbox 行未写 | 订单已落库，由 **recover 扫描**周期补写 Outbox | 不丢消息（最终补发） |
+| ⑤ Outbox 投递 | broker confirm 失败/超时 | 行状态回 `pending` 等下轮；超过最大次数标 `failed` 并触发 `FinalizeFailedMessage` | 不丢、可观测 |
+| ⑥ MQ 存储 | broker 重启 | durable queue + persistent message | 消息不丢 |
+| ⑦ 消费处理 | 可重试错误（如行锁超时） | 重发 retry 队列，`x-retry-count` 递增，超上限进 **DLQ** | 至少一次，最终人工/自动介入 |
+| ⑦ 消费处理 | 不可重试错误（凭据不存在/消息不一致） | `FinalizeFailedMessage` + ack，不再重试 | 快速失败，不阻塞队列 |
+| ⑦ 重复消费 | MQ 重投 / retry 重投 | 订单行 `FOR UPDATE` + 状态非 `queued` 直接返回 + 分桶条件 UPDATE | 重复消费不重复扣库存 |
+| ⑧ 超时消息 | 投递失败 | DB 扫描器周期兜底关单 | 超时不泄漏库存 |
+| ⑩ 补偿对账 | Redis 与 MySQL 漂移 | 周期对账：Redis > MySQL 时下调、缺失时补建 | 收敛到 MySQL 事实 |
+
+## 幂等的三层防线
+
+1. **客户端幂等键**：前端生成 `X-Idempotency-Key`（uuidv4），同一笔请求重试携带同键。
+2. **入口去重**：Redis 缓存命中直接返回；DB `(user_id, idempotency_key)` 唯一约束兜底并发。
+3. **消费幂等**：消息携带 `order_id`；consumer 用 `SELECT ... FOR UPDATE` 锁订单行，状态非 `queued` 说明已处理过，直接 ack。
+
+## 不超卖的两个层级
+
+- **入口层**：Redis Lua 原子扣减，先把超卖挡在 DB 之外。
+- **落库层**：MySQL 条件 UPDATE `WHERE remaining >= ?`（分桶时作用在命中的桶行），`RowsAffected==0` 即判定库存不足。两层独立，任何一层失效另一层仍能兜底。
+
+## 为什么用 Outbox 而不是「下单时直接发 MQ」
+
+直接发 MQ 存在经典的双写不一致：**DB 提交成功但 MQ 发送失败**（或反之），订单与消息就会漂移。Outbox 让「订单 + 待投递消息」落在**同一个本地事务**里，再由独立 publisher 异步、可重试地把消息送达 broker——把分布式一致性问题降级为「本地事务 + 至少一次投递 + 幂等消费」，这是工程上更可控的组合。
+
+## 已知边界（诚实声明）
+
+- 支付当前为站内余额扣款，未接第三方支付渠道；`PaymentGateway` 接口已预留，接真实渠道需补「回调幂等 + 对账」。
+- 多副本部署下 Outbox publisher / timeout scanner 通过 `SKIP LOCKED` 抢占，天然支持多实例，但需注意单消息只被一个 worker 处理。
+- 一致性是**最终一致**，毫秒级窗口内 Redis 与 MySQL 可能短暂不一致，由补偿对账收敛。

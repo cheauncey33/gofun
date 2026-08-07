@@ -1,35 +1,48 @@
-# 赴场
+# 赴场（Fuchang）· 高并发校园活动票务平台
 
 > 赴热爱之场，见想见的人。
 
-赴场是一个使用 Go 构建的多主办方活动票务平台。当前第一阶段聚焦无选座票务：
-主办方维护活动、场馆、场次和票档，用户完成普通购票或限时开售抢票，
-Redis 负责前置票额与并发控制，RabbitMQ 异步确认订单，MySQL 保存最终订单和票额。
+赴场是一个用 Go 构建的多主办方活动票务平台，核心难点是 **限时开售（抢票）瞬间的高并发写入**：
+开售峰值下保证不超卖、不重复下单、入口低延迟。本项目以「可量化压测 + 可观测的一致性设计」为目标，
+而非单纯堆功能。
+
+## 一句话技术主张
+
+开售瞬间高并发抢票：**Redis Lua 入口预扣 → 事务性 Outbox → RabbitMQ 异步落单 → MySQL 库存分桶（8 桶打散行锁）→ 支付/超时关单 → 电子票核销**，全链路幂等 + 补偿对账，压测无超卖。
+
+## 关键技术亮点
+
+| 主题 | 做法 | 证据 |
+|------|------|------|
+| **入口抢票** | Redis Lua 原子校验「活动票额 + 底层票档 + 个人限购」，预扣后异步落单 | `service/rush_sale_service.go` |
+| **库存热点优化** | MySQL 票档按 `userID % N` 分桶，父表退出热路径 | InnoDB `row_lock_waits` **降约 80%**，MQ 追平 **23s→11s** |
+| **入口吞吐** | k6 恒定 VU 阶梯压测 | 合格峰值（成功率≥99% 且 p99≤300ms）约 **1100~1450 req/s** |
+| **写一致性** | 订单 + Outbox 同事务，publisher `SKIP LOCKED` 抢占投递，broker confirm | `service/ticket_order_outbox_publish.go` |
+| **幂等** | `X-Idempotency-Key` + DB 唯一约束 + Redis 缓存 + 消费按 order_id 查重 | 重复提交/重试/重投递均不重复落单 |
+| **超时关单** | RabbitMQ 延时队列 + DB 扫描兜底，条件 UPDATE 防支付/超时竞态 | `service/ticket_order_timeout.go` |
+
+> 完整数据与复盘见 **[性能与压测报告](docs/PERFORMANCE.md)**、**[一致性设计](docs/CONSISTENCY.md)**。
+
+## 核心链路
+
+```text
+用户抢票
+  → 写限流 + 幂等键（X-Idempotency-Key）
+  → Redis Lua 原子预扣（活动票额 + 票档库存 + 个人限购，分桶选桶）
+  → MySQL 事务：写订单(queued) + Outbox 行
+  → 返回「排队中」，用户轮询/WebSocket 拿结果
+  → Outbox publisher 异步投递 RabbitMQ（confirm）
+  → Consumer 事务确认：MySQL 分桶扣减、订单 queued→pending_payment
+  → 支付（余额）→ 出票 / 超时关单 → 释放库存
+  → 补偿对账：周期性对齐 Redis 与 MySQL 票额（只下调/补缺）
+```
 
 ## 技术栈
 
-- 后端：Go、Gin、GORM、MySQL、Redis、RabbitMQ、Snowflake ID
-- 前端：Vue 3、Vite、Element Plus、Vue Router、Axios
-- 可观测性：Prometheus `/metrics`、Grafana
-
-## 第一阶段能力
-
-- 多主办方与 `owner / operator` 成员权限
-- 场馆、活动、场次、票档管理
-- 主办方工作台：运营概览、活动创建/续配/发布、近期订单
-- 公开活动发现与活动详情
-- 普通购票：Redis 预扣、RabbitMQ 异步确认、幂等请求
-- 限时开售：到点直抢，活动票额 + 底层票额 + 个人限购由 Lua 原子校验
-- 订单状态：`queued → pending_payment → paid / cancelled`
-- 超时取消、票额释放、余额支付和退款
-- 支付后按购买数量签发电子票，订单详情展示独立二维码
-- 主办方扫码或手动输入票码核销，并保留成功与失败审计记录
-- 服务重启时按 queued 订单重建 Redis 并重投 RabbitMQ
-
-本阶段不包含在线选座、实名观演人、电子票转赠、离线核销、第三方支付和主办方结算。
-完整的范围、字段、接口与风险见 [第一阶段改造说明](docs/FUCHANG_PHASE1.md)。
-主办方可运营闭环见 [主办方工作台说明](docs/FUCHANG_ORGANIZER_CLOSURE.md)。
-电子票、核销与数据库基线见 [电子票与核销说明](docs/FUCHANG_ADMISSION_TICKET.md)。
+- **后端**：Go 1.25、Gin、GORM、MySQL 8、Redis 7、RabbitMQ 3、Snowflake ID
+- **前端**：Vue 3、Vite、Element Plus、Vue Router、Axios
+- **可观测性**：Prometheus `/metrics`、Grafana、OpenTelemetry trace、pprof
+- **压测**：k6（入口峰值）+ Node 脚本（业务正确性/MQ 追平）
 
 ## 本地运行
 
@@ -58,15 +71,30 @@ cd ../frontend
 npm.cmd run build
 ```
 
+## 压测复现
+
+```powershell
+# 起压测栈（capacity 单实例 + 8 桶）
+docker compose -p whu-snack-go-capacity `
+  -f tests/integration/docker-compose.ticketing.yml `
+  -f tests/load/docker-compose.capacity.yml up -d
+
+# 准备夹具并跑 k6 峰值扫档
+node tests/load/k6/prepare_rush_fixture.mjs
+node tests/load/k6/run_peak_sweep.mjs
+```
+
+详见 [tests/load/k6/README.md](tests/load/k6/README.md)。
+
 ## 重要一致性约定
 
-- MySQL 是票务订单和票额的最终事实来源。
-- Redis 键使用 `fuchang:ticket:*` 与 `fuchang:rush:*` 命名空间。
-- RabbitMQ 队列使用 `fuchang.order.*`。
-- 新票务金额一律使用 `int64` 分；旧零食领域的 `float64` 字段只为回滚保留，未挂载运行路由。
-- `queued` 表示订单凭据已经创建，但消费者尚未完成 MySQL 票额确认；它不是支付成功。
+- MySQL 是票务订单和票额的最终事实来源；Redis 是前置并发闸门。
+- Redis 键使用 `fuchang:ticket:*` 与 `fuchang:rush:*` 命名空间；RabbitMQ 队列用 `fuchang.order.*`。
+- 票务金额一律 `int64` 分。
+- `queued` 表示订单凭据已创建、消费者尚未完成 MySQL 票额确认，**不是支付成功**。
 
-## 源码保护
+## 文档导航
 
-改造前源码已保存为本地标签 `pre-fuchang-phase1-20260721`，当前改造分支为
-`feature/fuchang-phase1`。离线恢复包位于被 Git 忽略的 `.backup/` 目录。
+- [性能与压测报告](docs/PERFORMANCE.md) — 峰值数据、分桶 v1→v2 复盘
+- [一致性设计](docs/CONSISTENCY.md) — 预扣 / Outbox / 幂等 / 补偿
+- [第一阶段范围](docs/FUCHANG_PHASE1.md) · [主办方闭环](docs/FUCHANG_ORGANIZER_CLOSURE.md) · [电子票与核销](docs/FUCHANG_ADMISSION_TICKET.md)
