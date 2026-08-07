@@ -125,12 +125,31 @@ func (s *RushSaleService) CreateCampaign(
 		EndsAt:         input.EndsAt,
 		Status:         models.RushSaleStatusScheduled,
 	}
-	if err := s.db.WithContext(ctx).Create(campaign).Error; err != nil {
+	ttl := time.Until(campaign.EndsAt) + time.Hour
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(campaign).Error; err != nil {
+			return err
+		}
+		return EnsureRushBuckets(tx, campaign, s.order.inventory)
+	})
+	if err != nil {
 		return nil, err
 	}
-	if err := s.rdb.Set(
-		ctx, rushStockKey(campaign.ID), campaign.RemainingQuota,
-		time.Until(campaign.EndsAt)+time.Hour,
+	if s.order.inventory.Enabled {
+		var buckets []models.RushCampaignBucket
+		if err := s.db.WithContext(ctx).
+			Where("campaign_id = ?", campaign.ID).Find(&buckets).Error; err != nil {
+			return nil, err
+		}
+		pipe := s.rdb.Pipeline()
+		for _, bucket := range buckets {
+			pipe.Set(ctx, RushStockBucketKey(bucket.CampaignID, bucket.BucketNo), bucket.RemainingQuota, ttl)
+		}
+		if _, err := pipe.Exec(ctx); err != nil {
+			return nil, err
+		}
+	} else if err := s.rdb.Set(
+		ctx, rushStockKey(campaign.ID), campaign.RemainingQuota, ttl,
 	).Err(); err != nil {
 		return nil, err
 	}
@@ -164,9 +183,13 @@ func (s *RushSaleService) ListCampaigns(
 	views := make([]RushSaleCampaignView, 0, len(campaigns))
 	for _, campaign := range campaigns {
 		view := RushSaleCampaignView{RushSaleCampaign: campaign}
-		// 展示余量优先读本地短缓存 → Redis，减轻开售热 key 读压力。
-		if stock, ok, err := s.loadRushStock(ctx, campaign.ID); err == nil && ok {
+		// 展示余量优先读本地短缓存 → Redis（分桶时 SUM），减轻开售热 key 读压力。
+		if stock, ok, err := s.loadRushStock(ctx, campaign.ID, campaign.TotalQuota); err == nil && ok {
 			view.RemainingQuota = int(stock)
+		} else if s.order.inventory.Enabled {
+			if sum, sumErr := sumRushBucketRemaining(ctx, s.db, campaign.ID); sumErr == nil {
+				view.RemainingQuota = sum
+			}
 		}
 		tier, err := s.catalog.repo.FindTicketTierByID(ctx, campaign.TicketTierID)
 		if err == nil {
@@ -210,11 +233,7 @@ func (s *RushSaleService) Execute(
 	}
 
 	ttl := int64(time.Until(campaign.EndsAt).Seconds()) + 3600
-	result, err := executeRushSaleScript.Run(ctx, s.rdb, []string{
-		rushStockKey(campaignID),
-		ticketStockKey(campaign.TicketTierID),
-		rushUserCountKey(campaignID, userID),
-	}, quantity, campaign.PerUserLimit, ttl).Int64()
+	bucketNo, result, err := s.reserveRushStock(ctx, userID, campaign, quantity, ttl)
 	if err != nil {
 		return nil, err
 	}
@@ -228,16 +247,67 @@ func (s *RushSaleService) Execute(
 		return nil, ErrTicketQuotaInsufficient
 	}
 
-	// Lua 返回扣减后余量：本节点本地缓存立即对齐，其它节点最多落后一个 TTL。
-	s.setRushStockLocal(campaignID, result)
+	// Lua 返回扣减后该桶余量；列表展示用 SUM，本地短缓存仅作热点挡板。
+	if !s.order.inventory.Enabled {
+		s.setRushStockLocal(campaignID, result)
+	} else {
+		s.invalidateRushStockLocal(campaignID)
+	}
 
+	var bucketPtr *int
+	if s.order.inventory.Enabled {
+		bucketPtr = intPtr(bucketNo)
+	}
 	receipt, rollback, err := s.order.createRushOrderAfterReservation(
-		ctx, userID, idempotencyKey, requestID, campaign, quantity, purchase,
+		ctx, userID, idempotencyKey, requestID, campaign, quantity, purchase, bucketPtr,
 	)
 	if rollback {
-		s.rollbackRushReservation(ctx, campaign, userID, quantity)
+		s.rollbackRushReservation(ctx, campaign, userID, quantity, bucketPtr)
 	}
 	return receipt, err
+}
+
+func (s *RushSaleService) reserveRushStock(
+	ctx context.Context,
+	userID int64,
+	campaign *models.RushSaleCampaign,
+	quantity int,
+	ttl int64,
+) (bucketNo int, result int64, err error) {
+	if !s.order.inventory.Enabled {
+		result, err = executeRushSaleScript.Run(ctx, s.rdb, []string{
+			rushStockKey(campaign.ID),
+			ticketStockKey(campaign.TicketTierID),
+			rushUserCountKey(campaign.ID, userID),
+		}, quantity, campaign.PerUserLimit, ttl).Int64()
+		return 0, result, err
+	}
+	n := s.order.inventory.EffectiveBucketCount(campaign.TotalQuota)
+	maxAttempts := 1 + s.order.inventory.BucketRetry
+	if maxAttempts > n {
+		maxAttempts = n
+	}
+	var last int64 = -1
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		b := SelectBucketNo(userID, n, attempt)
+		rem, runErr := executeRushSaleScript.Run(ctx, s.rdb, []string{
+			RushStockBucketKey(campaign.ID, b),
+			TicketStockBucketKey(campaign.TicketTierID, b),
+			rushUserCountKey(campaign.ID, userID),
+		}, quantity, campaign.PerUserLimit, ttl).Int64()
+		if runErr != nil {
+			return 0, 0, runErr
+		}
+		if rem >= 0 {
+			return b, rem, nil
+		}
+		last = rem
+		if rem == -4 {
+			// 限购全局，换桶无意义
+			return b, rem, nil
+		}
+	}
+	return 0, last, nil
 }
 
 func (s *RushSaleService) getAvailableCampaign(
@@ -289,20 +359,27 @@ func (s *RushSaleService) rollbackRushReservation(
 	campaign *models.RushSaleCampaign,
 	userID int64,
 	quantity int,
+	bucketNo *int,
 ) {
 	pipe := s.rdb.TxPipeline()
-	pipe.IncrBy(ctx, rushStockKey(campaign.ID), int64(quantity))
-	pipe.IncrBy(ctx, ticketStockKey(campaign.TicketTierID), int64(quantity))
+	if s.order.inventory.Enabled && bucketNo != nil {
+		pipe.IncrBy(ctx, RushStockBucketKey(campaign.ID, *bucketNo), int64(quantity))
+		pipe.IncrBy(ctx, TicketStockBucketKey(campaign.TicketTierID, *bucketNo), int64(quantity))
+	} else {
+		pipe.IncrBy(ctx, rushStockKey(campaign.ID), int64(quantity))
+		pipe.IncrBy(ctx, ticketStockKey(campaign.TicketTierID), int64(quantity))
+	}
 	pipe.DecrBy(ctx, rushUserCountKey(campaign.ID, userID), int64(quantity))
 	_, _ = pipe.Exec(ctx)
 	s.invalidateRushStockLocal(campaign.ID)
 }
 
-// loadRushStock 读路径：local(短 TTL) → singleflight → Redis。
+// loadRushStock 读路径：local(短 TTL) → singleflight → Redis（分桶 SUM）。
 // ok=false 表示 Redis 尚无预热 key，调用方应回退 MySQL 字段。
 func (s *RushSaleService) loadRushStock(
 	ctx context.Context,
 	campaignID int64,
+	totalQuota int,
 ) (stock int64, ok bool, err error) {
 	localKey := rushStockLocalKey(campaignID)
 	if s.localCache != nil {
@@ -316,6 +393,37 @@ func (s *RushSaleService) loadRushStock(
 			if cached, found := s.localCache.Get(localKey); found {
 				return cached.(int64), nil
 			}
+		}
+		if s.order.inventory.Enabled {
+			n := s.order.inventory.EffectiveBucketCount(totalQuota)
+			keys := make([]string, n)
+			for i := 0; i < n; i++ {
+				keys[i] = RushStockBucketKey(campaignID, i)
+			}
+			vals, err := s.rdb.MGet(ctx, keys...).Result()
+			if err != nil {
+				return int64(0), err
+			}
+			var sum int64
+			seen := 0
+			for _, v := range vals {
+				if v == nil {
+					continue
+				}
+				seen++
+				switch t := v.(type) {
+				case string:
+					parsed, parseErr := strconv.ParseInt(t, 10, 64)
+					if parseErr == nil {
+						sum += parsed
+					}
+				}
+			}
+			if seen == 0 {
+				return int64(-1), nil
+			}
+			s.setRushStockLocal(campaignID, sum)
+			return sum, nil
 		}
 		n, err := s.rdb.Get(ctx, rushStockKey(campaignID)).Int64()
 		if err == redis.Nil {
@@ -360,6 +468,7 @@ func (s *TicketOrderService) createRushOrderAfterReservation(
 	campaign *models.RushSaleCampaign,
 	quantity int,
 	purchase PurchaseInfoInput,
+	bucketNo *int,
 ) (receipt *TicketOrderReceipt, rollback bool, err error) {
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	if len(idempotencyKey) < 8 || len(idempotencyKey) > 64 {
@@ -398,6 +507,8 @@ func (s *TicketOrderService) createRushOrderAfterReservation(
 		IdempotencyKey:        idempotencyKey,
 		RequestID:             requestID,
 		ExpiresAt:             time.Now().Add(s.paymentTimeout),
+		StockBucketNo:         bucketNo,
+		RushBucketNo:          bucketNo,
 		Items: []models.TicketOrderItem{{
 			TicketTierID:            tier.ID,
 			Quantity:                quantity,
@@ -418,6 +529,8 @@ func (s *TicketOrderService) createRushOrderAfterReservation(
 		TicketTierID:       tier.ID,
 		Quantity:           quantity,
 		RushSaleCampaignID: &campaign.ID,
+		StockBucketNo:      bucketNo,
+		RushBucketNo:       bucketNo,
 	}
 	if err := s.createOrderAndOutbox(ctx, order, message); err != nil {
 		var existing models.TicketOrder

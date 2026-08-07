@@ -132,3 +132,32 @@ type TicketTier struct {
 	Status             TicketTierStatus `gorm:"size:16;not null;default:'disabled';index" json:"status"`
 	Version            int64            `gorm:"not null;default:0" json:"version"`
 }
+
+// TicketTierBucket 将票档库存拆成多行，打散消费热路径行锁。
+type TicketTierBucket struct {
+	TierID         int64     `gorm:"primaryKey;not null" json:"tier_id,string"`
+	BucketNo       int       `gorm:"primaryKey;not null" json:"bucket_no"`
+	RemainingQuota int       `gorm:"not null" json:"remaining_quota"`
+	SoldCount      int64     `gorm:"not null;default:0" json:"sold_count"`
+	Version        int64     `gorm:"not null;default:0" json:"version"`
+	UpdateTime     time.Time `gorm:"autoUpdateTime" json:"update_time"`
+	CreateTime     time.Time `gorm:"autoCreateTime" json:"create_time"`
+}
+
+func (TicketTierBucket) TableName() string {
+	return "ticket_tier_bucket"
+}
+
+// RushCampaignBucket 限时开售活动库存分桶。
+type RushCampaignBucket struct {
+	CampaignID     int64     `gorm:"primaryKey;not null" json:"campaign_id,string"`
+	BucketNo       int       `gorm:"primaryKey;not null" json:"bucket_no"`
+	RemainingQuota int       `gorm:"not null" json:"remaining_quota"`
+	Version        int64     `gorm:"not null;default:0" json:"version"`
+	UpdateTime     time.Time `gorm:"autoUpdateTime" json:"update_time"`
+	CreateTime     time.Time `gorm:"autoCreateTime" json:"create_time"`
+}
+
+func (RushCampaignBucket) TableName() string {
+	return "rush_campaign_bucket"
+}

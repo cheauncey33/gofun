@@ -29,6 +29,7 @@ type Config struct {
 	OrderOutbox   OrderOutboxConfig   `mapstructure:"order_outbox"`
 	DelayedOrder  OrderDelayConfig    `mapstructure:"delayed_order"`
 	RushSale      RushSaleConfig      `mapstructure:"rush_sale"`
+	Inventory     InventoryConfig     `mapstructure:"inventory"`
 }
 
 type ServerConfig struct {
@@ -156,6 +157,15 @@ type RushSaleConfig struct {
 	CampaignCacheTTLMS int `mapstructure:"campaign_cache_ttl_ms"`
 }
 
+// InventoryConfig 票档/抢票 Redis+MySQL 同构分桶。
+// buckets_enabled=false 时保持单 key / 父表 remaining_quota 热路径。
+type InventoryConfig struct {
+	BucketsEnabled   bool `mapstructure:"buckets_enabled"`
+	BucketCount      int  `mapstructure:"bucket_count"`
+	MinQuotaToBucket int  `mapstructure:"min_quota_to_bucket"`
+	BucketRetry      int  `mapstructure:"bucket_retry"`
+}
+
 func Load(configPath string) (*Config, error) {
 	v := viper.New()
 	if configPath != "" {
@@ -238,6 +248,10 @@ func Load(configPath string) (*Config, error) {
 		"delayed_order.timeout_minutes",
 		"delayed_order.lock_timeout_sec",
 		"rush_sale.campaign_cache_ttl_ms",
+		"inventory.buckets_enabled",
+		"inventory.bucket_count",
+		"inventory.min_quota_to_bucket",
+		"inventory.bucket_retry",
 	)
 
 	if err := v.ReadInConfig(); err != nil {
@@ -355,6 +369,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("delayed_order.lock_timeout_sec", 10)
 	v.SetDefault("rush_sale.campaign_cache_ttl_ms", 3000)
 
+	v.SetDefault("inventory.buckets_enabled", false)
+	v.SetDefault("inventory.bucket_count", 8)
+	v.SetDefault("inventory.min_quota_to_bucket", 64)
+	v.SetDefault("inventory.bucket_retry", 4)
+
 	v.SetDefault("elasticsearch.enabled", false)
 	v.SetDefault("elasticsearch.index", "fuchang_events")
 	v.SetDefault("elasticsearch.search_engine", "auto")
@@ -432,6 +451,21 @@ func (c *Config) Validate() error {
 	}
 	if c.RushSale.CampaignCacheTTLMS < 0 {
 		return fmt.Errorf("rush_sale.campaign_cache_ttl_ms 必须大于等于0")
+	}
+	if c.Inventory.BucketCount == 0 {
+		c.Inventory.BucketCount = 8
+	}
+	if c.Inventory.MinQuotaToBucket == 0 {
+		c.Inventory.MinQuotaToBucket = 64
+	}
+	if c.Inventory.BucketCount < 1 {
+		return fmt.Errorf("inventory.bucket_count 必须大于等于1")
+	}
+	if c.Inventory.MinQuotaToBucket < 1 {
+		return fmt.Errorf("inventory.min_quota_to_bucket 必须大于等于1")
+	}
+	if c.Inventory.BucketRetry < 0 {
+		return fmt.Errorf("inventory.bucket_retry 必须大于等于0")
 	}
 	if c.OrderConsumer.WorkerCount == 0 {
 		c.OrderConsumer.WorkerCount = 4

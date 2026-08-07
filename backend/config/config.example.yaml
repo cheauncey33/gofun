@@ -93,6 +93,14 @@ order_outbox:
 rush_sale:
   campaign_cache_ttl_ms: 3000
 
+# 票档/抢票库存分桶（Redis+MySQL 同构）。默认关闭，保持单 key 热路径。
+# 开启前应对存量票档/活动执行拆桶（启动 EnsureInventoryBuckets 或迁移脚本）。
+inventory:
+  buckets_enabled: false
+  bucket_count: 8
+  min_quota_to_bucket: 64
+  bucket_retry: 4
+
 # 支付窗口（分钟）。进入 pending_payment 后投递 RabbitMQ 延时关单（消息级 TTL + DLX）；
 # DB 扫描器作兜底（默认约 2 分钟一次）。
 delayed_order:

@@ -217,3 +217,35 @@ func copyTraceHeaders(target, source amqp.Table) {
 		target[key] = value
 	}
 }
+
+func readRetryCount(headers amqp.Table) int {
+	if headers == nil {
+		return 0
+	}
+	switch v := headers["x-retry-count"].(type) {
+	case int:
+		return v
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	case uint8:
+		return int(v)
+	case uint16:
+		return int(v)
+	case uint32:
+		return int(v)
+	case uint64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+func cloneHeaders(headers amqp.Table) amqp.Table {
+	cloned := amqp.Table{}
+	for key, value := range headers {
+		cloned[key] = value
+	}
+	return cloned
+}

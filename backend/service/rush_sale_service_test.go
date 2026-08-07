@@ -10,6 +10,12 @@ import (
 )
 
 func TestRushStockKeyUsesFuchangNamespace(t *testing.T) {
+	if got, want := TicketStockBucketKey(7, 3), "fuchang:ticket:stock:7:3"; got != want {
+		t.Fatalf("ticket bucket key = %q, want %q", got, want)
+	}
+	if got, want := RushStockBucketKey(7, 3), "fuchang:rush:stock:7:3"; got != want {
+		t.Fatalf("rush bucket key = %q, want %q", got, want)
+	}
 	if got, want := rushStockKey(7), "fuchang:rush:stock:7"; got != want {
 		t.Fatalf("rush stock key = %q, want %q", got, want)
 	}
@@ -37,7 +43,7 @@ func TestRushStockLocalCacheHitAndInvalidate(t *testing.T) {
 		localCache: gocache.New(time.Minute, time.Minute),
 	}
 	svc.setRushStockLocal(42, 88)
-	stock, ok, err := svc.loadRushStock(t.Context(), 42)
+	stock, ok, err := svc.loadRushStock(t.Context(), 42, 100)
 	if err != nil || !ok || stock != 88 {
 		t.Fatalf("expected local hit 88, got stock=%d ok=%v err=%v", stock, ok, err)
 	}

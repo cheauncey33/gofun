@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-WHU Snack GO is a campus snack ordering system with a Go backend (Gin + GORM) and Vue 3 frontend (Element Plus + Vite). It features normal product ordering and flash-sale (seckill) activities with Redis-based inventory pre-deduction and RabbitMQ-based async order processing.
+**赴场（Fuchang）** — event ticketing platform (Go + Vue 3). Normal purchase and rush-sale execute use Redis quota pre-deduct, transactional outbox, and RabbitMQ async order finalization. See `docs/FUCHANG_PHASE1.md` for scope; `interview-prep/00_CONTEXT_LOCK.md` for interview facts.
+
+> Legacy snack-commerce architecture below is **outdated**; prefer `backend/main.go` and ticketing services when editing docs.
 
 ## Development Commands
 
@@ -51,14 +53,12 @@ docker compose logs -f backend
 Node.js scripts (built-in `fetch`, no k6/wrk needed) that pressure a running backend. Config is via env vars read in `tests/load/lib/load_common.mjs` (`BASE_URL`, `CONCURRENCY`, `DURATION_SECONDS`, `ADMIN_PASSWORD`, etc.).
 
 ```bash
-node tests/load/smoke.mjs          # validate env + one full user path (run first)
-node tests/load/read_baseline.mjs  # read-only capacity
-node tests/load/shopping_mix.mjs   # normal browse + occasional order
-node tests/load/order_write.mjs    # Redis pre-deduct → MQ → MySQL write path
-node tests/load/seckill_spike.mjs  # seckill token + execute paths
+node tests/load/ticket_smoke.mjs
+node tests/load/ticket_rush_spike.mjs
+node tests/integration/rush_concurrency.mjs
 ```
 
-Write scenarios mutate real data (create orders, reduce stock, change balances) — use a dedicated DB/Redis/queue. For raw-capacity runs, raise `ratelimit.*` in `config.yaml` and restart. See `tests/load/LOAD_TEST_PLAN.md`.
+Write scenarios mutate real data — use a dedicated DB/Redis/queue. See `tests/load/results/capacity-buckets-compare-20260731.md`.
 
 ### Monitoring stack
 

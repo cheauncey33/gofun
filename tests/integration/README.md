@@ -50,6 +50,17 @@ $env:BASE_URL='http://127.0.0.1:18080/api/v1'
 node tests/integration/rush_concurrency.mjs
 ```
 
+库存分桶验收（需 `inventory.buckets_enabled=true`，查 MySQL 桶行数 + 全局限购）：
+
+```powershell
+$env:BASE_URL='http://127.0.0.1:18080/api/v1'
+$env:MYSQL_CONTAINER='whu-snack-go-capacity-mysql-1' # 或 fuchang-it 的 mysql 容器名
+node tests/integration/inventory_buckets.mjs
+```
+
+多热点抢票扫描（DB 直插多个活动/票档，不打同一热点）：见 `tests/load/ticket_rush_multi_hotspot.mjs` 与 `LOAD_TEST_PLAN.md` §6。
+
+
 覆盖：
 
 1. 同用户同幂等键 8 路并发 → 只有一单  

@@ -19,14 +19,15 @@ README text.
 
 ## Project Overview
 
-WHU Snack GO is a campus snack ordering system.
+**赴场（Fuchang）** — multi-organizer event ticketing platform (phase 1: no seat selection).
 
-- Backend: Go, Gin, GORM, MySQL, Redis, RabbitMQ, Snowflake IDs.
+- Backend: Go, Gin, GORM, MySQL, Redis, RabbitMQ, Snowflake IDs, outbox pattern.
 - Frontend: Vue 3, Vite, Element Plus, Vue Router, Axios.
-- Core feature: normal ordering and flash-sale ordering use Redis inventory
-  pre-deduction plus RabbitMQ asynchronous order creation.
-- Monitoring: Prometheus metrics at `/metrics`, Grafana dashboard under
-  `monitoring/`.
+- Core flows: normal ticket purchase + rush sale execute; Redis Lua quota pre-deduct → outbox → RabbitMQ async finalize.
+- Docs: `docs/FUCHANG_PHASE1.md`, `docs/FUCHANG_INTERVIEW.md`, `interview-prep/00_CONTEXT_LOCK.md`.
+- Monitoring: Prometheus `/metrics`, Grafana under `monitoring/`.
+
+Legacy snack-commerce code has been removed; do not reference product/seckill/user-lock paths in new answers.
 
 ## Useful Commands
 
@@ -60,12 +61,12 @@ Load tests live in `tests/load/` and mutate real data for write scenarios. Use a
 dedicated database, Redis, and queue before running:
 
 ```powershell
-node tests/load/smoke.mjs
-node tests/load/read_baseline.mjs
-node tests/load/shopping_mix.mjs
-node tests/load/order_write.mjs
-node tests/load/seckill_spike.mjs
+node tests/load/ticket_smoke.mjs
+node tests/load/ticket_rush_spike.mjs
+node tests/integration/rush_concurrency.mjs
 ```
+
+See `tests/load/results/capacity-buckets-compare-20260731.md` for capacity evidence.
 
 Note: on some Windows shells, `npm.ps1` may be blocked. Use `npm.cmd`. If `go`
 is not in PATH, do not claim tests passed.

@@ -7,6 +7,10 @@ import (
 )
 
 func TestLoad_ValidYAML(t *testing.T) {
+	t.Setenv("INVENTORY_BUCKETS_ENABLED", "")
+	t.Setenv("INVENTORY_BUCKET_COUNT", "")
+	t.Setenv("INVENTORY_MIN_QUOTA_TO_BUCKET", "")
+	t.Setenv("INVENTORY_BUCKET_RETRY", "")
 	dir := t.TempDir()
 	content := `
 server:
@@ -84,6 +88,10 @@ cors:
 	}
 	if !cfg.RateLimit.DistributedWriteEnabled || cfg.RateLimit.WriteMaxPerWindow != 10 {
 		t.Errorf("unexpected distributed rate limit defaults: %#v", cfg.RateLimit)
+	}
+	if cfg.Inventory.BucketsEnabled || cfg.Inventory.BucketCount != 8 ||
+		cfg.Inventory.MinQuotaToBucket != 64 || cfg.Inventory.BucketRetry != 4 {
+		t.Errorf("unexpected inventory defaults: %#v", cfg.Inventory)
 	}
 }
 

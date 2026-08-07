@@ -9,12 +9,18 @@ export class ResourceSampler {
     mysqlContainer = "",
     redisContainer = "",
     rabbitContainer = "",
+    mysqlUser = process.env.MYSQL_SAMPLE_USER || "fuchang",
+    mysqlPassword = process.env.MYSQL_SAMPLE_PASSWORD || "fuchang-it-mysql",
+    redisPassword = process.env.REDIS_SAMPLE_PASSWORD || "fuchang-it-redis",
     intervalMs = 1000,
   } = {}) {
     this.containers = containers.filter(Boolean);
     this.mysqlContainer = mysqlContainer;
     this.redisContainer = redisContainer;
     this.rabbitContainer = rabbitContainer;
+    this.mysqlUser = mysqlUser;
+    this.mysqlPassword = mysqlPassword;
+    this.redisPassword = redisPassword;
     this.intervalMs = intervalMs;
     this.samples = [];
     this.timer = null;
@@ -99,10 +105,15 @@ export class ResourceSampler {
         "docker",
         [
           "exec",
+          "-e",
+          `MYSQL_PWD=${this.mysqlPassword}`,
           this.mysqlContainer,
-          "sh",
-          "-lc",
-          `MYSQL_PWD="$MYSQL_PASSWORD" mysql -N -B -usnack -e "${query}"`,
+          "mysql",
+          "-N",
+          "-B",
+          `-u${this.mysqlUser}`,
+          "-e",
+          query,
         ],
         { windowsHide: true, timeout: 5000 },
       );
@@ -126,9 +137,12 @@ export class ResourceSampler {
           [
             "exec",
             this.redisContainer,
-            "sh",
-            "-lc",
-            'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning INFO stats',
+            "redis-cli",
+            "-a",
+            this.redisPassword,
+            "--no-auth-warning",
+            "INFO",
+            "stats",
           ],
           { windowsHide: true, timeout: 5000 },
         ),
@@ -137,9 +151,14 @@ export class ResourceSampler {
           [
             "exec",
             this.redisContainer,
-            "sh",
-            "-lc",
-            'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --latency -i 0.1 --raw',
+            "redis-cli",
+            "-a",
+            this.redisPassword,
+            "--no-auth-warning",
+            "--latency",
+            "-i",
+            "0.1",
+            "--raw",
           ],
           { windowsHide: true, timeout: 5000 },
         ),

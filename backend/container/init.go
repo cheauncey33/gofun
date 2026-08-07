@@ -68,9 +68,6 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 		EventSearcher:     eventSearcher,
 		SearchPreferES:    preferES,
 		mqURL:             cfg.RabbitMQ.URL,
-		ProductRepo:       repository.NewProductRepository(db),
-		OrderRepo:         repository.NewOrderRepository(db),
-		CategoryRepo:      repository.NewCategoryRepository(db),
 		TicketCatalogRepo: repository.NewTicketCatalogRepository(db),
 	}
 
@@ -153,7 +150,6 @@ func initDB(cfg config.MySQLConfig, tracingEnabled bool) (*gorm.DB, error) {
 }
 
 // ticketingSchemaModels 用于测试票务模型边界；运行时结构由 migrations/*.sql 决定。
-// 遗留零食电商模型仍保留在源码中用于回滚，但不属于赴场迁移基线。
 func ticketingSchemaModels() []interface{} {
 	return []interface{}{
 		&models.Dormitory{},
@@ -164,11 +160,13 @@ func ticketingSchemaModels() []interface{} {
 		&models.Event{},
 		&models.EventSession{},
 		&models.TicketTier{},
+		&models.TicketTierBucket{},
 		&models.TicketOrder{},
 		&models.TicketOrderItem{},
 		&models.TicketOrderAttendee{},
 		&models.TicketOrderOutbox{},
 		&models.RushSaleCampaign{},
+		&models.RushCampaignBucket{},
 		&models.AdmissionTicket{},
 		&models.TicketVerificationRecord{},
 		&models.EventComment{},

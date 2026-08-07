@@ -13,11 +13,13 @@ export async function bootstrapRushCampaign({
   totalQuota = 5,
   perUserLimit = 1,
   tierQuota = 20,
+  maxTicketsPerOrder = 6,
   label = "it-rush",
 } = {}) {
   const suffix = `${Date.now().toString(36)}${randomUUID().slice(0, 4)}`;
   const owner = await registerAndLogin(`o${suffix}`.slice(0, 20));
   const adminToken = await loginAdmin();
+  const orderLimit = Math.max(maxTicketsPerOrder, perUserLimit, 1);
 
   const orgRes = await http("POST", "/admin/organizers", {
     token: adminToken,
@@ -53,7 +55,7 @@ export async function bootstrapRushCampaign({
       category: "测试",
       description: "integration rush concurrency",
       real_name_required: false,
-      max_tickets_per_order: 6,
+      max_tickets_per_order: orderLimit,
     },
   });
   assert(eventRes.ok && eventRes.data?.data?.id, `create event failed: ${JSON.stringify(eventRes.data)}`);
@@ -78,7 +80,7 @@ export async function bootstrapRushCampaign({
       name: "IT票档",
       price_cents: 12800,
       total_quota: Math.max(tierQuota, totalQuota),
-      purchase_limit: Math.max(perUserLimit, 2),
+      purchase_limit: Math.max(perUserLimit, 1),
     },
   });
   assert(tierRes.ok && tierRes.data?.data?.id, `create tier failed: ${JSON.stringify(tierRes.data)}`);

@@ -31,9 +31,6 @@ type Container struct {
 	EventSearcher    search.EventSearcher
 	SearchPreferES   bool
 
-	ProductRepo       repository.ProductRepository
-	OrderRepo         repository.OrderRepository
-	CategoryRepo      repository.CategoryRepository
 	TicketCatalogRepo repository.TicketCatalogRepository
 
 	publishMu                    sync.Mutex

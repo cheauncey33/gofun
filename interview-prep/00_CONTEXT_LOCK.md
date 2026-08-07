@@ -1,85 +1,99 @@
-# WHU Snack 面试材料防偏离总控
+# 赴场票务 · 面试材料防偏离总控
+
+> 仓库名仍为 `WHU_Snack_GO`，但 **当前运行代码是赴场（Fuchang）多主办方活动票务**，零食电商链路已下线。面试以本文件 + `docs/FUCHANG_INTERVIEW.md` 为准。
 
 ## 依据来源
 
-- 简历 PDF: `张雨豪-19826563920-武汉大学-暑期求职.pdf`
 - 入口与路由: `backend/main.go`
-- 数据模型: `backend/models/model.go`, `backend/models/category.go`, `backend/models/address.go`, `backend/models/seckill_activity.go`, `backend/models/seckill_order.go`
-- 核心服务: `backend/service/order_service.go`, `backend/service/seckill_service.go`, `backend/service/order_consumer.go`, `backend/service/product_service.go`, `backend/service/compensation_service.go`
-- 基础设施: `backend/common/databaseInit.go`, `backend/common/redis.go`, `backend/common/rabbitMQ.go`, `backend/common/ratelimit.go`, `backend/common/jwt.go`, `backend/common/localcache.go`
-- 监控与响应: `backend/metrics/metrics.go`, `backend/pkg/response/response.go`
+- 数据模型: `backend/models/model.go`, `backend/models/ticketing.go`, `backend/models/ticket_order.go`
+- 核心服务: `backend/service/ticket_order_service.go`, `backend/service/ticket_order_hotpath.go`, `backend/service/rush_sale_service.go`, `backend/service/ticket_order_consumer.go`, `backend/service/ticket_compensation_service.go`
+- 库存分桶: `backend/service/inventory_bucket.go`, `backend/service/inventory_bucket_ops.go`
+- 基础设施: `backend/container/init.go`, `backend/common/ratelimit.go`, `backend/common/distributed_ratelimit.go`
+- 面试话术样板: `docs/FUCHANG_INTERVIEW.md`
+- 压测证据: `tests/load/results/capacity-buckets-compare-20260731.md`
 
 ## 项目真实边界
 
-项目名称在简历中写作 `Campus-Mall 校园电商秒杀系统`，仓库名为 `WHU_Snack_GO`。面试回答时可以说这是一个基于校园零食/电商场景的 Go 后端项目，重点训练高并发下单、秒杀、缓存、MQ 削峰和最终一致性。
+产品：**赴场** — 多主办方活动票务平台（无选座第一阶段）。
 
-真实技术栈:
+核心能力：活动发现、普通购票、限时开售（rush）、余额支付、超时取消、电子票签发与核销。
 
-- 后端: Go, Gin, GORM
-- 数据库: MySQL
-- 缓存: Redis, go-cache 本地缓存
-- 消息队列: RabbitMQ, `github.com/rabbitmq/amqp091-go`
-- 鉴权: JWT, Gin middleware
-- ID: Snowflake
-- 监控: Prometheus client, `/metrics`
-- 日志: zap, lumberjack
-- 前端: Vue3, Vite
-- 部署相关文件: Dockerfile, docker-compose, nginx 配置
+真实技术栈：Go / Gin / GORM / MySQL / Redis / RabbitMQ / Snowflake / Prometheus / Vue 3。
 
-## 已确认数据表
+## 已确认核心链路（当前代码）
 
-`AutoMigrate` 当前注册 9 张表:
+### 普通购票 `POST /orders`
 
-1. `dormitory`
-2. `category`
-3. `order`
-4. `order_item`
-5. `user`
-6. `product`
-7. `address`
-8. `seckill_activity`
-9. `seckill_order`
+1. 校验票档可售、限购、观演人信息。
+2. **幂等**：`X-Idempotency-Key` → Redis `fuchang:ticket:idem:{userId}:{key}` + MySQL `(user_id, idempotency_key)`。
+3. **Redis Lua 预扣票额**（可选分桶：`fuchang:ticket:stock:{tierId}:{bucketNo}`）。
+4. 同步写 MySQL：`ticket_order(status=queued)` + `ticket_order_outbox`（本地消息表/outbox）。
+5. Outbox publisher 异步投递 RabbitMQ；接口返回 `queued`。
+6. Consumer：`ProcessOrderTask` → 条件 UPDATE 扣 MySQL 票额 → `pending_payment`。
+7. 支付 / 超时：条件 UPDATE + 余额原子扣减 / 释放票额。
 
-所有表通过 `Base` 继承公共字段: `id`, `update_time`, `create_time`, `delete_time`。`delete_time` 是 GORM 软删除字段。
+### 限时开售 `POST /rush-sales/:id/execute`
 
-## 已确认核心链路
+1. 到点直抢，**无 token 两步**；防刷靠登录 + 写限流 + 幂等键。
+2. Redis Lua 扣 `fuchang:rush:stock:{campaignId}`（+ 分桶）+ 个人限购 hash。
+3. 列表余量读可走 **go-cache 短 TTL（≈300ms）+ singleflight**；扣减只走 Redis。
+4. 后续与普通票共用 outbox → MQ → consumer。
 
-- 登录注册: bcrypt 存密码, 登录成功生成 JWT, 中间件解析 `Authorization` 并把 `user_id` 写入 Gin Context。
-- 商品查询: 商品列表走 L1 本地缓存 -> L2 Redis -> MySQL；结果缓存为 `ProductListCache`，Redis TTL 5 分钟，本地缓存默认 30 秒。
-- 普通下单: Redis Lua 一次性校验并预扣多个商品库存 -> Snowflake 生成订单 ID -> RabbitMQ 持久化投递 -> consumer 异步事务落库。
-- 秒杀 token: 校验活动时间和状态 -> HMAC-SHA256 生成一次性 token -> Redis 保存 60 秒。
-- 秒杀执行: Redis Lua 原子校验 token、库存、用户限购并预扣 -> RabbitMQ 异步投递订单消息 -> consumer 落库。
-- MQ 消费: 多 worker, 每个 worker 单独 channel, `Qos(prefetchCount)`, 手动 ack；成功 `Ack`, 失败 `Nack(false, true)` 重新入队。
-- 幂等: consumer 在落库前按 `order_id` 查询，已存在则直接返回成功。
-- 库存补偿: 定时扫描商品库存，发现 Redis key 缺失或 Redis 库存大于 DB 库存时重建/修正普通商品库存 key。
-- 限流: 全局令牌桶 + IP 令牌桶，使用 `sync.RWMutex` 保护 IP 到 limiter 的 map。
-- 优雅停机: `mainCtx` cancel 通知 consumer 和定时任务退出，HTTP server 使用 `Shutdown` 等待连接收尾。
-- 监控: Gin middleware 统计请求数、延迟、活跃连接数；注册 `/metrics`。
+### MQ / 可靠性
+
+- Durable queue + persistent message + **publisher confirm**。
+- Consumer 多 worker + prefetch + 手动 Ack。
+- 可重试 → retry queue；超限 → DLQ。
+- 幂等：消费前查 `order_id`；MySQL 条件 UPDATE 兜底。
+
+### 补偿
+
+- `TicketCompensationService`：Redis 票额 > MySQL 可用量时 **只下调 Redis**。
+- 启动时 `WarmTicketQuota`、`RecoverQueuedOrders` 重建 Redis 并重投 outbox。
+
+### 限流
+
+- 全局 + IP 令牌桶；写接口可选 **Redis 滑动窗口分布式限流**。
+
+## 重要：当前系统 **没有** 用户级 Redis 分布式锁
+
+旧零食代码曾有 `lock:order:user:{userId}`，**赴场购票/抢票未使用 `WithLock` 用户锁**。
+
+并发控制靠：
+
+| 手段 | 作用 |
+|------|------|
+| 幂等键 | 防重复提交（客户端 UUID + Redis + DB） |
+| Redis Lua | 票额预扣原子性 |
+| MySQL 条件 UPDATE | 消费端最终扣减、支付/超时竞态 |
+| 写接口限流 | 防脚本刷接口 |
+| 库存分桶 | 降低单行热点锁竞争 |
+
+面试不要说「入口用用户锁」，应说 **「幂等键 + Lua 预扣 + 条件 UPDATE」**。
 
 ## 禁止幻觉清单
 
-以下内容不能说成项目已经实现:
+不能说成已实现：
 
-- 没有实现 Redis Cluster、Sentinel、Redlock。
-- 没有实现 RabbitMQ 死信队列、延迟队列、重试次数上限、生产者 confirm。
-- 没有实现分布式事务、TCC、SAGA、本地消息表。
-- 没有实现 Kubernetes、服务网格、真实线上灰度发布。
-- 没有真实生产千万 QPS，只能说写过压测脚本并观察到 MQ backlog 与 consumer 调优效果。
-- 没有实现 WebSocket 或订单状态异步推送。
-- 没有实现完善的库存补偿闭环来处理所有秒杀异常场景；当前普通库存补偿更明确。
-- 没有完整的多机分布式限流；当前限流是进程内令牌桶。
+- Redis Cluster / Redlock 生产级热点治理（分桶是已落地的拆 key）。
+- 完整分布式事务 / Seata / TCC。
+- 真实生产千万 QPS（只能说压测脚本 + 1500 并发证据）。
+- 旧零食：商品列表缓存、秒杀 token、WebSocket 订单推送、用户锁 — **均已移除**。
+
+## 压测可引用数据（1500 并发单热点）
+
+- 成功数 = 库存数，无超卖。
+- 库存分桶 v2：MQ 追平约 23s → 11s；`row_lock_waits` 约降 80%。
+- 详见 `tests/load/results/capacity-buckets-compare-20260731.md`。
 
 ## 回答口径
 
-- 已实现能力: 直接讲代码链路、关键数据结构、异常分支和不足。
-- 未实现但能扩展: 必须先说“当前项目没有做”，再讲生产扩展方案。
-- 简历过强表述: 改成“实践过”“实现了基础版本”“通过压测脚本观察并调优”，避免说成真实生产经验。
-- 面试被追问到不知道: 先承认边界，再把回答拉回项目中已经做过的部分。
+- 已实现：讲代码文件、关键 Redis key、失败分支。
+- 未实现：先说「当前没做」，再讲扩展方案。
+- 旧零食经验：可说「早期版本用过用户锁/秒杀 token，票务版改为幂等键 + 直抢 Lua」。
 
 ## 后续写作规则
 
-- 每篇文档开头必须写依据来源。
-- 每个结论尽量能指向文件或函数。
-- 八股词条必须落到“项目有没有用、怎么用、没用如何回答”。
-- 外部面经必须保留 URL，不能只写“网上说”。
-- 每完成一篇文档，回查本文件，删除或标注任何超出真实项目的描述。
+- 每篇文档开头写依据来源。
+- 结论指向文件或函数。
+- 与代码冲突时 **以代码为准**，更新文档。

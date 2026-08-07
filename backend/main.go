@@ -73,8 +73,10 @@ func main() {
 
 	userSvc := service.NewUserService(cont, cfg.JWT.ExpireSecs, cfg.JWT.RefreshExpireSecs)
 	ticketCatalogSvc := service.NewTicketCatalogService(cont)
+	ticketCatalogSvc.ConfigureInventory(cfg.Inventory)
 	ticketOrderSvc := service.NewTicketOrderService(cont, timeoutMinutes)
 	ticketOrderSvc.ConfigureOutboxWriter(cfg.OrderOutbox)
+	ticketOrderSvc.ConfigureInventory(cfg.Inventory)
 	ticketVerificationSvc := service.NewTicketVerificationService(cont)
 	rushSaleSvc := service.NewRushSaleService(
 		cont,
@@ -100,6 +102,7 @@ func main() {
 	eventCommentSvc := service.NewEventCommentService(cont)
 	eventCommentCtrl := controller.NewEventCommentController(eventCommentSvc)
 	ticketCompensationSvc := service.NewTicketCompensationService(cont)
+	ticketCompensationSvc.ConfigureInventory(cfg.Inventory)
 	eventSearchCompensationSvc := service.NewEventSearchCompensationService(
 		ticketCatalogSvc,
 		cont.RDB,

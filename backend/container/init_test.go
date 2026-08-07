@@ -31,16 +31,6 @@ func TestTicketingSchemaModelsExcludeLegacyCommerceTables(t *testing.T) {
 		}
 	}
 
-	legacy := []interface{}{
-		&models.Product{},
-		&models.Order{},
-		&models.SeckillActivity{},
-	}
-	for _, model := range legacy {
-		if actual[reflect.TypeOf(model)] {
-			t.Fatalf("legacy commerce model %T must not be auto-migrated", model)
-		}
-	}
 }
 
 func TestRabbitQueueArgs(t *testing.T) {

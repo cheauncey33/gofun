@@ -11,7 +11,6 @@ const (
 	CodeForbidden    = 40300
 	CodeNotFound     = 40400
 	CodeUserNotFound = 40401
-	CodeProductNotFound = 40402
 	CodeOrderNotFound = 40403
 	CodeConflict     = 40900
 	CodeUserExists   = 40901
@@ -27,11 +26,6 @@ const (
 	CodeInsufficientStock  = 60001
 	CodeInsufficientBalance = 60002
 	CodeOrderCreateFailed  = 60003
-	CodeSeckillNotStarted  = 60004
-	CodeSeckillEnded       = 60005
-	CodeSeckillSoldOut     = 60006
-	CodeSeckillLimitReached = 60007
-	CodeSeckillTokenInvalid = 60008
 	CodeInvalidOrderStatus = 60009
 )
 
@@ -44,7 +38,6 @@ var codeMessages = map[int]string{
 	CodeForbidden:         "权限不足",
 	CodeNotFound:          "资源不存在",
 	CodeUserNotFound:      "用户不存在",
-	CodeProductNotFound:   "商品不存在",
 	CodeOrderNotFound:     "订单不存在",
 	CodeConflict:          "资源冲突",
 	CodeUserExists:        "用户名已存在",
@@ -56,11 +49,6 @@ var codeMessages = map[int]string{
 	CodeInsufficientStock: "库存不足",
 	CodeInsufficientBalance: "余额不足",
 	CodeOrderCreateFailed: "订单创建失败",
-	CodeSeckillNotStarted: "秒杀活动尚未开始",
-	CodeSeckillEnded:      "秒杀活动已结束",
-	CodeSeckillSoldOut:    "秒杀已售罄",
-	CodeSeckillLimitReached: "已达限购上限",
-	CodeSeckillTokenInvalid: "秒杀令牌无效",
 	CodeInvalidOrderStatus:  "订单状态不允许此操作",
 }
 

@@ -34,3 +34,10 @@ mineru_vlm_output/
 .DS_Store
 .idea/
 .vscode/
+
+# k6 夹具含 JWT，勿提交
+tests/load/k6/fixtures/*.json
+
+# 构建/测试临时输出
+backend/_build_out.txt
+backend/_test_out.txt

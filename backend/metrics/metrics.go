@@ -44,14 +44,6 @@ var (
 		},
 	)
 
-	SeckillRequests = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "seckill_requests_total",
-			Help: "Total seckill requests",
-		},
-		[]string{"activity_id", "result"}, // success | sold_out | limit_reached | token_invalid
-	)
-
 	ActiveHTTPConnections = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "active_http_connections",
@@ -125,6 +117,13 @@ var (
 		prometheus.CounterOpts{
 			Name: "outbox_recover_backfill_total",
 			Help: "Total queued orders that received a backfilled outbox row",
+		},
+	)
+
+	InventoryBucketFallback = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "inventory_bucket_fallback_total",
+			Help: "Orders restored without stock_bucket_no; used userID mod N fallback",
 		},
 	)
 )

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"WHU_Snack_GO/config"
 	"WHU_Snack_GO/container"
 	"WHU_Snack_GO/models"
 	"WHU_Snack_GO/repository"
@@ -130,11 +131,12 @@ type OrganizerOverview struct {
 }
 
 type TicketCatalogService struct {
-	repo     repository.TicketCatalogRepository
-	db       *gorm.DB
-	rdb      *redis.Client
-	searcher search.EventSearcher
-	preferES bool
+	repo      repository.TicketCatalogRepository
+	db        *gorm.DB
+	rdb       *redis.Client
+	searcher  search.EventSearcher
+	preferES  bool
+	inventory InventoryBucketSettings
 }
 
 func NewTicketCatalogService(c *container.Container) *TicketCatalogService {
@@ -149,6 +151,10 @@ func NewTicketCatalogService(c *container.Container) *TicketCatalogService {
 		searcher: searcher,
 		preferES: c.SearchPreferES && searcher.Enabled(),
 	}
+}
+
+func (s *TicketCatalogService) ConfigureInventory(cfg config.InventoryConfig) {
+	s.inventory = NewInventoryBucketSettings(cfg)
 }
 
 func (s *TicketCatalogService) CreateOrganizer(
@@ -363,7 +369,21 @@ func (s *TicketCatalogService) PublishEvent(
 	stockValues := make(map[string]interface{})
 	for _, session := range event.Sessions {
 		for _, tier := range session.TicketTiers {
-			stockValues[ticketStockKey(tier.ID)] = tier.RemainingQuota
+			if s.inventory.Enabled {
+				if err := EnsureTierBuckets(s.db.WithContext(ctx), &tier, s.inventory); err != nil {
+					return nil, fmt.Errorf("发布前拆桶: %w", err)
+				}
+				var buckets []models.TicketTierBucket
+				if err := s.db.WithContext(ctx).
+					Where("tier_id = ?", tier.ID).Find(&buckets).Error; err != nil {
+					return nil, err
+				}
+				for _, bucket := range buckets {
+					stockValues[TicketStockBucketKey(bucket.TierID, bucket.BucketNo)] = bucket.RemainingQuota
+				}
+			} else {
+				stockValues[ticketStockKey(tier.ID)] = tier.RemainingQuota
+			}
 		}
 	}
 	if err := s.rdb.MSet(ctx, stockValues).Err(); err != nil {
@@ -400,8 +420,9 @@ func (s *TicketCatalogService) CancelEvent(
 	for si := range event.Sessions {
 		event.Sessions[si].Status = models.SessionStatusCancelled
 		for ti := range event.Sessions[si].TicketTiers {
-			event.Sessions[si].TicketTiers[ti].Status = models.TicketTierStatusDisabled
-			stockKeys = append(stockKeys, ticketStockKey(event.Sessions[si].TicketTiers[ti].ID))
+			tier := &event.Sessions[si].TicketTiers[ti]
+			tier.Status = models.TicketTierStatusDisabled
+			stockKeys = append(stockKeys, s.tierStockRedisKeys(tier)...)
 		}
 	}
 	event.Status = models.EventStatusCancelled
@@ -459,8 +480,8 @@ func (s *TicketCatalogService) UnpublishEvent(
 	}
 	stockKeys := make([]string, 0)
 	for _, session := range event.Sessions {
-		for _, tier := range session.TicketTiers {
-			stockKeys = append(stockKeys, ticketStockKey(tier.ID))
+		for i := range session.TicketTiers {
+			stockKeys = append(stockKeys, s.tierStockRedisKeys(&session.TicketTiers[i])...)
 		}
 	}
 	if len(stockKeys) > 0 {
@@ -475,6 +496,19 @@ func (s *TicketCatalogService) UnpublishEvent(
 	}
 	s.removeEventSearchIndex(ctx, event.ID)
 	return event, nil
+}
+
+func (s *TicketCatalogService) tierStockRedisKeys(tier *models.TicketTier) []string {
+	if !s.inventory.Enabled {
+		return []string{ticketStockKey(tier.ID)}
+	}
+	n := s.inventory.EffectiveBucketCount(tier.TotalQuota)
+	keys := make([]string, 0, n+1)
+	keys = append(keys, ticketStockKey(tier.ID)) // 兼容清理旧单 key
+	for i := 0; i < n; i++ {
+		keys = append(keys, TicketStockBucketKey(tier.ID, i))
+	}
+	return keys
 }
 
 func (s *TicketCatalogService) DisableTicketTier(
@@ -597,7 +631,13 @@ func (s *TicketCatalogService) CreateTicketTier(
 		PurchaseLimit:      input.PurchaseLimit,
 		Status:             models.TicketTierStatusOnSale,
 	}
-	if err := s.repo.CreateTicketTier(ctx, tier); err != nil {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(tier).Error; err != nil {
+			return err
+		}
+		return EnsureTierBuckets(tx, tier, s.inventory)
+	})
+	if err != nil {
 		return nil, err
 	}
 	return tier, nil
@@ -806,7 +846,22 @@ func (s *TicketCatalogService) GetPublishedEvent(
 	if event.Status != models.EventStatusPublished {
 		return nil, ErrTicketResourceNotFound
 	}
+	s.overlayTierRemainingFromBuckets(ctx, event)
 	return event, nil
+}
+
+func (s *TicketCatalogService) overlayTierRemainingFromBuckets(ctx context.Context, event *models.Event) {
+	if !s.inventory.Enabled || event == nil {
+		return
+	}
+	for si := range event.Sessions {
+		for ti := range event.Sessions[si].TicketTiers {
+			tier := &event.Sessions[si].TicketTiers[ti]
+			if sum, err := sumTierBucketRemaining(ctx, s.db, tier.ID); err == nil {
+				tier.RemainingQuota = sum
+			}
+		}
+	}
 }
 
 func (s *TicketCatalogService) ListOrganizerEvents(

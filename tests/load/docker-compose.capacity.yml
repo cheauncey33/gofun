@@ -1,0 +1,37 @@
+# 单机容量对比压测覆盖层（对齐 capacity-final-c4p5 参数）。
+services:
+  backend:
+    environment:
+      ORDER_CONSUMER_WORKER_COUNT: "6"
+      ORDER_CONSUMER_PREFETCH_COUNT: "5"
+      ORDER_CONSUMER_MAX_RETRIES: "3"
+      ORDER_OUTBOX_WRITE_MODE: batch
+      ORDER_OUTBOX_PUBLISH_WORKERS: "4"
+      ORDER_OUTBOX_PUBLISH_BATCH: "200"
+      MYSQL_MAX_OPEN_CONNS: "100"
+      MYSQL_MAX_IDLE_CONNS: "10"
+      REDIS_POOL_SIZE: "100"
+      RATELIMIT_GLOBAL_RATE: "100000"
+      RATELIMIT_GLOBAL_BURST: "100000"
+      RATELIMIT_IP_RATE: "100000"
+      RATELIMIT_IP_BURST: "100000"
+      RATELIMIT_DISTRIBUTED_WRITE_ENABLED: "true"
+      RATELIMIT_WRITE_WINDOW_MS: "1000"
+      RATELIMIT_WRITE_MAX_PER_WINDOW: "100000"
+      RATELIMIT_WRITE_FAIL_OPEN: "false"
+      TELEMETRY_ENABLED: "false"
+      # 分桶对比压测时打开；默认关闭保持与历史基线同构。
+      INVENTORY_BUCKETS_ENABLED: "${INVENTORY_BUCKETS_ENABLED:-false}"
+      INVENTORY_BUCKET_COUNT: "${INVENTORY_BUCKET_COUNT:-8}"
+      INVENTORY_MIN_QUOTA_TO_BUCKET: "${INVENTORY_MIN_QUOTA_TO_BUCKET:-64}"
+      INVENTORY_BUCKET_RETRY: "${INVENTORY_BUCKET_RETRY:-4}"
+    container_name: whu-snack-go-capacity-backend-load
+
+  mysql:
+    container_name: whu-snack-go-capacity-mysql-1
+
+  redis:
+    container_name: whu-snack-go-capacity-redis-1
+
+  rabbitmq:
+    container_name: whu-snack-go-capacity-rabbitmq-1

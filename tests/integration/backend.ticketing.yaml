@@ -82,6 +82,12 @@ order_outbox:
 rush_sale:
   campaign_cache_ttl_ms: 3000
 
+inventory:
+  buckets_enabled: false
+  bucket_count: 8
+  min_quota_to_bucket: 64
+  bucket_retry: 4
+
 delayed_order:
   timeout_minutes: 1
   lock_timeout_sec: 5

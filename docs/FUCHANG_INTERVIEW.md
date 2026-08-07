@@ -101,7 +101,7 @@
 | bigkey 拆分 | 票档库存、抢票、评论 list 均按资源拆 key | 拆分 + 监控，大 value 用分页/投影 |
 | hotkey | 抢票 stock + 本地短 TTL | 读走 L1，写走 Redis Lua |
 | Lua 原子扣减 | 普通票 / 抢票预扣 | 多命令当一事务，减少竞态 |
-| 分布式锁 | 下单用户锁 `lock:*` | SET NX EX + value 校验再删 |
+| 幂等键 | `X-Idempotency-Key` + Redis + DB 唯一约束 | 防重复提交，**不是**用户级分布式锁 |
 | 库存对账 | 补偿任务 | Redis > MySQL 时把 Redis 拉回，防超卖窗口 |
 
 ### MQ / 异步

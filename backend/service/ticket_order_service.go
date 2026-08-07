@@ -1,6 +1,7 @@
 package service
 
 import (
+	"WHU_Snack_GO/config"
 	"WHU_Snack_GO/container"
 	"WHU_Snack_GO/metrics"
 	"WHU_Snack_GO/models"
@@ -94,6 +95,8 @@ type TicketOrderMessage struct {
 	TicketTierID       int64             `json:"ticket_tier_id"`
 	Quantity           int               `json:"quantity"`
 	RushSaleCampaignID *int64            `json:"rush_sale_campaign_id,omitempty"`
+	StockBucketNo      *int              `json:"stock_bucket_no,omitempty"`
+	RushBucketNo       *int              `json:"rush_bucket_no,omitempty"`
 	TraceContext       map[string]string `json:"trace_context,omitempty"`
 }
 
@@ -119,6 +122,42 @@ type TicketOrderService struct {
 	outboxWriteMode    string
 	outboxBuffer       *outboxWriteBuffer
 	outboxRecoverEvery time.Duration
+	inventory          InventoryBucketSettings
+}
+
+func (s *TicketOrderService) ConfigureInventory(cfg config.InventoryConfig) {
+	s.inventory = NewInventoryBucketSettings(cfg)
+}
+
+// EnsureInventoryBuckets 存量票档/活动幂等拆桶；开关关闭时 no-op。
+func (s *TicketOrderService) EnsureInventoryBuckets(ctx context.Context) error {
+	if !s.inventory.Enabled {
+		return nil
+	}
+	var tiers []models.TicketTier
+	if err := s.db.WithContext(ctx).Find(&tiers).Error; err != nil {
+		return err
+	}
+	for i := range tiers {
+		if err := EnsureTierBuckets(s.db.WithContext(ctx), &tiers[i], s.inventory); err != nil {
+			return err
+		}
+	}
+	var campaigns []models.RushSaleCampaign
+	if err := s.db.WithContext(ctx).
+		Where("status IN ?", []models.RushSaleStatus{
+			models.RushSaleStatusScheduled,
+			models.RushSaleStatusActive,
+			models.RushSaleStatusDraft,
+		}).Find(&campaigns).Error; err != nil {
+		return err
+	}
+	for i := range campaigns {
+		if err := EnsureRushBuckets(s.db.WithContext(ctx), &campaigns[i], s.inventory); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func NewTicketOrderService(c *container.Container, timeoutMinutes int) *TicketOrderService {
@@ -143,6 +182,9 @@ func NewTicketOrderService(c *container.Container, timeoutMinutes int) *TicketOr
 }
 
 func (s *TicketOrderService) WarmTicketQuota(ctx context.Context) error {
+	if err := s.EnsureInventoryBuckets(ctx); err != nil {
+		return err
+	}
 	var tiers []models.TicketTier
 	if err := s.db.WithContext(ctx).Find(&tiers).Error; err != nil {
 		return err
@@ -155,21 +197,45 @@ func (s *TicketOrderService) WarmTicketQuota(ctx context.Context) error {
 	}
 	queuedByTier := make(map[int64]int)
 	queuedByCampaign := make(map[int64]int)
+	queuedByTierBucket := make(map[string]int)
+	queuedByCampaignBucket := make(map[string]int)
 	for _, order := range queuedOrders {
 		for _, item := range order.Items {
 			queuedByTier[item.TicketTierID] += item.Quantity
 			if order.RushSaleCampaignID != nil {
 				queuedByCampaign[*order.RushSaleCampaignID] += item.Quantity
 			}
+			if s.inventory.Enabled {
+				stockBucket := queuedOrderStockBucket(&order, s.inventory)
+				queuedByTierBucket[fmt.Sprintf("%d:%d", item.TicketTierID, stockBucket)] += item.Quantity
+				if order.RushSaleCampaignID != nil {
+					rushBucket := queuedOrderRushBucket(&order, s.inventory)
+					queuedByCampaignBucket[fmt.Sprintf("%d:%d", *order.RushSaleCampaignID, rushBucket)] += item.Quantity
+				}
+			}
 		}
 	}
-	values := make(map[string]interface{}, len(tiers))
-	for _, tier := range tiers {
-		available := tier.RemainingQuota - queuedByTier[tier.ID]
-		if available < 0 {
-			available = 0
+	values := make(map[string]interface{})
+	if s.inventory.Enabled {
+		var tierBuckets []models.TicketTierBucket
+		if err := s.db.WithContext(ctx).Find(&tierBuckets).Error; err != nil {
+			return err
 		}
-		values[ticketStockKey(tier.ID)] = available
+		for _, bucket := range tierBuckets {
+			available := bucket.RemainingQuota - queuedByTierBucket[fmt.Sprintf("%d:%d", bucket.TierID, bucket.BucketNo)]
+			if available < 0 {
+				available = 0
+			}
+			values[TicketStockBucketKey(bucket.TierID, bucket.BucketNo)] = available
+		}
+	} else {
+		for _, tier := range tiers {
+			available := tier.RemainingQuota - queuedByTier[tier.ID]
+			if available < 0 {
+				available = 0
+			}
+			values[ticketStockKey(tier.ID)] = available
+		}
 	}
 	var campaigns []models.RushSaleCampaign
 	if err := s.db.WithContext(ctx).
@@ -179,12 +245,26 @@ func (s *TicketOrderService) WarmTicketQuota(ctx context.Context) error {
 		}).Find(&campaigns).Error; err != nil {
 		return err
 	}
-	for _, campaign := range campaigns {
-		available := campaign.RemainingQuota - queuedByCampaign[campaign.ID]
-		if available < 0 {
-			available = 0
+	if s.inventory.Enabled {
+		var rushBuckets []models.RushCampaignBucket
+		if err := s.db.WithContext(ctx).Find(&rushBuckets).Error; err != nil {
+			return err
 		}
-		values[rushStockKey(campaign.ID)] = available
+		for _, bucket := range rushBuckets {
+			available := bucket.RemainingQuota - queuedByCampaignBucket[fmt.Sprintf("%d:%d", bucket.CampaignID, bucket.BucketNo)]
+			if available < 0 {
+				available = 0
+			}
+			values[RushStockBucketKey(bucket.CampaignID, bucket.BucketNo)] = available
+		}
+	} else {
+		for _, campaign := range campaigns {
+			available := campaign.RemainingQuota - queuedByCampaign[campaign.ID]
+			if available < 0 {
+				available = 0
+			}
+			values[rushStockKey(campaign.ID)] = available
+		}
 	}
 	var activeRushOrders []models.TicketOrder
 	if err := s.db.WithContext(ctx).Preload("Items").
@@ -242,11 +322,16 @@ func (s *TicketOrderService) RecoverQueuedOrders(ctx context.Context) error {
 				totalQty := 0
 				for _, item := range order.Items {
 					totalQty += item.Quantity
-					s.rollbackRedisQuota(ctx, item.TicketTierID, item.Quantity)
+					s.rollbackRedisQuota(ctx, item.TicketTierID, item.Quantity, order.StockBucketNo)
 				}
 				if order.RushSaleCampaignID != nil && totalQty > 0 {
 					pipe := s.rdb.TxPipeline()
-					pipe.IncrBy(ctx, rushStockKey(*order.RushSaleCampaignID), int64(totalQty))
+					if s.inventory.Enabled {
+						rb := queuedOrderRushBucket(&order, s.inventory)
+						pipe.IncrBy(ctx, RushStockBucketKey(*order.RushSaleCampaignID, rb), int64(totalQty))
+					} else {
+						pipe.IncrBy(ctx, rushStockKey(*order.RushSaleCampaignID), int64(totalQty))
+					}
 					pipe.DecrBy(
 						ctx,
 						rushUserCountKey(*order.RushSaleCampaignID, order.UserID),
@@ -279,6 +364,8 @@ func (s *TicketOrderService) RecoverQueuedOrders(ctx context.Context) error {
 			TicketTierID:       order.Items[0].TicketTierID,
 			Quantity:           order.Items[0].Quantity,
 			RushSaleCampaignID: order.RushSaleCampaignID,
+			StockBucketNo:      order.StockBucketNo,
+			RushBucketNo:       order.RushBucketNo,
 		}
 		if err := s.enqueueOutbox(ctx, order.ID, message); err != nil {
 			return err
@@ -343,10 +430,7 @@ func (s *TicketOrderService) CreateOrder(
 		return nil, err
 	}
 
-	stockKey := ticketStockKey(tier.ID)
-	remaining, err := reserveTicketQuotaScript.Run(
-		ctx, s.rdb, []string{stockKey}, input.Quantity,
-	).Int64()
+	bucketNo, remaining, err := s.reserveTicketStock(ctx, userID, tier, input.Quantity)
 	if err != nil || remaining < 0 {
 		if remaining == -2 {
 			return nil, fmt.Errorf("%w: 票额缓存尚未预热", ErrTicketOrderUnavailable)
@@ -389,6 +473,9 @@ func (s *TicketOrderService) CreateOrder(
 			TierNameSnapshot:        tier.Name,
 		}},
 	}
+	if s.inventory.Enabled {
+		order.StockBucketNo = intPtr(bucketNo)
+	}
 	if attendees := s.buildAttendeeSnapshots(orderID, input.Attendees, event.RealNameRequired); len(attendees) > 0 {
 		order.Attendees = attendees
 	}
@@ -398,8 +485,11 @@ func (s *TicketOrderService) CreateOrder(
 		TicketTierID: tier.ID,
 		Quantity:     input.Quantity,
 	}
+	if s.inventory.Enabled {
+		message.StockBucketNo = intPtr(bucketNo)
+	}
 	if err := s.createOrderAndOutbox(ctx, order, message); err != nil {
-		s.rollbackRedisQuota(ctx, tier.ID, input.Quantity)
+		s.rollbackRedisQuota(ctx, tier.ID, input.Quantity, order.StockBucketNo)
 		var existing models.TicketOrder
 		if lookupErr := s.db.WithContext(ctx).
 			Where("user_id = ? AND idempotency_key = ?", userID, idempotencyKey).
@@ -460,40 +550,53 @@ func (s *TicketOrderService) ProcessOrderTask(
 			return fmt.Errorf("%w: 消息与订单凭据不一致", ErrTicketOrderNonRetryable)
 		}
 
-		// 票档/活动库存不再 SELECT FOR UPDATE：用条件 UPDATE 缩短持锁，
-		// 由 WHERE remaining_quota >= ? 保证不超卖；订单行仍加锁防同单并发消费。
-		if order.RushSaleCampaignID != nil {
-			campaignResult := tx.Model(&models.RushSaleCampaign{}).
-				Where(
-					"id = ? AND ticket_tier_id = ? AND remaining_quota >= ?",
-					*order.RushSaleCampaignID, message.TicketTierID, message.Quantity,
-				).
-				Update("remaining_quota", gorm.Expr("remaining_quota - ?", message.Quantity))
-			if campaignResult.Error != nil {
-				return campaignResult.Error
+		// 分桶开启时扣 bucket 行；关闭时仍扣父表 remaining_quota。
+		// 订单行 FOR UPDATE 防同单并发消费。
+		if s.inventory.Enabled {
+			stockBucket, _ := resolveStockBucketForOrder(&order, message.StockBucketNo, s.inventory, 0)
+			if order.RushSaleCampaignID != nil {
+				rushBucket, _ := resolveRushBucketForOrder(&order, message.RushBucketNo, s.inventory, 0)
+				if err := deductRushBucket(tx, *order.RushSaleCampaignID, message.TicketTierID, rushBucket, message.Quantity); err != nil {
+					return err
+				}
 			}
-			if campaignResult.RowsAffected == 0 {
-				return classifyRushQuotaUpdateMiss(tx, *order.RushSaleCampaignID, message.TicketTierID, message.Quantity)
+			if err := deductTierBucket(tx, message.TicketTierID, stockBucket, message.Quantity); err != nil {
+				return err
 			}
-		}
-		tierResult := tx.Model(&models.TicketTier{}).
-			Where("id = ? AND remaining_quota >= ?", message.TicketTierID, message.Quantity).
-			Updates(map[string]interface{}{
-				"remaining_quota": gorm.Expr("remaining_quota - ?", message.Quantity),
-				"sold_count":      gorm.Expr("sold_count + ?", message.Quantity),
-				"version":         gorm.Expr("version + 1"),
-				"status": gorm.Expr(
-					"CASE WHEN remaining_quota <= ? AND status = ? THEN ? ELSE status END",
-					message.Quantity,
-					models.TicketTierStatusOnSale,
-					models.TicketTierStatusSoldOut,
-				),
-			})
-		if tierResult.Error != nil {
-			return tierResult.Error
-		}
-		if tierResult.RowsAffected == 0 {
-			return classifyTierQuotaUpdateMiss(tx, message.TicketTierID, message.Quantity)
+		} else {
+			if order.RushSaleCampaignID != nil {
+				campaignResult := tx.Model(&models.RushSaleCampaign{}).
+					Where(
+						"id = ? AND ticket_tier_id = ? AND remaining_quota >= ?",
+						*order.RushSaleCampaignID, message.TicketTierID, message.Quantity,
+					).
+					Update("remaining_quota", gorm.Expr("remaining_quota - ?", message.Quantity))
+				if campaignResult.Error != nil {
+					return campaignResult.Error
+				}
+				if campaignResult.RowsAffected == 0 {
+					return classifyRushQuotaUpdateMiss(tx, *order.RushSaleCampaignID, message.TicketTierID, message.Quantity)
+				}
+			}
+			tierResult := tx.Model(&models.TicketTier{}).
+				Where("id = ? AND remaining_quota >= ?", message.TicketTierID, message.Quantity).
+				Updates(map[string]interface{}{
+					"remaining_quota": gorm.Expr("remaining_quota - ?", message.Quantity),
+					"sold_count":      gorm.Expr("sold_count + ?", message.Quantity),
+					"version":         gorm.Expr("version + 1"),
+					"status": gorm.Expr(
+						"CASE WHEN remaining_quota <= ? AND status = ? THEN ? ELSE status END",
+						message.Quantity,
+						models.TicketTierStatusOnSale,
+						models.TicketTierStatusSoldOut,
+					),
+				})
+			if tierResult.Error != nil {
+				return tierResult.Error
+			}
+			if tierResult.RowsAffected == 0 {
+				return classifyTierQuotaUpdateMiss(tx, message.TicketTierID, message.Quantity)
+			}
 		}
 		expiresAt := time.Now().Add(s.paymentTimeout)
 		result := tx.Model(&models.TicketOrder{}).
@@ -568,10 +671,15 @@ func (s *TicketOrderService) FinalizeFailedMessage(
 			"cancel_reason": reason,
 		})
 	if result.Error == nil && result.RowsAffected > 0 {
-		s.rollbackRedisQuota(ctx, message.TicketTierID, message.Quantity)
+		s.rollbackRedisQuota(ctx, message.TicketTierID, message.Quantity, message.StockBucketNo)
 		if message.RushSaleCampaignID != nil {
 			pipe := s.rdb.TxPipeline()
-			pipe.IncrBy(ctx, rushStockKey(*message.RushSaleCampaignID), int64(message.Quantity))
+			if s.inventory.Enabled {
+				rushBucket := resolveMessageRushBucket(message, s.inventory)
+				pipe.IncrBy(ctx, RushStockBucketKey(*message.RushSaleCampaignID, rushBucket), int64(message.Quantity))
+			} else {
+				pipe.IncrBy(ctx, rushStockKey(*message.RushSaleCampaignID), int64(message.Quantity))
+			}
 			pipe.DecrBy(
 				ctx,
 				rushUserCountKey(*message.RushSaleCampaignID, message.UserID),
@@ -728,6 +836,8 @@ func (s *TicketOrderService) CancelOrder(
 	var quantity int
 	var refundCents int64
 	var rushCampaignID *int64
+	var stockBucketNo *int
+	var rushBucketNo *int
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var order models.TicketOrder
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -763,14 +873,29 @@ func (s *TicketOrderService) CancelOrder(
 				return err
 			}
 		}
-		if err := restoreTierQuota(tx, tierID, quantity); err != nil {
-			return err
-		}
-		if rushCampaignID != nil {
-			if err := tx.Model(&models.RushSaleCampaign{}).
-				Where("id = ?", *rushCampaignID).
-				Update("remaining_quota", gorm.Expr("remaining_quota + ?", quantity)).Error; err != nil {
+		if s.inventory.Enabled {
+			sb, _ := resolveStockBucketForOrder(&order, nil, s.inventory, 0)
+			stockBucketNo = intPtr(sb)
+			if err := restoreTierBucket(tx, tierID, sb, quantity); err != nil {
 				return err
+			}
+			if rushCampaignID != nil {
+				rb, _ := resolveRushBucketForOrder(&order, nil, s.inventory, 0)
+				rushBucketNo = intPtr(rb)
+				if err := restoreRushBucket(tx, *rushCampaignID, rb, quantity); err != nil {
+					return err
+				}
+			}
+		} else {
+			if err := restoreTierQuota(tx, tierID, quantity); err != nil {
+				return err
+			}
+			if rushCampaignID != nil {
+				if err := tx.Model(&models.RushSaleCampaign{}).
+					Where("id = ?", *rushCampaignID).
+					Update("remaining_quota", gorm.Expr("remaining_quota + ?", quantity)).Error; err != nil {
+					return err
+				}
 			}
 		}
 		now := time.Now()
@@ -798,10 +923,14 @@ func (s *TicketOrderService) CancelOrder(
 			}).Error
 	})
 	if err == nil {
-		_ = s.rdb.IncrBy(ctx, ticketStockKey(tierID), int64(quantity)).Err()
+		s.rollbackRedisQuota(ctx, tierID, quantity, stockBucketNo)
 		if rushCampaignID != nil {
 			pipe := s.rdb.TxPipeline()
-			pipe.IncrBy(ctx, rushStockKey(*rushCampaignID), int64(quantity))
+			if s.inventory.Enabled && rushBucketNo != nil {
+				pipe.IncrBy(ctx, RushStockBucketKey(*rushCampaignID, *rushBucketNo), int64(quantity))
+			} else {
+				pipe.IncrBy(ctx, rushStockKey(*rushCampaignID), int64(quantity))
+			}
 			pipe.DecrBy(
 				ctx,
 				rushUserCountKey(*rushCampaignID, userID),
@@ -946,6 +1075,8 @@ func (s *TicketOrderService) cancelPendingPaymentOnly(
 	var tierID int64
 	var quantity int
 	var rushCampaignID *int64
+	var stockBucketNo *int
+	var rushBucketNo *int
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var order models.TicketOrder
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -965,14 +1096,29 @@ func (s *TicketOrderService) cancelPendingPaymentOnly(
 		}
 		tierID, quantity = order.Items[0].TicketTierID, order.Items[0].Quantity
 		rushCampaignID = order.RushSaleCampaignID
-		if err := restoreTierQuota(tx, tierID, quantity); err != nil {
-			return err
-		}
-		if rushCampaignID != nil {
-			if err := tx.Model(&models.RushSaleCampaign{}).
-				Where("id = ?", *rushCampaignID).
-				Update("remaining_quota", gorm.Expr("remaining_quota + ?", quantity)).Error; err != nil {
+		if s.inventory.Enabled {
+			sb, _ := resolveStockBucketForOrder(&order, nil, s.inventory, 0)
+			stockBucketNo = intPtr(sb)
+			if err := restoreTierBucket(tx, tierID, sb, quantity); err != nil {
 				return err
+			}
+			if rushCampaignID != nil {
+				rb, _ := resolveRushBucketForOrder(&order, nil, s.inventory, 0)
+				rushBucketNo = intPtr(rb)
+				if err := restoreRushBucket(tx, *rushCampaignID, rb, quantity); err != nil {
+					return err
+				}
+			}
+		} else {
+			if err := restoreTierQuota(tx, tierID, quantity); err != nil {
+				return err
+			}
+			if rushCampaignID != nil {
+				if err := tx.Model(&models.RushSaleCampaign{}).
+					Where("id = ?", *rushCampaignID).
+					Update("remaining_quota", gorm.Expr("remaining_quota + ?", quantity)).Error; err != nil {
+					return err
+				}
 			}
 		}
 		now := time.Now()
@@ -992,10 +1138,14 @@ func (s *TicketOrderService) cancelPendingPaymentOnly(
 		return nil
 	})
 	if err == nil {
-		_ = s.rdb.IncrBy(ctx, ticketStockKey(tierID), int64(quantity)).Err()
+		s.rollbackRedisQuota(ctx, tierID, quantity, stockBucketNo)
 		if rushCampaignID != nil {
 			pipe := s.rdb.TxPipeline()
-			pipe.IncrBy(ctx, rushStockKey(*rushCampaignID), int64(quantity))
+			if s.inventory.Enabled && rushBucketNo != nil {
+				pipe.IncrBy(ctx, RushStockBucketKey(*rushCampaignID, *rushBucketNo), int64(quantity))
+			} else {
+				pipe.IncrBy(ctx, rushStockKey(*rushCampaignID), int64(quantity))
+			}
 			pipe.DecrBy(
 				ctx,
 				rushUserCountKey(*rushCampaignID, userID),
@@ -1090,8 +1240,79 @@ func (s *TicketOrderService) markQueuedOrderFailed(
 		}).Error
 }
 
-func (s *TicketOrderService) rollbackRedisQuota(ctx context.Context, tierID int64, quantity int) {
+func (s *TicketOrderService) rollbackRedisQuota(ctx context.Context, tierID int64, quantity int, bucketNo *int) {
+	if s.inventory.Enabled {
+		b := 0
+		if bucketNo != nil {
+			b = *bucketNo
+		}
+		_ = s.rdb.IncrBy(ctx, TicketStockBucketKey(tierID, b), int64(quantity)).Err()
+		return
+	}
 	_ = s.rdb.IncrBy(ctx, ticketStockKey(tierID), int64(quantity)).Err()
+}
+
+// reserveTicketStock Redis 预扣；分桶开启时按 userID%N 选桶并环形重试。
+func (s *TicketOrderService) reserveTicketStock(
+	ctx context.Context,
+	userID int64,
+	tier *models.TicketTier,
+	quantity int,
+) (bucketNo int, remaining int64, err error) {
+	if !s.inventory.Enabled {
+		remaining, err = reserveTicketQuotaScript.Run(
+			ctx, s.rdb, []string{ticketStockKey(tier.ID)}, quantity,
+		).Int64()
+		return 0, remaining, err
+	}
+	n := s.inventory.EffectiveBucketCount(tier.TotalQuota)
+	maxAttempts := 1 + s.inventory.BucketRetry
+	if maxAttempts > n {
+		maxAttempts = n
+	}
+	var last int64 = -1
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		b := SelectBucketNo(userID, n, attempt)
+		rem, runErr := reserveTicketQuotaScript.Run(
+			ctx, s.rdb, []string{TicketStockBucketKey(tier.ID, b)}, quantity,
+		).Int64()
+		if runErr != nil {
+			return 0, 0, runErr
+		}
+		if rem >= 0 {
+			return b, rem, nil
+		}
+		last = rem
+	}
+	return 0, last, nil
+}
+
+func queuedOrderStockBucket(order *models.TicketOrder, settings InventoryBucketSettings) int {
+	if order.StockBucketNo != nil {
+		return *order.StockBucketNo
+	}
+	return SelectBucketNo(order.UserID, settings.BucketCount, 0)
+}
+
+func queuedOrderRushBucket(order *models.TicketOrder, settings InventoryBucketSettings) int {
+	if order.RushBucketNo != nil {
+		return *order.RushBucketNo
+	}
+	if order.StockBucketNo != nil {
+		return *order.StockBucketNo
+	}
+	return SelectBucketNo(order.UserID, settings.BucketCount, 0)
+}
+
+func resolveMessageRushBucket(message TicketOrderMessage, settings InventoryBucketSettings) int {
+	if message.RushBucketNo != nil {
+		return *message.RushBucketNo
+	}
+	if message.StockBucketNo != nil {
+		return *message.StockBucketNo
+	}
+	b, _ := ResolveOrderBucketNo(nil, message.UserID, settings.BucketCount)
+	return b
 }
 
 func restoreTierQuota(tx *gorm.DB, tierID int64, quantity int) error {
