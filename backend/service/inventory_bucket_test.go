@@ -3,7 +3,7 @@ package service
 import (
 	"testing"
 
-	"WHU_Snack_GO/config"
+	"gofun/config"
 )
 
 func TestSplitQuotaEvenly(t *testing.T) {

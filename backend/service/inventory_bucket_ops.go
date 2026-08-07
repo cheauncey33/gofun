@@ -1,8 +1,8 @@
 package service
 
 import (
-	"WHU_Snack_GO/metrics"
-	"WHU_Snack_GO/models"
+	"gofun/metrics"
+	"gofun/models"
 	"context"
 	"errors"
 	"fmt"

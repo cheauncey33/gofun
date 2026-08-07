@@ -1,7 +1,7 @@
 package service
 
 import (
-	"WHU_Snack_GO/models"
+	"gofun/models"
 	"errors"
 	"strings"
 	"testing"

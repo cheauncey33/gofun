@@ -3,18 +3,18 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: "whu_snack_backend"
+  - job_name: "gofun_backend"
     metrics_path: "/metrics"
     static_configs:
       - targets: ["host.docker.internal:8080"]
         labels:
-          service: "whu_snack_go"
+          service: "gofun"
           env: "dev"
 
-  - job_name: "fuchang_ticketing_integration"
+  - job_name: "gofun_ticketing_integration"
     metrics_path: "/metrics"
     static_configs:
       - targets: ["host.docker.internal:18080"]
         labels:
-          service: "fuchang_ticketing"
+          service: "gofun_ticketing"
           env: "integration"

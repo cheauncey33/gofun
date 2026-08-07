@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	"WHU_Snack_GO/metrics"
-	"WHU_Snack_GO/pkg/response"
+	"gofun/metrics"
+	"gofun/pkg/response"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"

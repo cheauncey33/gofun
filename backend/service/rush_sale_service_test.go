@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"WHU_Snack_GO/models"
+	"gofun/models"
 
 	gocache "github.com/patrickmn/go-cache"
 )

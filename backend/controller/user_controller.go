@@ -1,9 +1,9 @@
 package controller
 
 import (
-	"WHU_Snack_GO/common"
-	"WHU_Snack_GO/pkg/response"
-	"WHU_Snack_GO/service"
+	"gofun/common"
+	"gofun/pkg/response"
+	"gofun/service"
 	"net/http"
 
 	"github.com/gin-gonic/gin"

@@ -1,8 +1,8 @@
 package container
 
 import (
-	"WHU_Snack_GO/repository"
-	"WHU_Snack_GO/search"
+	"gofun/repository"
+	"gofun/search"
 	"context"
 	"sync"
 

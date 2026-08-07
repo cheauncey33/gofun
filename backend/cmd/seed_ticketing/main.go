@@ -8,8 +8,8 @@
 package main
 
 import (
-	"WHU_Snack_GO/config"
-	"WHU_Snack_GO/models"
+	"gofun/config"
+	"gofun/models"
 	"flag"
 	"fmt"
 	"log"

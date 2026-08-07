@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"WHU_Snack_GO/models"
+	"gofun/models"
 	"context"
 
 	"gorm.io/gorm"

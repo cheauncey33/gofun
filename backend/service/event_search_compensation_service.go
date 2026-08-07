@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"WHU_Snack_GO/metrics"
-	redislock "WHU_Snack_GO/pkg/lock"
+	"gofun/metrics"
+	redislock "gofun/pkg/lock"
 
 	"github.com/redis/go-redis/v9"
 )

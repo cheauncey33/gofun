@@ -2,7 +2,7 @@ package service
 
 import (
 	"fmt"
-	"WHU_Snack_GO/config"
+	"gofun/config"
 )
 
 // InventoryBucketSettings 票档/抢票分桶运行时参数（来自 inventory.* 配置）。

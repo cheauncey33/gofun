@@ -3,8 +3,8 @@ package service
 import (
 	"testing"
 
-	"WHU_Snack_GO/config"
-	"WHU_Snack_GO/models"
+	"gofun/config"
+	"gofun/models"
 )
 
 func TestResolveStockBucketPrefersOrderField(t *testing.T) {

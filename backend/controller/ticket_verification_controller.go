@@ -1,8 +1,8 @@
 package controller
 
 import (
-	"WHU_Snack_GO/pkg/response"
-	"WHU_Snack_GO/service"
+	"gofun/pkg/response"
+	"gofun/service"
 	"errors"
 	"net/http"
 

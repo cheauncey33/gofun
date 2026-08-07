@@ -1,4 +1,4 @@
-module WHU_Snack_GO
+module gofun
 
 go 1.25.6
 

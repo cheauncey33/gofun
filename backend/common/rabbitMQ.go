@@ -1,7 +1,7 @@
 package common
 
 import (
-	"WHU_Snack_GO/config"
+	"gofun/config"
 	"context"
 	"fmt"
 	"sync"

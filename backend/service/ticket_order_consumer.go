@@ -1,9 +1,9 @@
 package service
 
 import (
-	"WHU_Snack_GO/config"
-	"WHU_Snack_GO/metrics"
-	apptelemetry "WHU_Snack_GO/pkg/telemetry"
+	"gofun/config"
+	"gofun/metrics"
+	apptelemetry "gofun/pkg/telemetry"
 	"context"
 	"encoding/json"
 	"errors"

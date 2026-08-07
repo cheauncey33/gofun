@@ -1,8 +1,8 @@
 package common
 
 import (
-	"WHU_Snack_GO/models"
-	"WHU_Snack_GO/pkg/response"
+	"gofun/models"
+	"gofun/pkg/response"
 	"net/http"
 
 	"github.com/gin-gonic/gin"

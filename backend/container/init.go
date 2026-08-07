@@ -1,12 +1,12 @@
 package container
 
 import (
-	"WHU_Snack_GO/common"
-	"WHU_Snack_GO/config"
-	"WHU_Snack_GO/migrations"
-	"WHU_Snack_GO/models"
-	"WHU_Snack_GO/repository"
-	"WHU_Snack_GO/search"
+	"gofun/common"
+	"gofun/config"
+	"gofun/migrations"
+	"gofun/models"
+	"gofun/repository"
+	"gofun/search"
 	"context"
 	"fmt"
 	"log"

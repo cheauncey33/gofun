@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"WHU_Snack_GO/metrics"
-	"WHU_Snack_GO/models"
-	apptelemetry "WHU_Snack_GO/pkg/telemetry"
+	"gofun/metrics"
+	"gofun/models"
+	apptelemetry "gofun/pkg/telemetry"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.opentelemetry.io/otel"

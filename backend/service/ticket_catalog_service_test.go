@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"WHU_Snack_GO/models"
-	"WHU_Snack_GO/repository"
-	"WHU_Snack_GO/search"
+	"gofun/models"
+	"gofun/repository"
+	"gofun/search"
 )
 
 type catalogListRepoStub struct {

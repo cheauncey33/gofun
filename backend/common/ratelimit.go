@@ -1,7 +1,7 @@
 package common
 
 import (
-	"WHU_Snack_GO/pkg/response"
+	"gofun/pkg/response"
 	"net/http"
 	"sync"
 

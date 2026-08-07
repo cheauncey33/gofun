@@ -1,9 +1,9 @@
 package service
 
 import (
-	"WHU_Snack_GO/container"
-	"WHU_Snack_GO/models"
-	"WHU_Snack_GO/repository"
+	"gofun/container"
+	"gofun/models"
+	"gofun/repository"
 	"context"
 	"encoding/json"
 	"errors"

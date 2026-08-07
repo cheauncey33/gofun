@@ -1,7 +1,7 @@
 package response
 
 import (
-	"WHU_Snack_GO/pkg/apperr"
+	"gofun/pkg/apperr"
 	"net/http"
 
 	"github.com/gin-gonic/gin"

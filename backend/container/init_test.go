@@ -1,7 +1,7 @@
 package container
 
 import (
-	"WHU_Snack_GO/models"
+	"gofun/models"
 	"reflect"
 	"testing"
 

@@ -3,7 +3,7 @@ package telemetry
 import (
 	"context"
 
-	"WHU_Snack_GO/config"
+	"gofun/config"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"

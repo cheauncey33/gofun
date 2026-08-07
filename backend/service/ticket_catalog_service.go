@@ -1,11 +1,11 @@
 package service
 
 import (
-	"WHU_Snack_GO/config"
-	"WHU_Snack_GO/container"
-	"WHU_Snack_GO/models"
-	"WHU_Snack_GO/repository"
-	"WHU_Snack_GO/search"
+	"gofun/config"
+	"gofun/container"
+	"gofun/models"
+	"gofun/repository"
+	"gofun/search"
 	"context"
 	"errors"
 	"fmt"

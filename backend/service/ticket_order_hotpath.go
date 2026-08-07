@@ -1,8 +1,8 @@
 package service
 
 import (
-	"WHU_Snack_GO/models"
-	apptelemetry "WHU_Snack_GO/pkg/telemetry"
+	"gofun/models"
+	apptelemetry "gofun/pkg/telemetry"
 	"context"
 	"encoding/json"
 	"errors"
