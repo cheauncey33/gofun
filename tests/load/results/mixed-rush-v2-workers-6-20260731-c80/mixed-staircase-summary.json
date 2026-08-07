@@ -1,0 +1,431 @@
+{
+  "scenario": "ticket_rush_mixed_staircase",
+  "run_label": "mixed-rush-v2-workers-6-20260731-c80",
+  "created_at": "2026-07-31T10:11:47.565Z",
+  "workload": {
+    "primary_purchase_ratio": 0.5,
+    "limit_repeat_ratio": 0.35,
+    "idempotent_retry_ratio": 0.15,
+    "success_users": 1000,
+    "total_requests_per_run": 2000,
+    "request_start_jitter_ms": 500,
+    "retry_jitter_ms": 120,
+    "seed": 20260731
+  },
+  "config": {
+    "base_url": "http://127.0.0.1:18080/api/v1",
+    "concurrency_steps": [
+      80
+    ],
+    "runs": 3,
+    "inventory_buckets_enabled": "true",
+    "inventory_bucket_count": "8",
+    "order_consumer_worker_count": "6",
+    "order_consumer_prefetch_count": ""
+  },
+  "setup": {
+    "scenario": "mixed_rush_user_setup",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 27.75,
+    "concurrency": 50,
+    "think_ms": 0,
+    "total_requests": 1000,
+    "requests_per_second": 36.04,
+    "ok": 1000,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 407.91,
+      "p50": 396.16,
+      "p90": 494.04,
+      "p95": 534.81,
+      "p99": 592.2,
+      "max": 663.85
+    },
+    "labels": {
+      "login_probe": 1000
+    },
+    "label_latency_ms": {
+      "login_probe": {
+        "count": 1000,
+        "avg": 407.91,
+        "p50": 396.16,
+        "p95": 534.81,
+        "p99": 592.2,
+        "max": 663.85
+      }
+    },
+    "statuses": {
+      "200": 1000
+    },
+    "outcomes": {
+      "success": 1000
+    },
+    "top_errors": {}
+  },
+  "results": [
+    {
+      "label": "mixed-rush-v2-workers-6-20260731-c80-c80-r1",
+      "concurrency": 80,
+      "round": 1,
+      "seed": 20268732,
+      "campaign_id": "202",
+      "total_requests": 2000,
+      "execute_seconds": 4.92,
+      "total_qps": 406.3,
+      "execute": {
+        "scenario": "mixed_rush_execute",
+        "baseUrl": "http://127.0.0.1:18080/api/v1",
+        "duration_seconds": 8.69,
+        "concurrency": 50,
+        "think_ms": 0,
+        "total_requests": 2000,
+        "requests_per_second": 230.12,
+        "ok": 2000,
+        "failed": 0,
+        "failure_rate": 0,
+        "latency_ms": {
+          "avg": 20.77,
+          "p50": 19.45,
+          "p90": 40.14,
+          "p95": 44.12,
+          "p99": 64.18,
+          "max": 146.71
+        },
+        "labels": {
+          "primary_purchase": 1000,
+          "limit_repeat": 700,
+          "idempotent_retry": 300
+        },
+        "label_latency_ms": {
+          "primary_purchase": {
+            "count": 1000,
+            "avg": 34.83,
+            "p50": 32.98,
+            "p95": 49.39,
+            "p99": 100.48,
+            "max": 146.71
+          },
+          "limit_repeat": {
+            "count": 700,
+            "avg": 6.99,
+            "p50": 5.63,
+            "p95": 16.47,
+            "p99": 19.81,
+            "max": 35.43
+          },
+          "idempotent_retry": {
+            "count": 300,
+            "avg": 6.07,
+            "p50": 3.64,
+            "p95": 17.02,
+            "p99": 18.61,
+            "max": 40.37
+          }
+        },
+        "statuses": {
+          "200": 1300,
+          "400": 700
+        },
+        "outcomes": {
+          "success": 1300,
+          "business_rejected": 700
+        },
+        "top_errors": {}
+      },
+      "outcome": {
+        "primary_attempts": 1000,
+        "primary_successes": 1000,
+        "primary_rejected": 0,
+        "limit_repeat_attempts": 700,
+        "limit_repeat_rejected": 700,
+        "limit_repeat_unexpected": 0,
+        "idempotent_retry_attempts": 300,
+        "idempotent_retry_same_order": 300,
+        "idempotent_retry_unexpected": 0
+      },
+      "correctness": {
+        "expected_primary_successes": 1000,
+        "primary_successes_match": true,
+        "limit_rejections_match": true,
+        "idempotent_retries_match": true,
+        "created_orders": 1000,
+        "no_oversell": true
+      },
+      "drain_seconds": 3.16,
+      "still_queued": 0,
+      "mq_metrics": {
+        "published_delta": 1000,
+        "consumed_success_delta": 1000
+      },
+      "resources": {
+        "containers": {},
+        "mysql": {
+          "threads_connected_max": 81,
+          "threads_running_max": 22,
+          "row_lock_current_waits_max": 4,
+          "row_lock_waits_delta": 669,
+          "deadlocks_delta": 0,
+          "aborted_connects_delta": 0
+        },
+        "redis": {
+          "ops_per_sec_max": 6307,
+          "latency_avg_ms_max": 0.18,
+          "latency_max_ms": 2,
+          "commands_delta": 33271,
+          "rejected_connections_delta": 0
+        },
+        "rabbitmq": {
+          "messages_ready_max": 1354,
+          "messages_unacknowledged_max": 32,
+          "order_queue_ready_max": 0,
+          "order_queue_unacked_max": 0,
+          "delay_queue_ready_end": 1000,
+          "consumers_max": 14
+        }
+      }
+    },
+    {
+      "label": "mixed-rush-v2-workers-6-20260731-c80-c80-r2",
+      "concurrency": 80,
+      "round": 2,
+      "seed": 20268733,
+      "campaign_id": "203",
+      "total_requests": 2000,
+      "execute_seconds": 4.88,
+      "total_qps": 409.51,
+      "execute": {
+        "scenario": "mixed_rush_execute",
+        "baseUrl": "http://127.0.0.1:18080/api/v1",
+        "duration_seconds": 8.67,
+        "concurrency": 50,
+        "think_ms": 0,
+        "total_requests": 2000,
+        "requests_per_second": 230.75,
+        "ok": 2000,
+        "failed": 0,
+        "failure_rate": 0,
+        "latency_ms": {
+          "avg": 21.45,
+          "p50": 21.87,
+          "p90": 43.15,
+          "p95": 47.95,
+          "p99": 60.16,
+          "max": 89.21
+        },
+        "labels": {
+          "primary_purchase": 1000,
+          "limit_repeat": 700,
+          "idempotent_retry": 300
+        },
+        "label_latency_ms": {
+          "primary_purchase": {
+            "count": 1000,
+            "avg": 36.05,
+            "p50": 34.92,
+            "p95": 53.55,
+            "p99": 65.44,
+            "max": 89.21
+          },
+          "limit_repeat": {
+            "count": 700,
+            "avg": 6.99,
+            "p50": 5.65,
+            "p95": 15.93,
+            "p99": 22.94,
+            "max": 33.32
+          },
+          "idempotent_retry": {
+            "count": 300,
+            "avg": 6.52,
+            "p50": 4.02,
+            "p95": 19.32,
+            "p99": 28.1,
+            "max": 28.5
+          }
+        },
+        "statuses": {
+          "200": 1300,
+          "400": 700
+        },
+        "outcomes": {
+          "success": 1300,
+          "business_rejected": 700
+        },
+        "top_errors": {}
+      },
+      "outcome": {
+        "primary_attempts": 1000,
+        "primary_successes": 1000,
+        "primary_rejected": 0,
+        "limit_repeat_attempts": 700,
+        "limit_repeat_rejected": 700,
+        "limit_repeat_unexpected": 0,
+        "idempotent_retry_attempts": 300,
+        "idempotent_retry_same_order": 300,
+        "idempotent_retry_unexpected": 0
+      },
+      "correctness": {
+        "expected_primary_successes": 1000,
+        "primary_successes_match": true,
+        "limit_rejections_match": true,
+        "idempotent_retries_match": true,
+        "created_orders": 1000,
+        "no_oversell": true
+      },
+      "drain_seconds": 3.19,
+      "still_queued": 0,
+      "mq_metrics": {
+        "published_delta": 1001,
+        "consumed_success_delta": 1001
+      },
+      "resources": {
+        "containers": {},
+        "mysql": {
+          "threads_connected_max": 28,
+          "threads_running_max": 22,
+          "row_lock_current_waits_max": 3,
+          "row_lock_waits_delta": 368,
+          "deadlocks_delta": 0,
+          "aborted_connects_delta": 0
+        },
+        "redis": {
+          "ops_per_sec_max": 6070,
+          "latency_avg_ms_max": 0.55,
+          "latency_max_ms": 4,
+          "commands_delta": 25904,
+          "rejected_connections_delta": 0
+        },
+        "rabbitmq": {
+          "messages_ready_max": 2000,
+          "messages_unacknowledged_max": 30,
+          "order_queue_ready_max": 0,
+          "order_queue_unacked_max": 0,
+          "delay_queue_ready_end": 2000,
+          "consumers_max": 14
+        }
+      }
+    },
+    {
+      "label": "mixed-rush-v2-workers-6-20260731-c80-c80-r3",
+      "concurrency": 80,
+      "round": 3,
+      "seed": 20268734,
+      "campaign_id": "204",
+      "total_requests": 2000,
+      "execute_seconds": 4.92,
+      "total_qps": 406.42,
+      "execute": {
+        "scenario": "mixed_rush_execute",
+        "baseUrl": "http://127.0.0.1:18080/api/v1",
+        "duration_seconds": 8.79,
+        "concurrency": 50,
+        "think_ms": 0,
+        "total_requests": 2000,
+        "requests_per_second": 227.47,
+        "ok": 2000,
+        "failed": 0,
+        "failure_rate": 0,
+        "latency_ms": {
+          "avg": 20.78,
+          "p50": 20.85,
+          "p90": 42.2,
+          "p95": 48.21,
+          "p99": 55.37,
+          "max": 77.67
+        },
+        "labels": {
+          "primary_purchase": 1000,
+          "limit_repeat": 700,
+          "idempotent_retry": 300
+        },
+        "label_latency_ms": {
+          "primary_purchase": {
+            "count": 1000,
+            "avg": 34.82,
+            "p50": 33.41,
+            "p95": 51.86,
+            "p99": 57.72,
+            "max": 77.67
+          },
+          "limit_repeat": {
+            "count": 700,
+            "avg": 6.94,
+            "p50": 5.43,
+            "p95": 16.26,
+            "p99": 22.35,
+            "max": 30.74
+          },
+          "idempotent_retry": {
+            "count": 300,
+            "avg": 6.22,
+            "p50": 3.97,
+            "p95": 17.66,
+            "p99": 24.11,
+            "max": 31.73
+          }
+        },
+        "statuses": {
+          "200": 1300,
+          "400": 700
+        },
+        "outcomes": {
+          "success": 1300,
+          "business_rejected": 700
+        },
+        "top_errors": {}
+      },
+      "outcome": {
+        "primary_attempts": 1000,
+        "primary_successes": 1000,
+        "primary_rejected": 0,
+        "limit_repeat_attempts": 700,
+        "limit_repeat_rejected": 700,
+        "limit_repeat_unexpected": 0,
+        "idempotent_retry_attempts": 300,
+        "idempotent_retry_same_order": 300,
+        "idempotent_retry_unexpected": 0
+      },
+      "correctness": {
+        "expected_primary_successes": 1000,
+        "primary_successes_match": true,
+        "limit_rejections_match": true,
+        "idempotent_retries_match": true,
+        "created_orders": 1000,
+        "no_oversell": true
+      },
+      "drain_seconds": 3.19,
+      "still_queued": 0,
+      "mq_metrics": {
+        "published_delta": 1000,
+        "consumed_success_delta": 1000
+      },
+      "resources": {
+        "containers": {},
+        "mysql": {
+          "threads_connected_max": 28,
+          "threads_running_max": 28,
+          "row_lock_current_waits_max": 5,
+          "row_lock_waits_delta": 365,
+          "deadlocks_delta": 0,
+          "aborted_connects_delta": 0
+        },
+        "redis": {
+          "ops_per_sec_max": 6069,
+          "latency_avg_ms_max": 0.18,
+          "latency_max_ms": 1,
+          "commands_delta": 25904,
+          "rejected_connections_delta": 0
+        },
+        "rabbitmq": {
+          "messages_ready_max": 3000,
+          "messages_unacknowledged_max": 30,
+          "order_queue_ready_max": 0,
+          "order_queue_unacked_max": 0,
+          "delay_queue_ready_end": 3000,
+          "consumers_max": 14
+        }
+      }
+    }
+  ]
+}

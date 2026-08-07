@@ -1,0 +1,141 @@
+{
+  "label": "multi-hotspot-buckets-workers-8-valid-1500-20260731-h2-h2-r1",
+  "hotspots": 2,
+  "round": 1,
+  "total_orders": 1500,
+  "quota_per_campaign": 863,
+  "campaign_ids": [
+    "81",
+    "82"
+  ],
+  "execute_seconds": 3.46,
+  "drain_seconds": 7.66,
+  "success_orders": 1500,
+  "success_rate": 1,
+  "success_qps": 433.42,
+  "still_queued": 0,
+  "by_hotspot": {
+    "0": {
+      "campaign_id": "81",
+      "attempts": 750,
+      "success": 750,
+      "still_queued": 0
+    },
+    "1": {
+      "campaign_id": "82",
+      "attempts": 750,
+      "success": 750,
+      "still_queued": 0
+    }
+  },
+  "execute": {
+    "scenario": "multi_hotspot_execute",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 11.87,
+    "concurrency": 50,
+    "think_ms": 0,
+    "total_requests": 1500,
+    "requests_per_second": 126.36,
+    "ok": 1500,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 95.05,
+      "p50": 86.02,
+      "p90": 161.05,
+      "p95": 177.71,
+      "p99": 193.69,
+      "max": 241.05
+    },
+    "labels": {
+      "rush_execute": 1500
+    },
+    "label_latency_ms": {
+      "rush_execute": {
+        "count": 1500,
+        "avg": 95.05,
+        "p50": 86.02,
+        "p95": 177.71,
+        "p99": 193.69,
+        "max": 241.05
+      }
+    },
+    "statuses": {
+      "200": 1500
+    },
+    "outcomes": {
+      "success": 1500
+    },
+    "top_errors": {}
+  },
+  "poll": {
+    "scenario": "multi_hotspot_poll",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 11.87,
+    "concurrency": 50,
+    "think_ms": 0,
+    "total_requests": 1503,
+    "requests_per_second": 126.6,
+    "ok": 1503,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 26.15,
+      "p50": 21.58,
+      "p90": 41.1,
+      "p95": 44.54,
+      "p99": 140.89,
+      "max": 172.83
+    },
+    "labels": {
+      "order_poll": 1503
+    },
+    "label_latency_ms": {
+      "order_poll": {
+        "count": 1503,
+        "avg": 26.15,
+        "p50": 21.58,
+        "p95": 44.54,
+        "p99": 140.89,
+        "max": 172.83
+      }
+    },
+    "statuses": {
+      "200": 1503
+    },
+    "outcomes": {
+      "success": 1503
+    },
+    "top_errors": {}
+  },
+  "mq_metrics": {
+    "published_delta": 1299,
+    "consumed_success_delta": 1500
+  },
+  "resources": {
+    "containers": {},
+    "mysql": {
+      "threads_connected_max": 66,
+      "threads_running_max": 40,
+      "row_lock_current_waits_max": 3,
+      "row_lock_waits_delta": 655,
+      "deadlocks_delta": 0,
+      "aborted_connects_delta": 0
+    },
+    "redis": {
+      "ops_per_sec_max": 6559,
+      "latency_avg_ms_max": 0.5,
+      "latency_max_ms": 3,
+      "commands_delta": 25713,
+      "rejected_connections_delta": 0
+    },
+    "rabbitmq": {
+      "messages_ready_max": 1897,
+      "messages_unacknowledged_max": 42,
+      "order_queue_ready_max": 0,
+      "order_queue_unacked_max": 0,
+      "delay_queue_ready_end": 1500,
+      "consumers_max": 18
+    }
+  }
+}

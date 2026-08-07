@@ -1,0 +1,21 @@
+{
+  "scenario": "k6_rush_execute",
+  "base_url": "http://127.0.0.1:18080/api/v1",
+  "campaign_id": "211",
+  "fixture": "fixtures/rush_execute.json",
+  "users": 800,
+  "http_reqs": 13930,
+  "http_req_rate": 924.5198499854048,
+  "p90_ms": 69.34678000000001,
+  "p95_ms": 89.2491,
+  "p99_ms": 152.76923299999962,
+  "avg_ms": 53.679189088299076,
+  "rush_execute_success_rate": 1,
+  "rush_execute_sold_out": 0,
+  "rush_execute_rejected": 0,
+  "checks": {
+    "rate": 1,
+    "passes": 13930,
+    "fails": 0
+  }
+}

@@ -1,0 +1,339 @@
+{
+  "sample_count": 30,
+  "containers": {},
+  "mysql": {
+    "threads_connected_max": 36,
+    "threads_running_max": 22,
+    "row_lock_current_waits_max": 3,
+    "row_lock_waits_delta": 368,
+    "deadlocks_delta": 0,
+    "aborted_connects_delta": 0
+  },
+  "redis": {
+    "ops_per_sec_max": 7903,
+    "latency_avg_ms_max": 1.7,
+    "latency_max_ms": 11,
+    "commands_delta": 27209,
+    "rejected_connections_delta": 0
+  },
+  "rabbitmq": {
+    "messages_ready_max": 4500,
+    "messages_unacknowledged_max": 40,
+    "order_queue_ready_max": 0,
+    "order_queue_unacked_max": 0,
+    "delay_queue_ready_end": 4500,
+    "consumers_max": 18
+  },
+  "samples": [
+    {
+      "at": "2026-07-31T09:11:13.603Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 104096,
+      "Innodb_row_lock_current_waits": 1,
+      "Innodb_row_lock_waits": 43423,
+      "Threads_connected": 11,
+      "Threads_running": 2
+    },
+    {
+      "at": "2026-07-31T09:11:13.603Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 16,
+      "total_commands_processed": 1377923,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 0,
+      "latency_avg_ms": 0,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T09:11:13.603Z",
+      "type": "rabbitmq",
+      "messages_ready": 3000,
+      "messages_unacknowledged": 0,
+      "consumers": 18,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 3000
+    },
+    {
+      "at": "2026-07-31T09:11:15.265Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 104666,
+      "Innodb_row_lock_current_waits": 1,
+      "Innodb_row_lock_waits": 43460,
+      "Threads_connected": 36,
+      "Threads_running": 22
+    },
+    {
+      "at": "2026-07-31T09:11:15.265Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 6154,
+      "total_commands_processed": 1388293,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 11,
+      "latency_avg_ms": 1.7,
+      "latency_samples": 10
+    },
+    {
+      "at": "2026-07-31T09:11:15.265Z",
+      "type": "rabbitmq",
+      "messages_ready": 3410,
+      "messages_unacknowledged": 40,
+      "consumers": 18,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 3239
+    },
+    {
+      "at": "2026-07-31T09:11:17.278Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 105550,
+      "Innodb_row_lock_current_waits": 1,
+      "Innodb_row_lock_waits": 43523,
+      "Threads_connected": 19,
+      "Threads_running": 11
+    },
+    {
+      "at": "2026-07-31T09:11:17.278Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 7903,
+      "total_commands_processed": 1401954,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.18,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T09:11:17.278Z",
+      "type": "rabbitmq",
+      "messages_ready": 3811,
+      "messages_unacknowledged": 40,
+      "consumers": 18,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 3486
+    },
+    {
+      "at": "2026-07-31T09:11:18.293Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 105726,
+      "Innodb_row_lock_current_waits": 2,
+      "Innodb_row_lock_waits": 43579,
+      "Threads_connected": 17,
+      "Threads_running": 10
+    },
+    {
+      "at": "2026-07-31T09:11:18.293Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 3172,
+      "total_commands_processed": 1403915,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.09,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T09:11:18.293Z",
+      "type": "rabbitmq",
+      "messages_ready": 4010,
+      "messages_unacknowledged": 40,
+      "consumers": 18,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 3705
+    },
+    {
+      "at": "2026-07-31T09:11:19.292Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 105905,
+      "Innodb_row_lock_current_waits": 1,
+      "Innodb_row_lock_waits": 43623,
+      "Threads_connected": 17,
+      "Threads_running": 10
+    },
+    {
+      "at": "2026-07-31T09:11:19.292Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 1921,
+      "total_commands_processed": 1405058,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.09,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T09:11:19.292Z",
+      "type": "rabbitmq",
+      "messages_ready": 4010,
+      "messages_unacknowledged": 40,
+      "consumers": 18,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 3874
+    },
+    {
+      "at": "2026-07-31T09:11:20.294Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 106087,
+      "Innodb_row_lock_current_waits": 2,
+      "Innodb_row_lock_waits": 43677,
+      "Threads_connected": 17,
+      "Threads_running": 12
+    },
+    {
+      "at": "2026-07-31T09:11:20.294Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 8,
+      "total_commands_processed": 1405072,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.18,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T09:11:20.294Z",
+      "type": "rabbitmq",
+      "messages_ready": 4050,
+      "messages_unacknowledged": 0,
+      "consumers": 18,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 4050
+    },
+    {
+      "at": "2026-07-31T09:11:21.305Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 106291,
+      "Innodb_row_lock_current_waits": 1,
+      "Innodb_row_lock_waits": 43692,
+      "Threads_connected": 15,
+      "Threads_running": 6
+    },
+    {
+      "at": "2026-07-31T09:11:21.305Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 8,
+      "total_commands_processed": 1405086,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.18,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T09:11:21.305Z",
+      "type": "rabbitmq",
+      "messages_ready": 4460,
+      "messages_unacknowledged": 40,
+      "consumers": 18,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 4095
+    },
+    {
+      "at": "2026-07-31T09:11:22.316Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 106437,
+      "Innodb_row_lock_current_waits": 3,
+      "Innodb_row_lock_waits": 43731,
+      "Threads_connected": 18,
+      "Threads_running": 14
+    },
+    {
+      "at": "2026-07-31T09:11:22.316Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 11,
+      "total_commands_processed": 1405104,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.18,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T09:11:22.316Z",
+      "type": "rabbitmq",
+      "messages_ready": 4460,
+      "messages_unacknowledged": 40,
+      "consumers": 18,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 4328
+    },
+    {
+      "at": "2026-07-31T09:11:23.321Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 106600,
+      "Innodb_row_lock_current_waits": 3,
+      "Innodb_row_lock_waits": 43777,
+      "Threads_connected": 16,
+      "Threads_running": 12
+    },
+    {
+      "at": "2026-07-31T09:11:23.321Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 8,
+      "total_commands_processed": 1405118,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.18,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T09:11:23.321Z",
+      "type": "rabbitmq",
+      "messages_ready": 4500,
+      "messages_unacknowledged": 0,
+      "consumers": 18,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 4500
+    },
+    {
+      "at": "2026-07-31T09:11:24.284Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 106726,
+      "Innodb_row_lock_current_waits": 1,
+      "Innodb_row_lock_waits": 43791,
+      "Threads_connected": 12,
+      "Threads_running": 3
+    },
+    {
+      "at": "2026-07-31T09:11:24.284Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 8,
+      "total_commands_processed": 1405132,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.09,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T09:11:24.284Z",
+      "type": "rabbitmq",
+      "messages_ready": 4500,
+      "messages_unacknowledged": 0,
+      "consumers": 18,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 4500
+    }
+  ]
+}

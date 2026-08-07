@@ -1,0 +1,50 @@
+{
+  "config": {
+    "steps": "1500",
+    "runs": "1",
+    "waveSteps": [
+      50,
+      200,
+      500,
+      1000
+    ]
+  },
+  "rows": [
+    {
+      "wave": 50,
+      "success_orders_median": 1500,
+      "execute_seconds_median": 2.62,
+      "success_qps_median": 571.77,
+      "execute_p99_median": 120.84,
+      "drain_seconds_median": 8.95,
+      "runs": 1
+    },
+    {
+      "wave": 200,
+      "success_orders_median": 1500,
+      "execute_seconds_median": 2.04,
+      "success_qps_median": 734.77,
+      "execute_p99_median": 351.98,
+      "drain_seconds_median": 16.74,
+      "runs": 1
+    },
+    {
+      "wave": 500,
+      "success_orders_median": 1500,
+      "execute_seconds_median": 1.72,
+      "success_qps_median": 871.93,
+      "execute_p99_median": 635.79,
+      "drain_seconds_median": 15.61,
+      "runs": 1
+    },
+    {
+      "wave": 1000,
+      "success_orders_median": 1500,
+      "execute_seconds_median": 1.4,
+      "success_qps_median": 1072.63,
+      "execute_p99_median": 911,
+      "drain_seconds_median": 19.64,
+      "runs": 1
+    }
+  ]
+}

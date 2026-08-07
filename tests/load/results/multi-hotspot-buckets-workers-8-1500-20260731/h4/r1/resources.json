@@ -1,0 +1,91 @@
+{
+  "sample_count": 6,
+  "containers": {},
+  "mysql": {
+    "threads_connected_max": 11,
+    "threads_running_max": 2,
+    "row_lock_current_waits_max": 1,
+    "row_lock_waits_delta": 0,
+    "deadlocks_delta": 0,
+    "aborted_connects_delta": 0
+  },
+  "redis": {
+    "ops_per_sec_max": 9324,
+    "latency_avg_ms_max": 0.36,
+    "latency_max_ms": 2,
+    "commands_delta": 15016,
+    "rejected_connections_delta": 0
+  },
+  "rabbitmq": {
+    "messages_ready_max": 0,
+    "messages_unacknowledged_max": 0,
+    "order_queue_ready_max": 0,
+    "order_queue_unacked_max": 0,
+    "delay_queue_ready_end": 0,
+    "consumers_max": 18
+  },
+  "samples": [
+    {
+      "at": "2026-07-31T09:05:30.293Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 89846,
+      "Innodb_row_lock_current_waits": 1,
+      "Innodb_row_lock_waits": 36621,
+      "Threads_connected": 11,
+      "Threads_running": 2
+    },
+    {
+      "at": "2026-07-31T09:05:30.293Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 14,
+      "total_commands_processed": 1166313,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.18,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T09:05:30.293Z",
+      "type": "rabbitmq",
+      "messages_ready": 0,
+      "messages_unacknowledged": 0,
+      "consumers": 18,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 0
+    },
+    {
+      "at": "2026-07-31T09:05:31.883Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 89999,
+      "Innodb_row_lock_current_waits": 1,
+      "Innodb_row_lock_waits": 36621,
+      "Threads_connected": 11,
+      "Threads_running": 2
+    },
+    {
+      "at": "2026-07-31T09:05:31.883Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 9324,
+      "total_commands_processed": 1181329,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 2,
+      "latency_avg_ms": 0.36,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T09:05:31.883Z",
+      "type": "rabbitmq",
+      "messages_ready": 0,
+      "messages_unacknowledged": 0,
+      "consumers": 18,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 0
+    }
+  ]
+}

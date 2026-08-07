@@ -1,0 +1,132 @@
+{
+  "label": "wave-sweep-1500-20260807/wave-200-1500-r1",
+  "size": 1500,
+  "round": 1,
+  "campaign_id": "207",
+  "execute_seconds": 2.04,
+  "drain_seconds": 16.74,
+  "success_orders": 1500,
+  "success_rate": 1,
+  "success_qps": 734.77,
+  "still_queued": 0,
+  "status_after_poll": {
+    "pending_payment": 1500
+  },
+  "execute": {
+    "scenario": "staircase_execute",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 19.94,
+    "concurrency": 50,
+    "think_ms": 0,
+    "total_requests": 1500,
+    "requests_per_second": 75.21,
+    "ok": 1500,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 183.14,
+      "p50": 170.58,
+      "p90": 297.25,
+      "p95": 326.73,
+      "p99": 351.98,
+      "max": 364.65
+    },
+    "labels": {
+      "rush_execute": 1500
+    },
+    "label_latency_ms": {
+      "rush_execute": {
+        "count": 1500,
+        "avg": 183.14,
+        "p50": 170.58,
+        "p95": 326.73,
+        "p99": 351.98,
+        "max": 364.65
+      }
+    },
+    "statuses": {
+      "200": 1500
+    },
+    "outcomes": {
+      "success": 1500
+    },
+    "top_errors": {}
+  },
+  "poll": {
+    "scenario": "staircase_poll",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 19.95,
+    "concurrency": 50,
+    "think_ms": 0,
+    "total_requests": 9050,
+    "requests_per_second": 453.74,
+    "ok": 9050,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 106.14,
+      "p50": 95.18,
+      "p90": 182.07,
+      "p95": 226.13,
+      "p99": 350.65,
+      "max": 426.95
+    },
+    "labels": {
+      "order_poll": 9050
+    },
+    "label_latency_ms": {
+      "order_poll": {
+        "count": 9050,
+        "avg": 106.14,
+        "p50": 95.18,
+        "p95": 226.13,
+        "p99": 350.65,
+        "max": 426.95
+      }
+    },
+    "statuses": {
+      "200": 9050
+    },
+    "outcomes": {
+      "success": 9050
+    },
+    "top_errors": {}
+  },
+  "mq_metrics": {
+    "published_delta": 1500,
+    "consumed_success_delta": 1500
+  },
+  "resources": {
+    "containers": {
+      "whu-snack-go-capacity-backend-load": {
+        "cpu_pct_avg": 139.73,
+        "cpu_pct_max": 166.82,
+        "memory_bytes_max": 57839452.16,
+        "pids_max": 30
+      }
+    },
+    "mysql": {
+      "threads_connected_max": 101,
+      "threads_running_max": 45,
+      "row_lock_current_waits_max": 4,
+      "row_lock_waits_delta": 853,
+      "deadlocks_delta": 0,
+      "aborted_connects_delta": 0
+    },
+    "redis": {
+      "ops_per_sec_max": 8147,
+      "latency_avg_ms_max": 1.22,
+      "latency_max_ms": 6,
+      "commands_delta": 26973,
+      "rejected_connections_delta": 0
+    },
+    "rabbitmq": {
+      "messages_ready_max": 2626,
+      "messages_unacknowledged_max": 32,
+      "order_queue_ready_max": 0,
+      "order_queue_unacked_max": 0,
+      "delay_queue_ready_end": 1336,
+      "consumers_max": 14
+    }
+  }
+}

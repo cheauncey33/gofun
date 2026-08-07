@@ -1,0 +1,16 @@
+{
+  "organizerID": "38",
+  "venueID": "38",
+  "bucketsEnabled": true,
+  "campaigns": [
+    {
+      "campaignID": "78",
+      "tierID": "78",
+      "eventID": "78",
+      "sessionID": "78",
+      "organizerID": "38",
+      "quota": 1725,
+      "index": 0
+    }
+  ]
+}

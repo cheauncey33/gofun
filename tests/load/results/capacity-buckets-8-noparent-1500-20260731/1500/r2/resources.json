@@ -1,0 +1,622 @@
+{
+  "sample_count": 56,
+  "containers": {
+    "whu-snack-go-capacity-backend-load": {
+      "cpu_pct_avg": 73.83,
+      "cpu_pct_max": 114.07,
+      "memory_bytes_max": 34236006.4,
+      "pids_max": 25
+    },
+    "whu-snack-go-capacity-mysql-1": {
+      "cpu_pct_avg": 73.9,
+      "cpu_pct_max": 113.56,
+      "memory_bytes_max": 638687641.6,
+      "pids_max": 61
+    },
+    "whu-snack-go-capacity-redis-1": {
+      "cpu_pct_avg": 2.03,
+      "cpu_pct_max": 4.27,
+      "memory_bytes_max": 13463715.84,
+      "pids_max": 6
+    },
+    "whu-snack-go-capacity-rabbitmq-1": {
+      "cpu_pct_avg": 176.06,
+      "cpu_pct_max": 243.93,
+      "memory_bytes_max": 217160089.6,
+      "pids_max": 90
+    }
+  },
+  "mysql": {
+    "threads_connected_max": 48,
+    "threads_running_max": 11,
+    "row_lock_current_waits_max": 3,
+    "row_lock_waits_delta": 301,
+    "deadlocks_delta": 0,
+    "aborted_connects_delta": 0
+  },
+  "redis": {
+    "ops_per_sec_max": 7243,
+    "latency_avg_ms_max": 0.27,
+    "latency_max_ms": 1,
+    "commands_delta": 25391,
+    "rejected_connections_delta": 0
+  },
+  "rabbitmq": {
+    "messages_ready_max": 3000,
+    "messages_unacknowledged_max": 20,
+    "order_queue_ready_max": 0,
+    "order_queue_unacked_max": 0,
+    "delay_queue_ready_end": 3000,
+    "consumers_max": 10
+  },
+  "samples": [
+    {
+      "at": "2026-07-31T08:43:46.359Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-backend-load",
+      "cpu_pct": 3.16,
+      "memory_bytes": 29139927.04,
+      "pids": 25,
+      "block_io": "4.1kB / 0B",
+      "net_io": "75.7MB / 31.6MB"
+    },
+    {
+      "at": "2026-07-31T08:43:46.359Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-mysql-1",
+      "cpu_pct": 2.93,
+      "memory_bytes": 633339904,
+      "pids": 56,
+      "block_io": "21.6MB / 2.14GB",
+      "net_io": "355MB / 1.45GB"
+    },
+    {
+      "at": "2026-07-31T08:43:46.359Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-redis-1",
+      "cpu_pct": 0.38,
+      "memory_bytes": 11597250.56,
+      "pids": 6,
+      "block_io": "6.64MB / 39.6MB",
+      "net_io": "42MB / 19.7MB"
+    },
+    {
+      "at": "2026-07-31T08:43:46.359Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-rabbitmq-1",
+      "cpu_pct": 3.77,
+      "memory_bytes": 172700467.2,
+      "pids": 54,
+      "block_io": "1.73MB / 24.4MB",
+      "net_io": "21.4MB / 24.2MB"
+    },
+    {
+      "at": "2026-07-31T08:43:46.359Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 46128,
+      "Innodb_row_lock_current_waits": 1,
+      "Innodb_row_lock_waits": 22126,
+      "Threads_connected": 11,
+      "Threads_running": 2
+    },
+    {
+      "at": "2026-07-31T08:43:46.359Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 11,
+      "total_commands_processed": 458036,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.18,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T08:43:46.359Z",
+      "type": "rabbitmq",
+      "messages_ready": 1500,
+      "messages_unacknowledged": 0,
+      "consumers": 10,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 1500
+    },
+    {
+      "at": "2026-07-31T08:43:49.486Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-backend-load",
+      "cpu_pct": 114.07,
+      "memory_bytes": 34236006.4,
+      "pids": 25,
+      "block_io": "4.1kB / 0B",
+      "net_io": "90.3MB / 41.9MB"
+    },
+    {
+      "at": "2026-07-31T08:43:49.486Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-mysql-1",
+      "cpu_pct": 113.56,
+      "memory_bytes": 635646771.2,
+      "pids": 59,
+      "block_io": "21.6MB / 2.16GB",
+      "net_io": "363MB / 1.46GB"
+    },
+    {
+      "at": "2026-07-31T08:43:49.486Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-redis-1",
+      "cpu_pct": 2.22,
+      "memory_bytes": 13128171.52,
+      "pids": 6,
+      "block_io": "6.65MB / 40.6MB",
+      "net_io": "43.6MB / 20.2MB"
+    },
+    {
+      "at": "2026-07-31T08:43:49.486Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-rabbitmq-1",
+      "cpu_pct": 191.18,
+      "memory_bytes": 159907840,
+      "pids": 48,
+      "block_io": "1.73MB / 24.8MB",
+      "net_io": "21.8MB / 24.4MB"
+    },
+    {
+      "at": "2026-07-31T08:43:49.486Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 46747,
+      "Innodb_row_lock_current_waits": 1,
+      "Innodb_row_lock_waits": 22143,
+      "Threads_connected": 16,
+      "Threads_running": 9
+    },
+    {
+      "at": "2026-07-31T08:43:49.486Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 7243,
+      "total_commands_processed": 470535,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.09,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T08:43:49.486Z",
+      "type": "rabbitmq",
+      "messages_ready": 2281,
+      "messages_unacknowledged": 20,
+      "consumers": 10,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 1653
+    },
+    {
+      "at": "2026-07-31T08:43:52.509Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-backend-load",
+      "cpu_pct": 100.07,
+      "memory_bytes": 34120663.04,
+      "pids": 25,
+      "block_io": "4.1kB / 0B",
+      "net_io": "101MB / 45.1MB"
+    },
+    {
+      "at": "2026-07-31T08:43:52.509Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-mysql-1",
+      "cpu_pct": 110.2,
+      "memory_bytes": 637953638.4,
+      "pids": 61,
+      "block_io": "21.6MB / 2.16GB",
+      "net_io": "365MB / 1.47GB"
+    },
+    {
+      "at": "2026-07-31T08:43:52.509Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-redis-1",
+      "cpu_pct": 4.27,
+      "memory_bytes": 12205424.64,
+      "pids": 6,
+      "block_io": "6.66MB / 40.6MB",
+      "net_io": "43.6MB / 20.2MB"
+    },
+    {
+      "at": "2026-07-31T08:43:52.509Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-rabbitmq-1",
+      "cpu_pct": 243.93,
+      "memory_bytes": 162634137.6,
+      "pids": 48,
+      "block_io": "1.73MB / 24.9MB",
+      "net_io": "22.3MB / 24.8MB"
+    },
+    {
+      "at": "2026-07-31T08:43:52.509Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 47785,
+      "Innodb_row_lock_current_waits": 1,
+      "Innodb_row_lock_waits": 22216,
+      "Threads_connected": 48,
+      "Threads_running": 7
+    },
+    {
+      "at": "2026-07-31T08:43:52.509Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 1,
+      "total_commands_processed": 483349,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.09,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T08:43:52.509Z",
+      "type": "rabbitmq",
+      "messages_ready": 2481,
+      "messages_unacknowledged": 20,
+      "consumers": 10,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 1991
+    },
+    {
+      "at": "2026-07-31T08:43:54.524Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-backend-load",
+      "cpu_pct": 98.87,
+      "memory_bytes": 33313259.52,
+      "pids": 25,
+      "block_io": "4.1kB / 0B",
+      "net_io": "111MB / 48.2MB"
+    },
+    {
+      "at": "2026-07-31T08:43:54.524Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-mysql-1",
+      "cpu_pct": 94.82,
+      "memory_bytes": 638058496,
+      "pids": 59,
+      "block_io": "21.6MB / 2.17GB",
+      "net_io": "367MB / 1.48GB"
+    },
+    {
+      "at": "2026-07-31T08:43:54.524Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-redis-1",
+      "cpu_pct": 2.76,
+      "memory_bytes": 12677283.84,
+      "pids": 6,
+      "block_io": "6.67MB / 40.6MB",
+      "net_io": "43.6MB / 20.2MB"
+    },
+    {
+      "at": "2026-07-31T08:43:54.524Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-rabbitmq-1",
+      "cpu_pct": 206.11,
+      "memory_bytes": 163263283.2,
+      "pids": 48,
+      "block_io": "1.73MB / 25.1MB",
+      "net_io": "22.7MB / 25.1MB"
+    },
+    {
+      "at": "2026-07-31T08:43:54.524Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 48071,
+      "Innodb_row_lock_current_waits": 1,
+      "Innodb_row_lock_waits": 22259,
+      "Threads_connected": 21,
+      "Threads_running": 11
+    },
+    {
+      "at": "2026-07-31T08:43:54.524Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 0,
+      "total_commands_processed": 483366,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.09,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T08:43:54.524Z",
+      "type": "rabbitmq",
+      "messages_ready": 2980,
+      "messages_unacknowledged": 20,
+      "consumers": 10,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 2226
+    },
+    {
+      "at": "2026-07-31T08:43:56.539Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-backend-load",
+      "cpu_pct": 97.19,
+      "memory_bytes": 32547799.04,
+      "pids": 25,
+      "block_io": "4.1kB / 0B",
+      "net_io": "121MB / 51.1MB"
+    },
+    {
+      "at": "2026-07-31T08:43:56.539Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-mysql-1",
+      "cpu_pct": 98.5,
+      "memory_bytes": 638163353.6,
+      "pids": 58,
+      "block_io": "21.6MB / 2.18GB",
+      "net_io": "369MB / 1.49GB"
+    },
+    {
+      "at": "2026-07-31T08:43:56.539Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-redis-1",
+      "cpu_pct": 2.4,
+      "memory_bytes": 12698255.36,
+      "pids": 6,
+      "block_io": "6.68MB / 40.7MB",
+      "net_io": "43.6MB / 20.2MB"
+    },
+    {
+      "at": "2026-07-31T08:43:56.539Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-rabbitmq-1",
+      "cpu_pct": 214.87,
+      "memory_bytes": 162214707.2,
+      "pids": 48,
+      "block_io": "1.73MB / 25.1MB",
+      "net_io": "23MB / 25.3MB"
+    },
+    {
+      "at": "2026-07-31T08:43:56.539Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 48386,
+      "Innodb_row_lock_current_waits": 3,
+      "Innodb_row_lock_waits": 22308,
+      "Threads_connected": 14,
+      "Threads_running": 9
+    },
+    {
+      "at": "2026-07-31T08:43:56.539Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 1,
+      "total_commands_processed": 483379,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.18,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T08:43:56.539Z",
+      "type": "rabbitmq",
+      "messages_ready": 2980,
+      "messages_unacknowledged": 20,
+      "consumers": 10,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 2466
+    },
+    {
+      "at": "2026-07-31T08:43:58.559Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-backend-load",
+      "cpu_pct": 92.79,
+      "memory_bytes": 31635537.92,
+      "pids": 25,
+      "block_io": "4.1kB / 0B",
+      "net_io": "132MB / 54MB"
+    },
+    {
+      "at": "2026-07-31T08:43:58.559Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-mysql-1",
+      "cpu_pct": 91.93,
+      "memory_bytes": 638582784,
+      "pids": 58,
+      "block_io": "21.6MB / 2.19GB",
+      "net_io": "371MB / 1.5GB"
+    },
+    {
+      "at": "2026-07-31T08:43:58.559Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-redis-1",
+      "cpu_pct": 0.59,
+      "memory_bytes": 11785994.24,
+      "pids": 6,
+      "block_io": "6.68MB / 40.7MB",
+      "net_io": "43.6MB / 20.2MB"
+    },
+    {
+      "at": "2026-07-31T08:43:58.559Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-rabbitmq-1",
+      "cpu_pct": 193.16,
+      "memory_bytes": 182976512,
+      "pids": 90,
+      "block_io": "1.73MB / 25.1MB",
+      "net_io": "23.2MB / 25.6MB"
+    },
+    {
+      "at": "2026-07-31T08:43:58.559Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 48692,
+      "Innodb_row_lock_current_waits": 1,
+      "Innodb_row_lock_waits": 22347,
+      "Threads_connected": 13,
+      "Threads_running": 7
+    },
+    {
+      "at": "2026-07-31T08:43:58.559Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 1,
+      "total_commands_processed": 483397,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.18,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T08:43:58.559Z",
+      "type": "rabbitmq",
+      "messages_ready": 2980,
+      "messages_unacknowledged": 20,
+      "consumers": 10,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 2684
+    },
+    {
+      "at": "2026-07-31T08:44:00.583Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-backend-load",
+      "cpu_pct": 81.42,
+      "memory_bytes": 32421969.92,
+      "pids": 25,
+      "block_io": "4.1kB / 0B",
+      "net_io": "141MB / 56.7MB"
+    },
+    {
+      "at": "2026-07-31T08:44:00.583Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-mysql-1",
+      "cpu_pct": 76.15,
+      "memory_bytes": 637848780.8,
+      "pids": 57,
+      "block_io": "21.6MB / 2.19GB",
+      "net_io": "373MB / 1.51GB"
+    },
+    {
+      "at": "2026-07-31T08:44:00.583Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-redis-1",
+      "cpu_pct": 3.3,
+      "memory_bytes": 13463715.84,
+      "pids": 6,
+      "block_io": "6.69MB / 40.7MB",
+      "net_io": "43.6MB / 20.2MB"
+    },
+    {
+      "at": "2026-07-31T08:44:00.583Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-rabbitmq-1",
+      "cpu_pct": 210.24,
+      "memory_bytes": 162004992,
+      "pids": 48,
+      "block_io": "1.73MB / 25.1MB",
+      "net_io": "23.5MB / 25.8MB"
+    },
+    {
+      "at": "2026-07-31T08:44:00.583Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 49017,
+      "Innodb_row_lock_current_waits": 2,
+      "Innodb_row_lock_waits": 22404,
+      "Threads_connected": 12,
+      "Threads_running": 6
+    },
+    {
+      "at": "2026-07-31T08:44:00.583Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 0,
+      "total_commands_processed": 483411,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.09,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T08:44:00.583Z",
+      "type": "rabbitmq",
+      "messages_ready": 2980,
+      "messages_unacknowledged": 20,
+      "consumers": 10,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 2942
+    },
+    {
+      "at": "2026-07-31T08:44:02.167Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-backend-load",
+      "cpu_pct": 3.07,
+      "memory_bytes": 31520194.56,
+      "pids": 25,
+      "block_io": "4.1kB / 0B",
+      "net_io": "142MB / 56.8MB"
+    },
+    {
+      "at": "2026-07-31T08:44:02.167Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-mysql-1",
+      "cpu_pct": 3.1,
+      "memory_bytes": 638687641.6,
+      "pids": 56,
+      "block_io": "21.6MB / 2.19GB",
+      "net_io": "373MB / 1.51GB"
+    },
+    {
+      "at": "2026-07-31T08:44:02.167Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-redis-1",
+      "cpu_pct": 0.32,
+      "memory_bytes": 13327400.96,
+      "pids": 6,
+      "block_io": "6.7MB / 40.7MB",
+      "net_io": "43.6MB / 20.2MB"
+    },
+    {
+      "at": "2026-07-31T08:44:02.167Z",
+      "type": "container",
+      "name": "whu-snack-go-capacity-rabbitmq-1",
+      "cpu_pct": 145.24,
+      "memory_bytes": 217160089.6,
+      "pids": 90,
+      "block_io": "1.73MB / 25.6MB",
+      "net_io": "23.5MB / 25.8MB"
+    },
+    {
+      "at": "2026-07-31T08:44:02.167Z",
+      "type": "mysql",
+      "Aborted_connects": 42,
+      "Connections": 49155,
+      "Innodb_row_lock_current_waits": 1,
+      "Innodb_row_lock_waits": 22427,
+      "Threads_connected": 11,
+      "Threads_running": 2
+    },
+    {
+      "at": "2026-07-31T08:44:02.167Z",
+      "type": "redis",
+      "instantaneous_ops_per_sec": 9,
+      "total_commands_processed": 483427,
+      "rejected_connections": 0,
+      "latency_min_ms": 0,
+      "latency_max_ms": 1,
+      "latency_avg_ms": 0.27,
+      "latency_samples": 11
+    },
+    {
+      "at": "2026-07-31T08:44:02.167Z",
+      "type": "rabbitmq",
+      "messages_ready": 3000,
+      "messages_unacknowledged": 0,
+      "consumers": 10,
+      "order_queue_ready": 0,
+      "order_queue_unacked": 0,
+      "delay_queue_ready": 3000
+    }
+  ]
+}

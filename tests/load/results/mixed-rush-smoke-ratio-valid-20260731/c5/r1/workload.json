@@ -1,0 +1,166 @@
+{
+  "seed": 20261232,
+  "campaign_id": "192",
+  "flows": [
+    {
+      "username": "load_user_mixed_2",
+      "followup": "limit_repeat",
+      "startDelayMs": 16,
+      "retryDelayMs": 9,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_1",
+      "followup": "limit_repeat",
+      "startDelayMs": 4,
+      "retryDelayMs": 9,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_12",
+      "followup": "limit_repeat",
+      "startDelayMs": 9,
+      "retryDelayMs": 6,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_15",
+      "followup": "limit_repeat",
+      "startDelayMs": 15,
+      "retryDelayMs": 0,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_14",
+      "followup": "limit_repeat",
+      "startDelayMs": 3,
+      "retryDelayMs": 10,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_10",
+      "followup": "limit_repeat",
+      "startDelayMs": 15,
+      "retryDelayMs": 7,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_18",
+      "followup": "limit_repeat",
+      "startDelayMs": 12,
+      "retryDelayMs": 0,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_9",
+      "followup": "limit_repeat",
+      "startDelayMs": 7,
+      "retryDelayMs": 0,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_8",
+      "followup": "limit_repeat",
+      "startDelayMs": 7,
+      "retryDelayMs": 8,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_4",
+      "followup": "limit_repeat",
+      "startDelayMs": 15,
+      "retryDelayMs": 10,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_3",
+      "followup": "limit_repeat",
+      "startDelayMs": 13,
+      "retryDelayMs": 9,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_13",
+      "followup": "limit_repeat",
+      "startDelayMs": 9,
+      "retryDelayMs": 9,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_11",
+      "followup": "limit_repeat",
+      "startDelayMs": 11,
+      "retryDelayMs": 1,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_19",
+      "followup": "limit_repeat",
+      "startDelayMs": 6,
+      "retryDelayMs": 6,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_7",
+      "followup": "idempotent_retry",
+      "startDelayMs": 18,
+      "retryDelayMs": 5,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_16",
+      "followup": "idempotent_retry",
+      "startDelayMs": 8,
+      "retryDelayMs": 4,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_5",
+      "followup": "idempotent_retry",
+      "startDelayMs": 4,
+      "retryDelayMs": 3,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_6",
+      "followup": "idempotent_retry",
+      "startDelayMs": 12,
+      "retryDelayMs": 8,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_0",
+      "followup": "idempotent_retry",
+      "startDelayMs": 14,
+      "retryDelayMs": 3,
+      "orderID": null,
+      "status": null
+    },
+    {
+      "username": "load_user_mixed_17",
+      "followup": "idempotent_retry",
+      "startDelayMs": 8,
+      "retryDelayMs": 4,
+      "orderID": null,
+      "status": null
+    }
+  ]
+}

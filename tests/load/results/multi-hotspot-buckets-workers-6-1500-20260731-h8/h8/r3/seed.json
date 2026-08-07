@@ -1,0 +1,79 @@
+{
+  "organizerID": "62",
+  "venueID": "62",
+  "bucketsEnabled": true,
+  "campaigns": [
+    {
+      "campaignID": "168",
+      "tierID": "168",
+      "eventID": "168",
+      "sessionID": "168",
+      "organizerID": "62",
+      "quota": 217,
+      "index": 0
+    },
+    {
+      "campaignID": "169",
+      "tierID": "169",
+      "eventID": "169",
+      "sessionID": "169",
+      "organizerID": "62",
+      "quota": 217,
+      "index": 1
+    },
+    {
+      "campaignID": "170",
+      "tierID": "170",
+      "eventID": "170",
+      "sessionID": "170",
+      "organizerID": "62",
+      "quota": 217,
+      "index": 2
+    },
+    {
+      "campaignID": "171",
+      "tierID": "171",
+      "eventID": "171",
+      "sessionID": "171",
+      "organizerID": "62",
+      "quota": 217,
+      "index": 3
+    },
+    {
+      "campaignID": "172",
+      "tierID": "172",
+      "eventID": "172",
+      "sessionID": "172",
+      "organizerID": "62",
+      "quota": 217,
+      "index": 4
+    },
+    {
+      "campaignID": "173",
+      "tierID": "173",
+      "eventID": "173",
+      "sessionID": "173",
+      "organizerID": "62",
+      "quota": 217,
+      "index": 5
+    },
+    {
+      "campaignID": "174",
+      "tierID": "174",
+      "eventID": "174",
+      "sessionID": "174",
+      "organizerID": "62",
+      "quota": 217,
+      "index": 6
+    },
+    {
+      "campaignID": "175",
+      "tierID": "175",
+      "eventID": "175",
+      "sessionID": "175",
+      "organizerID": "62",
+      "quota": 217,
+      "index": 7
+    }
+  ]
+}

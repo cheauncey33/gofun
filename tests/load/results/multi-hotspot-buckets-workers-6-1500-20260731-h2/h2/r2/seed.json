@@ -1,0 +1,25 @@
+{
+  "organizerID": "55",
+  "venueID": "55",
+  "bucketsEnabled": true,
+  "campaigns": [
+    {
+      "campaignID": "136",
+      "tierID": "136",
+      "eventID": "136",
+      "sessionID": "136",
+      "organizerID": "55",
+      "quota": 863,
+      "index": 0
+    },
+    {
+      "campaignID": "137",
+      "tierID": "137",
+      "eventID": "137",
+      "sessionID": "137",
+      "organizerID": "55",
+      "quota": 863,
+      "index": 1
+    }
+  ]
+}

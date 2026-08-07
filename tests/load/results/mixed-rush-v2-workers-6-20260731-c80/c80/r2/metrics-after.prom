@@ -1,0 +1,256 @@
+# HELP active_http_connections Current number of active HTTP connections
+# TYPE active_http_connections gauge
+active_http_connections 1
+# HELP distributed_rate_limit_requests_total Total requests evaluated by the distributed write rate limiter
+# TYPE distributed_rate_limit_requests_total counter
+distributed_rate_limit_requests_total{result="allowed"} 50600
+# HELP event_search_sync_total Total Elasticsearch event projection reconciliation runs
+# TYPE event_search_sync_total counter
+event_search_sync_total{result="anomalies_found"} 2
+# HELP go_gc_duration_seconds A summary of the wall-time pause (stop-the-world) duration in garbage collection cycles.
+# TYPE go_gc_duration_seconds summary
+go_gc_duration_seconds{quantile="0"} 3.3193e-05
+go_gc_duration_seconds{quantile="0.25"} 0.000141373
+go_gc_duration_seconds{quantile="0.5"} 0.000205885
+go_gc_duration_seconds{quantile="0.75"} 0.00037578
+go_gc_duration_seconds{quantile="1"} 0.004276499
+go_gc_duration_seconds_sum 1.636282646
+go_gc_duration_seconds_count 2532
+# HELP go_gc_gogc_percent Heap size target percentage configured by the user, otherwise 100. This value is set by the GOGC environment variable, and the runtime/debug.SetGCPercent function. Sourced from /gc/gogc:percent.
+# TYPE go_gc_gogc_percent gauge
+go_gc_gogc_percent 100
+# HELP go_gc_gomemlimit_bytes Go runtime memory limit configured by the user, otherwise math.MaxInt64. This value is set by the GOMEMLIMIT environment variable, and the runtime/debug.SetMemoryLimit function. Sourced from /gc/gomemlimit:bytes.
+# TYPE go_gc_gomemlimit_bytes gauge
+go_gc_gomemlimit_bytes 9.223372036854776e+18
+# HELP go_goroutines Number of goroutines that currently exist.
+# TYPE go_goroutines gauge
+go_goroutines 140
+# HELP go_info Information about the Go environment.
+# TYPE go_info gauge
+go_info{version="go1.25.12"} 1
+# HELP go_memstats_alloc_bytes Number of bytes allocated in heap and currently in use. Equals to /memory/classes/heap/objects:bytes.
+# TYPE go_memstats_alloc_bytes gauge
+go_memstats_alloc_bytes 1.2586208e+07
+# HELP go_memstats_alloc_bytes_total Total number of bytes allocated in heap until now, even if released already. Equals to /gc/heap/allocs:bytes.
+# TYPE go_memstats_alloc_bytes_total counter
+go_memstats_alloc_bytes_total 1.3183892e+10
+# HELP go_memstats_buck_hash_sys_bytes Number of bytes used by the profiling bucket hash table. Equals to /memory/classes/profiling/buckets:bytes.
+# TYPE go_memstats_buck_hash_sys_bytes gauge
+go_memstats_buck_hash_sys_bytes 2.51592e+06
+# HELP go_memstats_frees_total Total number of heap objects frees. Equals to /gc/heap/frees:objects + /gc/heap/tiny/allocs:objects.
+# TYPE go_memstats_frees_total counter
+go_memstats_frees_total 1.58783887e+08
+# HELP go_memstats_gc_sys_bytes Number of bytes used for garbage collection system metadata. Equals to /memory/classes/metadata/other:bytes.
+# TYPE go_memstats_gc_sys_bytes gauge
+go_memstats_gc_sys_bytes 3.818256e+06
+# HELP go_memstats_heap_alloc_bytes Number of heap bytes allocated and currently in use, same as go_memstats_alloc_bytes. Equals to /memory/classes/heap/objects:bytes.
+# TYPE go_memstats_heap_alloc_bytes gauge
+go_memstats_heap_alloc_bytes 1.2586208e+07
+# HELP go_memstats_heap_idle_bytes Number of heap bytes waiting to be used. Equals to /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.
+# TYPE go_memstats_heap_idle_bytes gauge
+go_memstats_heap_idle_bytes 2.21184e+07
+# HELP go_memstats_heap_inuse_bytes Number of heap bytes that are in use. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes
+# TYPE go_memstats_heap_inuse_bytes gauge
+go_memstats_heap_inuse_bytes 1.9103744e+07
+# HELP go_memstats_heap_objects Number of currently allocated objects. Equals to /gc/heap/objects:objects.
+# TYPE go_memstats_heap_objects gauge
+go_memstats_heap_objects 60162
+# HELP go_memstats_heap_released_bytes Number of heap bytes released to OS. Equals to /memory/classes/heap/released:bytes.
+# TYPE go_memstats_heap_released_bytes gauge
+go_memstats_heap_released_bytes 1.9243008e+07
+# HELP go_memstats_heap_sys_bytes Number of heap bytes obtained from system. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes + /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.
+# TYPE go_memstats_heap_sys_bytes gauge
+go_memstats_heap_sys_bytes 4.1222144e+07
+# HELP go_memstats_last_gc_time_seconds Number of seconds since 1970 of last garbage collection.
+# TYPE go_memstats_last_gc_time_seconds gauge
+go_memstats_last_gc_time_seconds 1.7854927361156497e+09
+# HELP go_memstats_mallocs_total Total number of heap objects allocated, both live and gc-ed. Semantically a counter version for go_memstats_heap_objects gauge. Equals to /gc/heap/allocs:objects + /gc/heap/tiny/allocs:objects.
+# TYPE go_memstats_mallocs_total counter
+go_memstats_mallocs_total 1.58844049e+08
+# HELP go_memstats_mcache_inuse_bytes Number of bytes in use by mcache structures. Equals to /memory/classes/metadata/mcache/inuse:bytes.
+# TYPE go_memstats_mcache_inuse_bytes gauge
+go_memstats_mcache_inuse_bytes 14496
+# HELP go_memstats_mcache_sys_bytes Number of bytes used for mcache structures obtained from system. Equals to /memory/classes/metadata/mcache/inuse:bytes + /memory/classes/metadata/mcache/free:bytes.
+# TYPE go_memstats_mcache_sys_bytes gauge
+go_memstats_mcache_sys_bytes 15704
+# HELP go_memstats_mspan_inuse_bytes Number of bytes in use by mspan structures. Equals to /memory/classes/metadata/mspan/inuse:bytes.
+# TYPE go_memstats_mspan_inuse_bytes gauge
+go_memstats_mspan_inuse_bytes 409120
+# HELP go_memstats_mspan_sys_bytes Number of bytes used for mspan structures obtained from system. Equals to /memory/classes/metadata/mspan/inuse:bytes + /memory/classes/metadata/mspan/free:bytes.
+# TYPE go_memstats_mspan_sys_bytes gauge
+go_memstats_mspan_sys_bytes 603840
+# HELP go_memstats_next_gc_bytes Number of heap bytes when next garbage collection will take place. Equals to /gc/heap/goal:bytes.
+# TYPE go_memstats_next_gc_bytes gauge
+go_memstats_next_gc_bytes 1.9685378e+07
+# HELP go_memstats_other_sys_bytes Number of bytes used for other system allocations. Equals to /memory/classes/other:bytes.
+# TYPE go_memstats_other_sys_bytes gauge
+go_memstats_other_sys_bytes 1.850896e+06
+# HELP go_memstats_stack_inuse_bytes Number of bytes obtained from system for stack allocator in non-CGO environments. Equals to /memory/classes/heap/stacks:bytes.
+# TYPE go_memstats_stack_inuse_bytes gauge
+go_memstats_stack_inuse_bytes 4.9152e+06
+# HELP go_memstats_stack_sys_bytes Number of bytes obtained from system for stack allocator. Equals to /memory/classes/heap/stacks:bytes + /memory/classes/os-stacks:bytes.
+# TYPE go_memstats_stack_sys_bytes gauge
+go_memstats_stack_sys_bytes 4.9152e+06
+# HELP go_memstats_sys_bytes Number of bytes obtained from system. Equals to /memory/classes/total:byte.
+# TYPE go_memstats_sys_bytes gauge
+go_memstats_sys_bytes 5.494196e+07
+# HELP go_sched_gomaxprocs_threads The current runtime.GOMAXPROCS setting, or the number of operating system threads that can execute user-level Go code simultaneously. Sourced from /sched/gomaxprocs:threads.
+# TYPE go_sched_gomaxprocs_threads gauge
+go_sched_gomaxprocs_threads 12
+# HELP go_threads Number of OS threads created.
+# TYPE go_threads gauge
+go_threads 26
+# HELP http_request_duration_seconds HTTP request latency in seconds
+# TYPE http_request_duration_seconds histogram
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="0.005"} 10145
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="0.01"} 20023
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="0.025"} 36395
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="0.05"} 40269
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="0.1"} 41148
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="0.25"} 41523
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="0.5"} 41545
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="1"} 41545
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="2.5"} 41545
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="5"} 41545
+http_request_duration_seconds_bucket{method="GET",path="/api/v1/orders/:id",le="+Inf"} 41545
+http_request_duration_seconds_sum{method="GET",path="/api/v1/orders/:id"} 613.9933687110014
+http_request_duration_seconds_count{method="GET",path="/api/v1/orders/:id"} 41545
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="0.005"} 203
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="0.01"} 208
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="0.025"} 219
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="0.05"} 224
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="0.1"} 231
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="0.25"} 231
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="0.5"} 231
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="1"} 231
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="2.5"} 231
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="5"} 231
+http_request_duration_seconds_bucket{method="GET",path="/metrics",le="+Inf"} 231
+http_request_duration_seconds_sum{method="GET",path="/metrics"} 1.1907963560000001
+http_request_duration_seconds_count{method="GET",path="/metrics"} 231
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="0.005"} 989
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="0.01"} 995
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="0.025"} 999
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="0.05"} 999
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="0.1"} 999
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="0.25"} 1003
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="0.5"} 11578
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="1"} 14579
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="2.5"} 14580
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="5"} 14580
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/login",le="+Inf"} 14580
+http_request_duration_seconds_sum{method="POST",path="/api/v1/login"} 6085.337142964941
+http_request_duration_seconds_count{method="POST",path="/api/v1/login"} 14580
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="0.005"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="0.01"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="0.025"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="0.05"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="0.1"} 0
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="0.25"} 1
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="0.5"} 863
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="1"} 1000
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="2.5"} 1000
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="5"} 1000
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/register",le="+Inf"} 1000
+http_request_duration_seconds_sum{method="POST",path="/api/v1/register"} 409.2286940540004
+http_request_duration_seconds_count{method="POST",path="/api/v1/register"} 1000
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="0.005"} 13827
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="0.01"} 14004
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="0.025"} 20945
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="0.05"} 37080
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="0.1"} 46672
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="0.25"} 50242
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="0.5"} 50600
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="1"} 50600
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="2.5"} 50600
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="5"} 50600
+http_request_duration_seconds_bucket{method="POST",path="/api/v1/rush-sales/:id/execute",le="+Inf"} 50600
+http_request_duration_seconds_sum{method="POST",path="/api/v1/rush-sales/:id/execute"} 2001.2350524689937
+http_request_duration_seconds_count{method="POST",path="/api/v1/rush-sales/:id/execute"} 50600
+# HELP http_requests_total Total HTTP requests handled
+# TYPE http_requests_total counter
+http_requests_total{method="GET",path="/api/v1/orders/:id",status="200"} 41545
+http_requests_total{method="GET",path="/metrics",status="200"} 231
+http_requests_total{method="POST",path="/api/v1/login",status="200"} 13580
+http_requests_total{method="POST",path="/api/v1/login",status="401"} 1000
+http_requests_total{method="POST",path="/api/v1/register",status="200"} 1000
+http_requests_total{method="POST",path="/api/v1/rush-sales/:id/execute",status="200"} 40771
+http_requests_total{method="POST",path="/api/v1/rush-sales/:id/execute",status="400"} 9828
+http_requests_total{method="POST",path="/api/v1/rush-sales/:id/execute",status="409"} 1
+# HELP inventory_bucket_fallback_total Orders restored without stock_bucket_no; used userID mod N fallback
+# TYPE inventory_bucket_fallback_total counter
+inventory_bucket_fallback_total 0
+# HELP mq_messages_consumed_total Total messages consumed from RabbitMQ
+# TYPE mq_messages_consumed_total counter
+mq_messages_consumed_total{result="success"} 36630
+# HELP mq_messages_published_total Total messages published to RabbitMQ
+# TYPE mq_messages_published_total counter
+mq_messages_published_total 36630
+# HELP orders_cancelled_total Total number of orders cancelled
+# TYPE orders_cancelled_total counter
+orders_cancelled_total 0
+# HELP orders_created_total Total number of orders created
+# TYPE orders_created_total counter
+orders_created_total 36559
+# HELP outbox_buffer_len Current number of outbox drafts waiting in the process-local batch buffer
+# TYPE outbox_buffer_len gauge
+outbox_buffer_len 0
+# HELP outbox_flush_batch_size Number of outbox rows written per batch flush
+# TYPE outbox_flush_batch_size histogram
+outbox_flush_batch_size_bucket{le="1"} 2682
+outbox_flush_batch_size_bucket{le="5"} 6002
+outbox_flush_batch_size_bucket{le="10"} 6669
+outbox_flush_batch_size_bucket{le="25"} 6931
+outbox_flush_batch_size_bucket{le="50"} 7305
+outbox_flush_batch_size_bucket{le="100"} 7305
+outbox_flush_batch_size_bucket{le="200"} 7305
+outbox_flush_batch_size_bucket{le="500"} 7305
+outbox_flush_batch_size_bucket{le="1000"} 7305
+outbox_flush_batch_size_bucket{le="+Inf"} 7305
+outbox_flush_batch_size_sum 36559
+outbox_flush_batch_size_count 7305
+# HELP outbox_recover_backfill_total Total queued orders that received a backfilled outbox row
+# TYPE outbox_recover_backfill_total counter
+outbox_recover_backfill_total 71
+# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.
+# TYPE process_cpu_seconds_total counter
+process_cpu_seconds_total 4014.71
+# HELP process_max_fds Maximum number of open file descriptors.
+# TYPE process_max_fds gauge
+process_max_fds 1.048576e+06
+# HELP process_network_receive_bytes_total Number of bytes received by the process over the network.
+# TYPE process_network_receive_bytes_total counter
+process_network_receive_bytes_total 2.14367706e+09
+# HELP process_network_transmit_bytes_total Number of bytes sent by the process over the network.
+# TYPE process_network_transmit_bytes_total counter
+process_network_transmit_bytes_total 7.93925656e+08
+# HELP process_open_fds Number of open file descriptors.
+# TYPE process_open_fds gauge
+process_open_fds 151
+# HELP process_resident_memory_bytes Resident memory size in bytes.
+# TYPE process_resident_memory_bytes gauge
+process_resident_memory_bytes 6.5421312e+07
+# HELP process_start_time_seconds Start time of the process since unix epoch in seconds.
+# TYPE process_start_time_seconds gauge
+process_start_time_seconds 1.78549025454e+09
+# HELP process_virtual_memory_bytes Virtual memory size in bytes.
+# TYPE process_virtual_memory_bytes gauge
+process_virtual_memory_bytes 1.319596032e+09
+# HELP process_virtual_memory_max_bytes Maximum amount of virtual memory available in bytes.
+# TYPE process_virtual_memory_max_bytes gauge
+process_virtual_memory_max_bytes 1.8446744073709552e+19
+# HELP promhttp_metric_handler_requests_in_flight Current number of scrapes being served.
+# TYPE promhttp_metric_handler_requests_in_flight gauge
+promhttp_metric_handler_requests_in_flight 1
+# HELP promhttp_metric_handler_requests_total Total number of scrapes by HTTP status code.
+# TYPE promhttp_metric_handler_requests_total counter
+promhttp_metric_handler_requests_total{code="200"} 231
+promhttp_metric_handler_requests_total{code="500"} 0
+promhttp_metric_handler_requests_total{code="503"} 0
+# HELP stock_compensation_total Total stock compensation runs
+# TYPE stock_compensation_total counter
+stock_compensation_total{result="anomalies_found"} 4
+stock_compensation_total{result="success"} 4
+# HELP ticket_timeout_messages_total Total ticket payment timeout messages by handling result
+# TYPE ticket_timeout_messages_total counter
+ticket_timeout_messages_total{result="success"} 34559

@@ -1,0 +1,180 @@
+{
+  "label": "multi-hotspot-buckets-1500-20260731-h4-r2",
+  "hotspots": 4,
+  "round": 2,
+  "total_orders": 1500,
+  "quota_per_campaign": 432,
+  "campaign_ids": [
+    "33",
+    "34",
+    "35",
+    "36"
+  ],
+  "execute_seconds": 2.05,
+  "drain_seconds": 11.44,
+  "success_orders": 1500,
+  "success_rate": 1,
+  "success_qps": 732.26,
+  "still_queued": 0,
+  "by_hotspot": {
+    "0": {
+      "campaign_id": "33",
+      "attempts": 375,
+      "success": 375,
+      "still_queued": 0
+    },
+    "1": {
+      "campaign_id": "34",
+      "attempts": 375,
+      "success": 375,
+      "still_queued": 0
+    },
+    "2": {
+      "campaign_id": "35",
+      "attempts": 375,
+      "success": 375,
+      "still_queued": 0
+    },
+    "3": {
+      "campaign_id": "36",
+      "attempts": 375,
+      "success": 375,
+      "still_queued": 0
+    }
+  },
+  "execute": {
+    "scenario": "multi_hotspot_execute",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 15.63,
+    "concurrency": 50,
+    "think_ms": 0,
+    "total_requests": 1500,
+    "requests_per_second": 95.96,
+    "ok": 1500,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 57.98,
+      "p50": 57.03,
+      "p90": 73.33,
+      "p95": 77.93,
+      "p99": 81.47,
+      "max": 95.59
+    },
+    "labels": {
+      "rush_execute": 1500
+    },
+    "label_latency_ms": {
+      "rush_execute": {
+        "count": 1500,
+        "avg": 57.98,
+        "p50": 57.03,
+        "p95": 77.93,
+        "p99": 81.47,
+        "max": 95.59
+      }
+    },
+    "statuses": {
+      "200": 1500
+    },
+    "outcomes": {
+      "success": 1500
+    },
+    "top_errors": {}
+  },
+  "poll": {
+    "scenario": "multi_hotspot_poll",
+    "baseUrl": "http://127.0.0.1:18080/api/v1",
+    "duration_seconds": 15.63,
+    "concurrency": 50,
+    "think_ms": 0,
+    "total_requests": 2335,
+    "requests_per_second": 149.36,
+    "ok": 2335,
+    "failed": 0,
+    "failure_rate": 0,
+    "latency_ms": {
+      "avg": 21.18,
+      "p50": 19.77,
+      "p90": 32.26,
+      "p95": 35.96,
+      "p99": 60.09,
+      "max": 68.35
+    },
+    "labels": {
+      "order_poll": 2335
+    },
+    "label_latency_ms": {
+      "order_poll": {
+        "count": 2335,
+        "avg": 21.18,
+        "p50": 19.77,
+        "p95": 35.96,
+        "p99": 60.09,
+        "max": 68.35
+      }
+    },
+    "statuses": {
+      "200": 2335
+    },
+    "outcomes": {
+      "success": 2335
+    },
+    "top_errors": {}
+  },
+  "mq_metrics": {
+    "published_delta": 1500,
+    "consumed_success_delta": 1500
+  },
+  "resources": {
+    "containers": {
+      "whu-snack-go-capacity-backend-load": {
+        "cpu_pct_avg": 93.17,
+        "cpu_pct_max": 113.13,
+        "memory_bytes_max": 36490444.8,
+        "pids_max": 26
+      },
+      "whu-snack-go-capacity-mysql-1": {
+        "cpu_pct_avg": 85.4,
+        "cpu_pct_max": 107.73,
+        "memory_bytes_max": 695101030.4,
+        "pids_max": 60
+      },
+      "whu-snack-go-capacity-redis-1": {
+        "cpu_pct_avg": 7.85,
+        "cpu_pct_max": 18.6,
+        "memory_bytes_max": 18045992.96,
+        "pids_max": 6
+      },
+      "whu-snack-go-capacity-rabbitmq-1": {
+        "cpu_pct_avg": 179,
+        "cpu_pct_max": 322.91,
+        "memory_bytes_max": 201221734.4,
+        "pids_max": 48
+      }
+    },
+    "mysql": {
+      "threads_connected_max": 63,
+      "threads_running_max": 49,
+      "row_lock_current_waits_max": 3,
+      "row_lock_waits_delta": 334,
+      "deadlocks_delta": 0,
+      "aborted_connects_delta": 0
+    },
+    "redis": {
+      "ops_per_sec_max": 8689,
+      "latency_avg_ms_max": 0.45,
+      "latency_max_ms": 3,
+      "commands_delta": 28054,
+      "rejected_connections_delta": 0
+    },
+    "rabbitmq": {
+      "messages_ready_max": 3508,
+      "messages_unacknowledged_max": 22,
+      "order_queue_ready_max": 0,
+      "order_queue_unacked_max": 0,
+      "delay_queue_ready_end": 2838,
+      "consumers_max": 10
+    }
+  }
+}

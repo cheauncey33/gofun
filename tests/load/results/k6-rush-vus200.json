@@ -1,0 +1,20 @@
+{
+  "scenario": "k6_rush_execute",
+  "base_url": "http://127.0.0.1:18080/api/v1",
+  "campaign_id": "210",
+  "fixture": "fixtures/rush_execute.json",
+  "users": 400,
+  "http_reqs": 60450,
+  "http_req_rate": 3013.1070155175007,
+  "p90_ms": 115.39899,
+  "p95_ms": 137.4376,
+  "avg_ms": 65.86807761786554,
+  "rush_execute_success_rate": 0,
+  "rush_execute_sold_out": 60450,
+  "rush_execute_rejected": 0,
+  "checks": {
+    "rate": 1,
+    "passes": 60450,
+    "fails": 0
+  }
+}

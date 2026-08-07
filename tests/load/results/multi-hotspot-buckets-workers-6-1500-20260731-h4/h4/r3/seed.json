@@ -1,0 +1,43 @@
+{
+  "organizerID": "59",
+  "venueID": "59",
+  "bucketsEnabled": true,
+  "campaigns": [
+    {
+      "campaignID": "148",
+      "tierID": "148",
+      "eventID": "148",
+      "sessionID": "148",
+      "organizerID": "59",
+      "quota": 432,
+      "index": 0
+    },
+    {
+      "campaignID": "149",
+      "tierID": "149",
+      "eventID": "149",
+      "sessionID": "149",
+      "organizerID": "59",
+      "quota": 432,
+      "index": 1
+    },
+    {
+      "campaignID": "150",
+      "tierID": "150",
+      "eventID": "150",
+      "sessionID": "150",
+      "organizerID": "59",
+      "quota": 432,
+      "index": 2
+    },
+    {
+      "campaignID": "151",
+      "tierID": "151",
+      "eventID": "151",
+      "sessionID": "151",
+      "organizerID": "59",
+      "quota": 432,
+      "index": 3
+    }
+  ]
+}
