@@ -1,4 +1,4 @@
-# 赴场票务压测计划
+# Gofun 票务压测计划
 
 > 旧零食脚本（`smoke.mjs` / `seckill_spike.mjs` 等）已废弃。当前以 `ticket_*.mjs` 为准。
 

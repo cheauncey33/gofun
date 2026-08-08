@@ -1,4 +1,15 @@
-# 赴场面试话术对照
+# Gofun 票务系统面试口径
+
+> 当前代码口径：多主办方活动票务（无选座阶段），不是旧的校园电商/商品余额系统。本文中的旧电商段落仅作历史背景；现行支付、出票、核销和一致性说明以 `docs/FUCHANG_PHASE1.md`、`docs/FUCHANG_PAYMENT_SANDBOX.md` 与本文新增的“当前票务口径”小节为准。
+
+## 当前票务口径
+
+- 下单链路：Redis Lua 预扣票档 → MySQL `queued` + outbox → RabbitMQ consumer → `pending_payment`。
+- 支付链路：创建 `payment_transaction` 后等待渠道异步回调；当前 `SandboxPaymentGateway` 只模拟外部支付机构，不读取或扣减用户余额。
+- 成功回调：验签、校验金额和 `provider_event_id` 幂等后，在事务内把订单变为 `paid` 并签发电子票。
+- 失败/超时：失败回调不出票；超时任务条件关单并恢复票额；已支付取消调用支付适配器退款，再撤销未核销电子票。
+- 核销链路：HMAC 票凭证 + 主办方权限 + 场次校验，行锁保证并发重复核销只有一次成功，审计记录保留每次尝试。
+- E2E：`node tests/integration/payment_verification_e2e.mjs` 覆盖支付成功出票、支付失败不出票、核销和重复核销。
 
 本文把「仓库里已有的实操」和「评论 / 抢票本地缓存新补的样板」对照写清，方便直接讲。
 

@@ -19,7 +19,7 @@ README text.
 
 ## Project Overview
 
-**赴场（Fuchang）** — multi-organizer event ticketing platform (phase 1: no seat selection).
+**Gofun** — multi-organizer event ticketing platform (phase 1: no seat selection).
 
 - Backend: Go, Gin, GORM, MySQL, Redis, RabbitMQ, Snowflake IDs, outbox pattern.
 - Frontend: Vue 3, Vite, Element Plus, Vue Router, Axios.

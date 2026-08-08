@@ -226,7 +226,7 @@ function formatDate(value) {
 <template>
   <div class="console-shell">
     <header class="console-topbar">
-      <button class="console-brand" type="button" @click="router.push('/')">赴场</button>
+      <button class="console-brand" type="button" @click="router.push('/')">Gofun</button>
       <span></span>
       <button class="back-store" type="button" @click="router.push('/')">返回购票站</button>
       <div v-if="currentOrganizer" class="organizer-switcher">
@@ -263,7 +263,7 @@ function formatDate(value) {
       <main v-loading="workspaceLoading" class="console-main">
         <section id="overview" class="console-heading">
           <div>
-            <h1>赴场主办方工作台</h1>
+          <h1>Gofun 主办方工作台</h1>
             <p>{{ currentOrganizer?.name }} · {{ currentMembership?.role === 'owner' ? '负责人' : '运营成员' }}</p>
           </div>
           <div class="heading-actions">

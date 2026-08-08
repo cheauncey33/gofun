@@ -1,12 +1,12 @@
 package service
 
 import (
-	"gofun/models"
-	apptelemetry "gofun/pkg/telemetry"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gofun/models"
+	apptelemetry "gofun/pkg/telemetry"
 	"log"
 	"strconv"
 	"strings"
@@ -123,7 +123,7 @@ func (s *TicketOrderService) enqueueOutboxInTx(
 	orderID int64,
 	message TicketOrderMessage,
 ) error {
-	ctx, span := otel.Tracer("fuchang-ticketing/order").Start(
+	ctx, span := otel.Tracer("gofun-ticketing/order").Start(
 		ctx,
 		"ticket.outbox.enqueue",
 		trace.WithAttributes(attribute.Int64("ticket.order.id", orderID)),

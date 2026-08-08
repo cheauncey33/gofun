@@ -1,7 +1,7 @@
 <template>
   <div class="auth-container">
     <aside class="auth-brand">
-      <div class="auth-brand-mark"><i>赴</i> 赴场</div>
+      <div class="auth-brand-mark"><i>G</i> Gofun</div>
       <div>
         <h1 class="auth-headline">注册之后，<br />奔赴<em>热爱现场</em>。</h1>
         <p class="auth-tagline">
@@ -9,7 +9,7 @@
           一张票，是一次见面的开始。
         </p>
       </div>
-      <div class="auth-foot">© 赴场 · 多主办方活动票务平台</div>
+      <div class="auth-foot">© Gofun · 多主办方活动票务平台</div>
     </aside>
 
     <section class="auth-panel">

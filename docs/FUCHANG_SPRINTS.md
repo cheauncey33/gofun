@@ -1,4 +1,4 @@
-# 赴场 Sprint A / B / C 执行计划
+# Gofun Sprint A / B / C 执行计划
 
 目标：把票务从「可演示主链路」推进到「可运营、可并发、可现场」。
 原则：小步可逆；每项都有可验证行为；不引入新框架。
@@ -28,7 +28,7 @@
 
 ### A4 清零食遗留
 - 删除未接线的 snack controller/service/view（保留迁移回滚标签说明）
-- 用户余额展示统一 `balance_cents`
+- 支付展示统一为“支付沙箱/待渠道回调”，平台不展示或维护外部用户余额
 - container 去掉 ProductRepo 若无引用
 
 ## Sprint B — 并发可信
@@ -54,9 +54,9 @@
 - 面板：今日成功数、失败分类、历史更清晰
 
 ### C2 支付适配层
-- `PaymentGateway` 接口：`Debit` / `Credit`
-- 默认 `BalancePaymentGateway`（现有余额）
-- `PayOrder` / 退款走接口，便于后续接真实渠道
+- `PaymentGateway`：创建支付单、异步回调、退款
+- `SandboxPaymentGateway` + `payment_transaction` / `payment_callback` 已落地
+- 订单只保存支付结果，不读取或扣减用户余额；真实渠道可替换适配器
 
 ### C3 票码密钥轮换
 - `ticket_qr.secrets` 支持多版本：`FC1.<kid>.<payload>.<sig>` 或并行验旧签新

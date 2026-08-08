@@ -1,13 +1,13 @@
 package service
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"gofun/config"
 	"gofun/container"
 	"gofun/metrics"
 	"gofun/models"
-	"context"
-	"errors"
-	"fmt"
 	"log"
 	"strconv"
 	"time"
@@ -16,7 +16,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// TicketCompensationService 对齐赴场票档 Redis 库存与 MySQL 可用量，只下调或补缺。
+// TicketCompensationService 对齐 Gofun 票档 Redis 库存与 MySQL 可用量，只下调或补缺。
 type TicketCompensationService struct {
 	db        *gorm.DB
 	rdb       *redis.Client

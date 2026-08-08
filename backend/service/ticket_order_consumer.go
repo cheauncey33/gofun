@@ -1,13 +1,13 @@
 package service
 
 import (
-	"gofun/config"
-	"gofun/metrics"
-	apptelemetry "gofun/pkg/telemetry"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gofun/config"
+	"gofun/metrics"
+	apptelemetry "gofun/pkg/telemetry"
 	"log"
 	"sync"
 	"time"
@@ -89,7 +89,7 @@ func (c *TicketOrderConsumer) consume(
 	}
 	deliveries, err := channel.Consume(
 		c.queueName,
-		fmt.Sprintf("fuchang-order-%d", workerID),
+		fmt.Sprintf("gofun-order-%d", workerID),
 		false, false, false, false, nil,
 	)
 	if err != nil {
@@ -97,7 +97,7 @@ func (c *TicketOrderConsumer) consume(
 	}
 	retries, err := channel.Consume(
 		c.retryQueueName,
-		fmt.Sprintf("fuchang-order-retry-%d", workerID),
+		fmt.Sprintf("gofun-order-retry-%d", workerID),
 		false, false, false, false, nil,
 	)
 	if err != nil {
@@ -201,7 +201,7 @@ func startTicketOrderConsumerSpan(
 	message TicketOrderMessage,
 ) (context.Context, trace.Span) {
 	parentCtx := apptelemetry.ExtractAMQP(ctx, delivery.Headers, message.TraceContext)
-	return otel.Tracer("fuchang-ticketing/order").Start(
+	return otel.Tracer("gofun-ticketing/order").Start(
 		parentCtx,
 		"ticket.order.consume",
 		trace.WithSpanKind(trace.SpanKindConsumer),

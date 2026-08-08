@@ -1,5 +1,5 @@
 /**
- * 赴场抢票入口压测（k6）
+ * Gofun 抢票入口压测（k6）
  *
  * 前置：
  *   node tests/load/k6/prepare_rush_fixture.mjs

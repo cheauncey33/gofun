@@ -8,7 +8,7 @@
 2. 再结合项目或工程场景。
 3. 最后主动说边界和可扩展方案。
 
-项目相关回答必须遵守 `00_CONTEXT_LOCK.md`: 当前项目没有实现 WebSocket、生产者 confirm、死信队列、本地消息表、完整秒杀补偿闭环和多机分布式限流，面试中只能作为扩展方案讲。
+项目相关回答必须遵守 `00_CONTEXT_LOCK.md`: 当前已经实现单实例 WebSocket 订单状态推送；多实例广播、完整分布式事务和多机分布式限流仍只能作为扩展方案讲。
 
 ## 1. 自我介绍
 
@@ -238,7 +238,7 @@ RAG 是 Retrieval-Augmented Generation，检索增强生成。它解决的是大
 
 ## 10. WebSocket 和流式输出
 
-当前项目没有实现 WebSocket 或订单状态推送。如果被问到，只能按通用方案回答，不要说项目已实现。
+当前项目已经实现 WebSocket 订单状态推送：JWT 鉴权后按 `user_id` 管理连接，订单事务提交后推送状态事件，前端订单详情和收银台收到事件后刷新；轮询保留为断线兜底。当前边界是 Hub 位于单进程内存，多实例部署还需接 Redis Pub/Sub。
 
 ### WebSocket 怎么做
 
@@ -406,7 +406,7 @@ BM25 兼顾词频、逆文档频率和文档长度归一化，是成熟稳定的
 1. 自我介绍 60 秒版本。
 2. AI 使用经历: AI 帮我拆解秒杀异步链路异常分支。
 3. 项目主线: Redis Lua + RabbitMQ + consumer 幂等 + DB 兜底 + 补偿。
-4. 项目边界: 没有 WebSocket、死信队列、本地消息表、producer confirm。
+4. 项目边界: WebSocket 当前是单实例内存 Hub，多实例广播仍需 Redis Pub/Sub。
 5. HTTPS: TLS = 证书认证 + 密钥协商 + 对称加密 + 完整性。
 6. G1: Region、停顿目标、优先回收垃圾多的 Region。
 7. MVCC: undo log + ReadView + 版本可见性。

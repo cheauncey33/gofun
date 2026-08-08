@@ -30,7 +30,7 @@ const heroFolded = computed(() => heroProgress.value > 0.92)
 const filterSummary = computed(() => {
   const parts = []
   if (state.city) parts.push(state.city)
-  if (state.selectedCategories.length) parts.push(state.selectedCategories.join(' / '))
+  if (state.selectedCategory) parts.push(state.selectedCategory)
   if (state.keyword) parts.push(`“${state.keyword}”`)
   return parts.join(' · ')
 })
@@ -79,7 +79,7 @@ onMounted(async () => {
 })
 
 watch(
-  () => [state.city, state.keyword, state.selectedCategories.slice()],
+  () => [state.city, state.keyword, state.selectedCategory],
   () => {
     loadCatalog()
   },
@@ -140,11 +140,11 @@ function onCoverError(event) {
   >
     <!-- 轨道高度 = 一屏 + 短行程：滑过约 0.42 屏翻页完成，sticky 随即释放 -->
     <div ref="flipTrack" class="flip-track">
-      <section class="hero-panel" aria-label="赴场封面">
+      <section class="hero-panel" aria-label="Gofun 封面">
         <img class="hero-media" :src="heroImage" alt="暖色灯光下的现场演出" />
         <div class="hero-veil" />
         <div class="hero-copy">
-          <p class="brand-mark">赴场</p>
+            <p class="brand-mark">Gofun</p>
           <h1>赴热爱之场，见想见的人。</h1>
           <p class="hero-lead">发现值得奔赴的现场</p>
           <div class="hero-actions">
@@ -208,7 +208,7 @@ function onCoverError(event) {
           <button
             type="button"
             class="chip"
-            :class="{ active: !state.selectedCategories.length }"
+            :class="{ active: !state.selectedCategory }"
             @click="toggleCategory('')"
           >全部</button>
           <button
@@ -216,8 +216,8 @@ function onCoverError(event) {
             :key="item"
             type="button"
             class="chip"
-            :class="{ active: state.selectedCategories.includes(item) }"
-            :aria-pressed="state.selectedCategories.includes(item)"
+            :class="{ active: state.selectedCategory === item }"
+            :aria-pressed="state.selectedCategory === item"
             @click="toggleCategory(item)"
           >{{ item }}</button>
           <button
@@ -431,7 +431,7 @@ function onCoverError(event) {
   /* 文档起点 = flip-travel；再用 translate 与封面底边同步上推，全程无空白带 */
   margin-top: -100dvh;
   min-height: 100dvh;
-  /* 顶出固定顶栏高度，避免「赴场」logo 压到 RUSH / 限时开售 */
+  /* 顶出固定顶栏高度，避免 Gofun logo 压到 RUSH / 限时开售 */
   padding: calc(68px + 20px) 3.2vw 48px;
   background: var(--paper);
   transform: translate3d(

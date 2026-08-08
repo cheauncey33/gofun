@@ -1,6 +1,6 @@
-# 赴场票务 · 面试材料防偏离总控
+# Gofun 票务 · 面试材料防偏离总控
 
-> 仓库名仍为 `WHU_Snack_GO`，但 **当前运行代码是赴场（Fuchang）多主办方活动票务**，零食电商链路已下线。面试以本文件 + `docs/FUCHANG_INTERVIEW.md` 为准。
+> 仓库名仍为 `WHU_Snack_GO`，但 **当前运行代码是 Gofun 多主办方活动票务**，零食电商链路已下线。面试以本文件 + `docs/FUCHANG_INTERVIEW.md` 为准。
 
 ## 依据来源
 
@@ -14,9 +14,9 @@
 
 ## 项目真实边界
 
-产品：**赴场** — 多主办方活动票务平台（无选座第一阶段）。
+产品：**Gofun** — 多主办方活动票务平台（无选座第一阶段）。
 
-核心能力：活动发现、普通购票、限时开售（rush）、余额支付、超时取消、电子票签发与核销。
+核心能力：活动发现、普通购票、限时开售（rush）、支付沙箱回调、超时取消、电子票签发与核销。
 
 真实技术栈：Go / Gin / GORM / MySQL / Redis / RabbitMQ / Snowflake / Prometheus / Vue 3。
 
@@ -30,7 +30,7 @@
 4. 同步写 MySQL：`ticket_order(status=queued)` + `ticket_order_outbox`（本地消息表/outbox）。
 5. Outbox publisher 异步投递 RabbitMQ；接口返回 `queued`。
 6. Consumer：`ProcessOrderTask` → 条件 UPDATE 扣 MySQL 票额 → `pending_payment`。
-7. 支付 / 超时：条件 UPDATE + 余额原子扣减 / 释放票额。
+7. 支付 / 超时：支付单 + provider 回调幂等出票；超时条件取消并释放票额。
 
 ### 限时开售 `POST /rush-sales/:id/execute`
 
@@ -57,7 +57,7 @@
 
 ## 重要：当前系统 **没有** 用户级 Redis 分布式锁
 
-旧零食代码曾有 `lock:order:user:{userId}`，**赴场购票/抢票未使用 `WithLock` 用户锁**。
+旧零食代码曾有 `lock:order:user:{userId}`，**Gofun 购票/抢票未使用 `WithLock` 用户锁**。
 
 并发控制靠：
 
@@ -78,7 +78,7 @@
 - Redis Cluster / Redlock 生产级热点治理（分桶是已落地的拆 key）。
 - 完整分布式事务 / Seata / TCC。
 - 真实生产千万 QPS（只能说压测脚本 + 1500 并发证据）。
-- 旧零食：商品列表缓存、秒杀 token、WebSocket 订单推送、用户锁 — **均已移除**。
+- 旧零食的商品列表缓存、秒杀 token、订单推送和用户锁均已移除；当前已按票务订单状态机重新实现 WebSocket 推送。
 
 ## 压测可引用数据（1500 并发单热点）
 

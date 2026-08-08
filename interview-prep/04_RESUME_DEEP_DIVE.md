@@ -3,7 +3,7 @@
 ## 依据来源
 
 - 简历 PDF: `张雨豪-19826563920-武汉大学-暑期求职.pdf`
-- 项目描述模板: `RESUME_TEMPLATE.md`
+- 当前票务系统文档: `docs/FUCHANG_INTERVIEW.md`
 - 下单链路: `backend/service/order_service.go`
 - 秒杀链路: `backend/service/seckill_service.go`
 - MQ 消费: `backend/service/order_consumer.go`

@@ -120,7 +120,7 @@ func (s *TicketOrderService) PublishPaymentTimeout(ctx context.Context, orderID,
 	}
 	defer ch.Close()
 
-	ctx, span := otel.Tracer("fuchang-ticketing/order").Start(
+	ctx, span := otel.Tracer("gofun-ticketing/order").Start(
 		ctx,
 		"ticket.payment_timeout.publish",
 		trace.WithSpanKind(trace.SpanKindProducer),
@@ -225,7 +225,7 @@ func (s *TicketOrderService) consumePaymentTimeoutLoop(ctx context.Context, work
 				continue
 			}
 			timeoutCtx := apptelemetry.ExtractAMQP(ctx, d.Headers, msg.TraceContext)
-			timeoutCtx, span := otel.Tracer("fuchang-ticketing/order").Start(
+			timeoutCtx, span := otel.Tracer("gofun-ticketing/order").Start(
 				timeoutCtx,
 				"ticket.payment_timeout.consume",
 				trace.WithSpanKind(trace.SpanKindConsumer),

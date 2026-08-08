@@ -1,13 +1,13 @@
 package service
 
 import (
-	"gofun/container"
-	"gofun/models"
-	"gofun/repository"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gofun/container"
+	"gofun/models"
+	"gofun/repository"
 	"strconv"
 	"strings"
 	"time"
@@ -19,21 +19,21 @@ import (
 )
 
 var (
-	ErrCommentNotFound   = errors.New("评论不存在")
-	ErrCommentForbidden  = errors.New("无权操作该评论")
-	ErrCommentInvalid    = errors.New("评论内容不合法")
-	ErrCommentRateLimited = errors.New("评论过于频繁，请稍后再试")
-	ErrCommentAlreadyLiked = errors.New("已经点过赞了")
+	ErrCommentNotFound          = errors.New("评论不存在")
+	ErrCommentForbidden         = errors.New("无权操作该评论")
+	ErrCommentInvalid           = errors.New("评论内容不合法")
+	ErrCommentRateLimited       = errors.New("评论过于频繁，请稍后再试")
+	ErrCommentAlreadyLiked      = errors.New("已经点过赞了")
 	ErrCommentEventNotPublished = errors.New("活动不存在或未发布")
 )
 
 const (
-	commentListCacheLimit = 50
-	commentListCacheTTL   = 3 * time.Minute
-	commentEmptyCacheTTL  = 30 * time.Second
-	commentRateLimitMax   = 10
+	commentListCacheLimit  = 50
+	commentListCacheTTL    = 3 * time.Minute
+	commentEmptyCacheTTL   = 30 * time.Second
+	commentRateLimitMax    = 10
 	commentRateLimitWindow = time.Minute
-	commentLikeFlushEvery = 20 * time.Second
+	commentLikeFlushEvery  = 20 * time.Second
 )
 
 type EventCommentView struct {
@@ -48,11 +48,11 @@ type EventCommentView struct {
 }
 
 type EventCommentService struct {
-	repo     repository.EventCommentRepository
-	catalog  repository.TicketCatalogRepository
-	db       *gorm.DB
-	rdb      *redis.Client
-	node     *snowflake.Node
+	repo    repository.EventCommentRepository
+	catalog repository.TicketCatalogRepository
+	db      *gorm.DB
+	rdb     *redis.Client
+	node    *snowflake.Node
 }
 
 func NewEventCommentService(c *container.Container) *EventCommentService {
@@ -347,7 +347,7 @@ func normalizeCommentContent(content string) (string, error) {
 }
 
 func toCommentView(item models.EventComment, viewerID int64) EventCommentView {
-	username := "赴场用户"
+	username := "Gofun 用户"
 	if item.User != nil && item.User.Username != "" {
 		username = item.User.Username
 	}

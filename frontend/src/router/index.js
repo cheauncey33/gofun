@@ -40,7 +40,7 @@ router.beforeEach((to, from, next) => {
     next('/')
     return
   }
-  document.title = `${to.meta.title || '发现活动'} · 赴场`
+  document.title = `${to.meta.title || '发现活动'} · Gofun`
   next()
 })
 

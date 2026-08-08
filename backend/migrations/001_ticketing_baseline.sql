@@ -1,4 +1,4 @@
--- 赴场票务 V1 数据库基线。
+-- Gofun 票务 V1 数据库基线。
 -- 该文件冻结主办方、活动、场次、票档、订单和限时开售的最小运行结构。
 
 CREATE TABLE IF NOT EXISTS `dormitory` (

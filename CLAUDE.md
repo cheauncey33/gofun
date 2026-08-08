@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**赴场（Fuchang）** — event ticketing platform (Go + Vue 3). Normal purchase and rush-sale execute use Redis quota pre-deduct, transactional outbox, and RabbitMQ async order finalization. See `docs/FUCHANG_PHASE1.md` for scope; `interview-prep/00_CONTEXT_LOCK.md` for interview facts.
+**Gofun** — event ticketing platform (Go + Vue 3). Normal purchase and rush-sale execute use Redis quota pre-deduct, transactional outbox, and RabbitMQ async order finalization. See `docs/FUCHANG_PHASE1.md` for scope; `interview-prep/00_CONTEXT_LOCK.md` for interview facts.
 
 > Legacy snack-commerce architecture below is **outdated**; prefer `backend/main.go` and ticketing services when editing docs.
 

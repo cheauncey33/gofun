@@ -1,11 +1,17 @@
 import { computed, reactive, watch } from 'vue'
 
-const STORAGE_CITY = 'fuchang_city'
+const STORAGE_CITY = 'gofun_city'
+const LEGACY_STORAGE_CITY = 'fuchang_city'
+
+const storedCity = localStorage.getItem(STORAGE_CITY) || localStorage.getItem(LEGACY_STORAGE_CITY) || ''
+if (storedCity && !localStorage.getItem(STORAGE_CITY)) {
+  localStorage.setItem(STORAGE_CITY, storedCity)
+}
 
 const state = reactive({
-  city: localStorage.getItem(STORAGE_CITY) || '',
+  city: storedCity,
   keyword: '',
-  selectedCategories: [],
+  selectedCategory: '',
   cities: [],
   categories: [],
 })
@@ -20,7 +26,7 @@ watch(
 
 export function useDiscovery() {
   const hasActiveFilters = computed(
-    () => !!(state.city || state.keyword || state.selectedCategories.length),
+    () => !!(state.city || state.keyword || state.selectedCategory),
   )
 
   function setCity(city) {
@@ -32,28 +38,19 @@ export function useDiscovery() {
   }
 
   function toggleCategory(category) {
-    if (!category) {
-      state.selectedCategories = []
-      return
-    }
-    const idx = state.selectedCategories.indexOf(category)
-    if (idx >= 0) {
-      state.selectedCategories.splice(idx, 1)
-    } else {
-      state.selectedCategories.push(category)
-    }
+    state.selectedCategory = category || ''
   }
 
   function clearFilters() {
     state.keyword = ''
-    state.selectedCategories = []
+    state.selectedCategory = ''
   }
 
   function eventQuery(extra = {}) {
     const params = { page: 1, page_size: 24, ...extra }
     if (state.city) params.city = state.city
-    if (state.selectedCategories.length) {
-      params.category = state.selectedCategories.join(',')
+    if (state.selectedCategory) {
+      params.category = state.selectedCategory
     }
     if (state.keyword) params.keyword = state.keyword
     return params
