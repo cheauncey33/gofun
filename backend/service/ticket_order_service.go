@@ -1,15 +1,17 @@
 package service
 
 import (
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"gofun/config"
 	"gofun/container"
 	"gofun/metrics"
 	"gofun/models"
-	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"errors"
-	"fmt"
+	"gofun/pkg/ws"
 	"log"
 	"regexp"
 	"strconv"
@@ -123,10 +125,32 @@ type TicketOrderService struct {
 	outboxBuffer       *outboxWriteBuffer
 	outboxRecoverEvery time.Duration
 	inventory          InventoryBucketSettings
+	orderEvents        *ws.Hub
 }
 
 func (s *TicketOrderService) ConfigureInventory(cfg config.InventoryConfig) {
 	s.inventory = NewInventoryBucketSettings(cfg)
+}
+
+func (s *TicketOrderService) ConfigureOrderEvents(hub *ws.Hub) {
+	s.orderEvents = hub
+}
+
+func (s *TicketOrderService) publishOrderEvent(
+	userID, orderID int64,
+	event string,
+	status models.TicketOrderStatus,
+	message string,
+) {
+	if s.orderEvents == nil {
+		return
+	}
+	s.orderEvents.Publish(userID, ws.Event{
+		Event:   event,
+		OrderID: orderID,
+		Status:  string(status),
+		Message: message,
+	})
 }
 
 // EnsureInventoryBuckets 存量票档/活动幂等拆桶；开关关闭时 no-op。
@@ -160,11 +184,11 @@ func (s *TicketOrderService) EnsureInventoryBuckets(ctx context.Context) error {
 	return nil
 }
 
-func NewTicketOrderService(c *container.Container, timeoutMinutes int) *TicketOrderService {
+func NewTicketOrderService(c *container.Container, timeoutMinutes int, paymentCfg config.PaymentConfig) *TicketOrderService {
 	if timeoutMinutes <= 0 {
 		timeoutMinutes = 15
 	}
-	return &TicketOrderService{
+	s := &TicketOrderService{
 		db:               c.DB,
 		rdb:              c.RDB,
 		node:             c.SnowflakeNode,
@@ -173,12 +197,16 @@ func NewTicketOrderService(c *container.Container, timeoutMinutes int) *TicketOr
 		mqQueueType:      c.MQQueueType,
 		localCache:       c.LocalCache,
 		paymentTimeout:   time.Duration(timeoutMinutes) * time.Minute,
-		payment:          NewBalancePaymentGateway(),
+		payment:          NewSandboxPaymentGateway(paymentCfg.SandboxSecret, time.Duration(paymentCfg.SandboxCallbackDelayMS)*time.Millisecond),
 		credentialSigner: NewTicketCredentialSigner(c.TicketQRSecrets...),
 		identityHashKey:  append([]byte(nil), c.TicketQRSecret...),
 		scannerInterval:  2 * time.Minute,
 		outboxNotify:     make(chan struct{}, 1),
 	}
+	if gateway, ok := s.payment.(*SandboxPaymentGateway); ok {
+		gateway.SetCallback(s.HandlePaymentCallback)
+	}
+	return s
 }
 
 func (s *TicketOrderService) WarmTicketQuota(ctx context.Context) error {
@@ -511,7 +539,7 @@ func (s *TicketOrderService) ProcessOrderTask(
 	ctx context.Context,
 	message TicketOrderMessage,
 ) error {
-	ctx, span := otel.Tracer("fuchang-ticketing/order").Start(
+	ctx, span := otel.Tracer("gofun-ticketing/order").Start(
 		ctx,
 		"ticket.order.finalize",
 		trace.WithAttributes(
@@ -625,6 +653,13 @@ func (s *TicketOrderService) ProcessOrderTask(
 		if pubErr := s.PublishPaymentTimeout(ctx, pendingOrderID, pendingUserID); pubErr != nil {
 			log.Printf("ticket payment timeout publish order %d: %v", pendingOrderID, pubErr)
 		}
+		s.publishOrderEvent(
+			pendingUserID,
+			pendingOrderID,
+			"pending_payment",
+			models.TicketOrderStatusPendingPayment,
+			"票额确认成功，请在有效期内完成支付",
+		)
 	}
 	return nil
 }
@@ -687,6 +722,13 @@ func (s *TicketOrderService) FinalizeFailedMessage(
 			)
 			_, _ = pipe.Exec(ctx)
 		}
+		s.publishOrderEvent(
+			message.UserID,
+			message.OrderID,
+			"failed",
+			models.TicketOrderStatusFailed,
+			"订单确认失败，预占票额已释放",
+		)
 	}
 }
 
@@ -735,39 +777,225 @@ func (s *TicketOrderService) ListOrders(
 func (s *TicketOrderService) PayOrder(
 	ctx context.Context,
 	userID, orderID int64,
-) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var order models.TicketOrder
+	scenario string,
+) (*PaymentIntent, error) {
+	var order models.TicketOrder
+	if err := s.db.WithContext(ctx).Preload("Items").
+		Where("id = ? AND user_id = ?", orderID, userID).
+		First(&order).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTicketOrderNotFound
+		}
+		return nil, err
+	}
+	if order.Status != models.TicketOrderStatusPendingPayment || time.Now().After(order.ExpiresAt) {
+		return nil, ErrTicketOrderState
+	}
+	if len(order.Items) == 0 {
+		return nil, fmt.Errorf("订单明细异常")
+	}
+
+	// Retry an unfinished payment instead of creating a second provider charge.
+	var pending models.PaymentTransaction
+	if err := s.db.WithContext(ctx).
+		Where("order_id = ? AND status = ?", orderID, models.PaymentTransactionPending).
+		Order("id DESC").First(&pending).Error; err == nil {
+		return &PaymentIntent{
+			PaymentNo: pending.PaymentNo, Provider: pending.Provider,
+			Status: string(pending.Status), AmountCents: pending.AmountCents,
+			ExpiresAt: pending.ExpiresAt,
+		}, nil
+	}
+
+	intent, err := s.payment.CreatePayment(ctx, PaymentCreateRequest{
+		OrderID: order.ID, UserID: userID, AmountCents: order.TotalAmountCents,
+		ExpiresAt: order.ExpiresAt, Scenario: scenario,
+	})
+	if err != nil {
+		return nil, err
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var locked models.TicketOrder
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Preload("Items").
-			Where("id = ? AND user_id = ?", orderID, userID).
-			First(&order).Error; err != nil {
+			Where("id = ? AND user_id = ?", orderID, userID).First(&locked).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrTicketOrderNotFound
 			}
 			return err
 		}
-		if order.Status != models.TicketOrderStatusPendingPayment ||
-			time.Now().After(order.ExpiresAt) {
+		if locked.Status != models.TicketOrderStatusPendingPayment || time.Now().After(locked.ExpiresAt) {
 			return ErrTicketOrderState
 		}
-		if len(order.Items) == 0 {
-			return fmt.Errorf("订单明细异常")
+		var active models.PaymentTransaction
+		if err := tx.Where("order_id = ? AND status = ?", orderID, models.PaymentTransactionPending).
+			First(&active).Error; err == nil {
+			intent.PaymentNo = active.PaymentNo
+			intent.Provider = active.Provider
+			intent.Status = string(active.Status)
+			intent.AmountCents = active.AmountCents
+			intent.ExpiresAt = active.ExpiresAt
+			return nil
 		}
-		if err := s.payment.Debit(ctx, tx, userID, order.TotalAmountCents); err != nil {
+		return tx.Create(&models.PaymentTransaction{
+			PaymentNo: intent.PaymentNo, OrderID: orderID, UserID: userID,
+			Provider: intent.Provider, ProviderPaymentID: intent.PaymentNo,
+			AmountCents: intent.AmountCents, Status: models.PaymentTransactionPending,
+			Scenario: normalizePaymentScenario(scenario), ExpiresAt: order.ExpiresAt,
+		}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.payment.ScheduleCallback(intent.PaymentNo, scenario)
+	return intent, nil
+}
+
+// HandlePaymentCallback is the same state transition a real provider webhook
+// would invoke. The callback is authenticated and idempotent before tickets
+// are issued.
+func (s *TicketOrderService) HandlePaymentCallback(
+	ctx context.Context,
+	notification PaymentNotification,
+) error {
+	startedAt := time.Now()
+	callbackResult := "error"
+	providerMetric := notification.Provider
+	if providerMetric != "sandbox" {
+		providerMetric = "unknown"
+	}
+	defer func() {
+		metrics.PaymentCallbackDuration.WithLabelValues(providerMetric).Observe(time.Since(startedAt).Seconds())
+		metrics.PaymentCallbacksTotal.WithLabelValues(providerMetric, callbackResult).Inc()
+	}()
+	if !s.payment.VerifyNotification(notification) {
+		callbackResult = "signature_invalid"
+		return ErrPaymentSignature
+	}
+	payload, _ := json.Marshal(notification)
+	var paid bool
+	var eventUserID, eventOrderID int64
+	var eventName, eventMessage string
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var payment models.PaymentTransaction
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("payment_no = ?", notification.PaymentNo).First(&payment).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrPaymentNotFound
+			}
 			return err
+		}
+		if payment.AmountCents != notification.AmountCents {
+			return ErrPaymentAmountMismatch
+		}
+		if payment.Provider != notification.Provider {
+			return ErrPaymentInvalidNotification
+		}
+		var callback models.PaymentCallback
+		if err := tx.Where("provider_event_id = ?", notification.ProviderEventID).
+			First(&callback).Error; err == nil {
+			return nil
+		}
+		callback = models.PaymentCallback{
+			ProviderEventID: notification.ProviderEventID,
+			PaymentNo:       notification.PaymentNo,
+			Provider:        notification.Provider,
+			Status:          notification.Status,
+			AmountCents:     notification.AmountCents,
+			Payload:         string(payload),
+		}
+		if err := tx.Create(&callback).Error; err != nil {
+			return err
+		}
+		if payment.Status != models.PaymentTransactionPending {
+			return nil
+		}
+		if notification.Status != "success" {
+			reason := notification.FailureReason
+			if reason == "" {
+				reason = "payment provider rejected the transaction"
+			}
+			if err := tx.Model(&models.PaymentTransaction{}).Where("id = ?", payment.ID).
+				Updates(map[string]interface{}{
+					"status":         models.PaymentTransactionFailed,
+					"failure_reason": reason,
+				}).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&models.TicketOrder{}).Where("id = ? AND status = ?", payment.OrderID, models.TicketOrderStatusPendingPayment).
+				Update("payment_status", models.PaymentStatusFailed).Error; err != nil {
+				return err
+			}
+			eventUserID, eventOrderID = payment.UserID, payment.OrderID
+			eventName, eventMessage = "payment_failed", reason
+			now := time.Now()
+			return tx.Model(&models.PaymentCallback{}).Where("id = ?", callback.ID).
+				Update("processed_at", &now).Error
+		}
+
+		var order models.TicketOrder
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Preload("Items").Where("id = ?", payment.OrderID).First(&order).Error; err != nil {
+			return err
+		}
+		if order.Status != models.TicketOrderStatusPendingPayment || time.Now().After(order.ExpiresAt) {
+			if err := tx.Model(&models.PaymentTransaction{}).Where("id = ?", payment.ID).
+				Update("status", models.PaymentTransactionClosed).Error; err != nil {
+				return err
+			}
+			now := time.Now()
+			return tx.Model(&models.PaymentCallback{}).Where("id = ?", callback.ID).
+				Update("processed_at", &now).Error
 		}
 		now := time.Now()
 		if err := s.issueAdmissionTickets(tx, &order, now); err != nil {
 			return err
 		}
-		return tx.Model(&models.TicketOrder{}).Where("id = ?", orderID).
+		if err := tx.Model(&models.TicketOrder{}).Where("id = ?", order.ID).
 			Updates(map[string]interface{}{
 				"status":         models.TicketOrderStatusPaid,
 				"payment_status": models.PaymentStatusPaid,
 				"paid_at":        &now,
-			}).Error
+			}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.PaymentTransaction{}).Where("id = ?", payment.ID).
+			Updates(map[string]interface{}{
+				"status":  models.PaymentTransactionSuccess,
+				"paid_at": &now,
+			}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.PaymentCallback{}).Where("id = ?", callback.ID).
+			Update("processed_at", &now).Error; err != nil {
+			return err
+		}
+		paid = true
+		eventUserID, eventOrderID = order.UserID, order.ID
+		eventName, eventMessage = "paid", "支付成功，电子票已签发"
+		return nil
 	})
+	if err == nil && eventName != "" {
+		if paid {
+			callbackResult = "success"
+		} else {
+			callbackResult = "failed"
+		}
+		status := models.TicketOrderStatusPendingPayment
+		if paid {
+			status = models.TicketOrderStatusPaid
+		}
+		s.publishOrderEvent(eventUserID, eventOrderID, eventName, status, eventMessage)
+	}
+	if err == nil && eventName == "" {
+		callbackResult = "duplicate_or_ignored"
+	}
+	if errors.Is(err, ErrPaymentAmountMismatch) {
+		callbackResult = "amount_mismatch"
+	}
+	if errors.Is(err, ErrPaymentNotFound) {
+		callbackResult = "not_found"
+	}
+	return err
 }
 
 type BatchRefundResult struct {
@@ -835,9 +1063,23 @@ func (s *TicketOrderService) CancelOrder(
 	var tierID int64
 	var quantity int
 	var refundCents int64
+	var refundPaymentNo string
 	var rushCampaignID *int64
 	var stockBucketNo *int
 	var rushBucketNo *int
+	var paidOrder models.TicketOrder
+	if err := s.db.WithContext(ctx).Where("id = ? AND user_id = ?", orderID, userID).
+		First(&paidOrder).Error; err == nil && paidOrder.Status.HasBeenPaid() {
+		var payment models.PaymentTransaction
+		if err := s.db.WithContext(ctx).Where("order_id = ? AND status = ?", orderID, models.PaymentTransactionSuccess).
+			Order("id DESC").First(&payment).Error; err != nil {
+			return ErrPaymentNotFound
+		}
+		if err := s.payment.Refund(ctx, payment.PaymentNo, paidOrder.TotalAmountCents); err != nil {
+			return err
+		}
+		refundPaymentNo = payment.PaymentNo
+	}
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var order models.TicketOrder
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -869,8 +1111,13 @@ func (s *TicketOrderService) CancelOrder(
 				return ErrTicketAlreadyUsed
 			}
 			refundCents = order.TotalAmountCents
-			if err := s.payment.Credit(ctx, tx, userID, refundCents); err != nil {
-				return err
+			if refundPaymentNo == "" {
+				var payment models.PaymentTransaction
+				if err := tx.Where("order_id = ? AND status = ?", orderID, models.PaymentTransactionSuccess).
+					Order("id DESC").First(&payment).Error; err != nil {
+					return ErrPaymentNotFound
+				}
+				refundPaymentNo = payment.PaymentNo
 			}
 		}
 		if s.inventory.Enabled {
@@ -900,6 +1147,15 @@ func (s *TicketOrderService) CancelOrder(
 		}
 		now := time.Now()
 		if refundCents > 0 {
+			now := time.Now()
+			if err := tx.Model(&models.PaymentTransaction{}).
+				Where("payment_no = ?", refundPaymentNo).
+				Updates(map[string]interface{}{
+					"status":      models.PaymentTransactionRefunded,
+					"refunded_at": &now,
+				}).Error; err != nil {
+				return err
+			}
 			if err := tx.Model(&models.AdmissionTicket{}).
 				Where("order_id = ? AND status = ?", order.ID, models.AdmissionTicketStatusValid).
 				Updates(map[string]interface{}{
@@ -938,6 +1194,17 @@ func (s *TicketOrderService) CancelOrder(
 			)
 			_, _ = pipe.Exec(ctx)
 		}
+		message := "订单已取消，票额已释放"
+		if refundCents > 0 {
+			message = "退款完成，电子票已作废"
+		}
+		s.publishOrderEvent(
+			userID,
+			orderID,
+			"cancelled",
+			models.TicketOrderStatusCancelled,
+			message,
+		)
 	}
 	return err
 }
@@ -1135,6 +1402,11 @@ func (s *TicketOrderService) cancelPendingPaymentOnly(
 		if result.RowsAffected == 0 {
 			return ErrTicketOrderState
 		}
+		if err := tx.Model(&models.PaymentTransaction{}).
+			Where("order_id = ? AND status = ?", orderID, models.PaymentTransactionPending).
+			Update("status", models.PaymentTransactionClosed).Error; err != nil {
+			return err
+		}
 		return nil
 	})
 	if err == nil {
@@ -1153,6 +1425,13 @@ func (s *TicketOrderService) cancelPendingPaymentOnly(
 			)
 			_, _ = pipe.Exec(ctx)
 		}
+		s.publishOrderEvent(
+			userID,
+			orderID,
+			"timeout_cancelled",
+			models.TicketOrderStatusCancelled,
+			"订单支付超时，票额已自动释放",
+		)
 	}
 	return err
 }

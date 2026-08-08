@@ -44,6 +44,31 @@ var (
 		},
 	)
 
+	PaymentCallbacksTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "payment_callbacks_total",
+			Help: "Payment provider callbacks handled by result",
+		},
+		[]string{"provider", "result"},
+	)
+
+	PaymentCallbackDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "payment_callback_duration_seconds",
+			Help:    "Payment provider callback processing latency",
+			Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5},
+		},
+		[]string{"provider"},
+	)
+
+	TicketVerificationsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "ticket_verifications_total",
+			Help: "Ticket verification attempts by result",
+		},
+		[]string{"result"},
+	)
+
 	ActiveHTTPConnections = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "active_http_connections",
@@ -125,6 +150,29 @@ var (
 			Name: "inventory_bucket_fallback_total",
 			Help: "Orders restored without stock_bucket_no; used userID mod N fallback",
 		},
+	)
+
+	MySQLInnoDBRowLockWaits = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "mysql_innodb_row_lock_waits_total",
+			Help: "Current MySQL Innodb_row_lock_waits global status value",
+		},
+	)
+
+	MQQueueReadyMessages = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "mq_queue_ready_messages",
+			Help: "Current RabbitMQ messages ready for delivery",
+		},
+		[]string{"queue"},
+	)
+
+	MQQueueConsumers = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "mq_queue_consumers",
+			Help: "Current RabbitMQ consumers attached to the queue",
+		},
+		[]string{"queue"},
 	)
 )
 

@@ -1,54 +1,216 @@
 package service
 
 import (
-	"gofun/models"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"strings"
+	"sync"
+	"time"
 
-	"gorm.io/gorm"
+	"github.com/google/uuid"
 )
 
-// PaymentGateway 抽象票务余额扣款/退款，默认走站内 balance_cents。
-// 后续可替换为真实渠道适配器，而不改动订单状态机。
+var (
+	ErrPaymentSignature           = errors.New("payment callback signature invalid")
+	ErrPaymentNotFound            = errors.New("payment transaction not found")
+	ErrPaymentAmountMismatch      = errors.New("payment amount mismatch")
+	ErrPaymentNotRefundable       = errors.New("payment is not refundable")
+	ErrPaymentInvalidNotification = errors.New("payment callback notification invalid")
+)
+
+type PaymentCreateRequest struct {
+	OrderID     int64
+	UserID      int64
+	AmountCents int64
+	ExpiresAt   time.Time
+	Scenario    string
+}
+
+type PaymentIntent struct {
+	PaymentNo   string    `json:"payment_no"`
+	Provider    string    `json:"provider"`
+	Status      string    `json:"status"`
+	AmountCents int64     `json:"amount_cents"`
+	ExpiresAt   time.Time `json:"expires_at"`
+}
+
+type PaymentNotification struct {
+	ProviderEventID string `json:"provider_event_id"`
+	PaymentNo       string `json:"payment_no"`
+	Provider        string `json:"provider"`
+	Status          string `json:"status"`
+	AmountCents     int64  `json:"amount_cents"`
+	FailureReason   string `json:"failure_reason,omitempty"`
+	Signature       string `json:"signature"`
+}
+
+// PaymentCallbackHandler is deliberately independent from the provider. A
+// real Alipay/WeChat adapter can call the same handler from its HTTP webhook.
+type PaymentCallbackHandler func(context.Context, PaymentNotification) error
+
 type PaymentGateway interface {
-	Debit(ctx context.Context, tx *gorm.DB, userID, amountCents int64) error
-	Credit(ctx context.Context, tx *gorm.DB, userID, amountCents int64) error
+	CreatePayment(context.Context, PaymentCreateRequest) (*PaymentIntent, error)
+	ScheduleCallback(paymentNo, scenario string)
+	Refund(ctx context.Context, paymentNo string, amountCents int64) error
+	VerifyNotification(PaymentNotification) bool
 }
 
-type BalancePaymentGateway struct{}
-
-func NewBalancePaymentGateway() *BalancePaymentGateway {
-	return &BalancePaymentGateway{}
+type sandboxPaymentState struct {
+	OrderID     int64
+	UserID      int64
+	AmountCents int64
+	Status      string
 }
 
-func (g *BalancePaymentGateway) Debit(
-	ctx context.Context,
-	tx *gorm.DB,
-	userID, amountCents int64,
-) error {
-	if amountCents <= 0 {
-		return fmt.Errorf("%w: 扣款金额无效", ErrInvalidTicketCatalog)
+// SandboxPaymentGateway emulates an external payment provider. It owns only
+// provider-side transaction state in memory; it never reads or changes users'
+// balance_cents in the ticketing database.
+type SandboxPaymentGateway struct {
+	mu       sync.Mutex
+	secret   []byte
+	delay    time.Duration
+	provider string
+	byNo     map[string]sandboxPaymentState
+	byOrder  map[int64]string
+	callback PaymentCallbackHandler
+}
+
+func NewSandboxPaymentGateway(secret string, delay time.Duration) *SandboxPaymentGateway {
+	if strings.TrimSpace(secret) == "" {
+		// An omitted secret is ephemeral, so callbacks from a previous process
+		// cannot be replayed after restart.
+		secret = uuid.NewString()
 	}
-	result := tx.WithContext(ctx).Model(&models.User{}).
-		Where("id = ? AND balance_cents >= ?", userID, amountCents).
-		Update("balance_cents", gorm.Expr("balance_cents - ?", amountCents))
-	if result.Error != nil {
-		return result.Error
+	if delay <= 0 {
+		delay = 500 * time.Millisecond
 	}
-	if result.RowsAffected == 0 {
-		return ErrTicketBalance
+	return &SandboxPaymentGateway{
+		secret:   []byte(secret),
+		delay:    delay,
+		provider: "sandbox",
+		byNo:     make(map[string]sandboxPaymentState),
+		byOrder:  make(map[int64]string),
 	}
+}
+
+func (g *SandboxPaymentGateway) SetCallback(callback PaymentCallbackHandler) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.callback = callback
+}
+
+func (g *SandboxPaymentGateway) CreatePayment(
+	_ context.Context,
+	req PaymentCreateRequest,
+) (*PaymentIntent, error) {
+	if req.OrderID <= 0 || req.UserID <= 0 || req.AmountCents <= 0 {
+		return nil, fmt.Errorf("invalid payment request")
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if paymentNo := g.byOrder[req.OrderID]; paymentNo != "" {
+		if state, ok := g.byNo[paymentNo]; ok && state.Status == "pending" {
+			return &PaymentIntent{
+				PaymentNo: paymentNo, Provider: g.provider, Status: state.Status,
+				AmountCents: state.AmountCents, ExpiresAt: req.ExpiresAt,
+			}, nil
+		}
+	}
+	paymentNo := "sandbox_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	g.byNo[paymentNo] = sandboxPaymentState{
+		OrderID: req.OrderID, UserID: req.UserID,
+		AmountCents: req.AmountCents, Status: "pending",
+	}
+	g.byOrder[req.OrderID] = paymentNo
+	return &PaymentIntent{
+		PaymentNo: paymentNo, Provider: g.provider, Status: "pending",
+		AmountCents: req.AmountCents, ExpiresAt: req.ExpiresAt,
+	}, nil
+}
+
+func normalizePaymentScenario(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "failed", "timeout", "manual":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "success"
+	}
+}
+
+func (g *SandboxPaymentGateway) ScheduleCallback(paymentNo, scenario string) {
+	scenario = normalizePaymentScenario(scenario)
+	if scenario == "timeout" || scenario == "manual" {
+		return
+	}
+	time.AfterFunc(g.delay, func() {
+		g.emitCallback(paymentNo, scenario)
+	})
+}
+
+func (g *SandboxPaymentGateway) emitCallback(paymentNo, scenario string) {
+	g.mu.Lock()
+	state, ok := g.byNo[paymentNo]
+	callback := g.callback
+	if !ok || state.Status != "pending" || callback == nil {
+		g.mu.Unlock()
+		return
+	}
+	status := "success"
+	reason := ""
+	if scenario == "failed" {
+		status = "failed"
+		reason = "sandbox simulated payment failure"
+	}
+	state.Status = status
+	g.byNo[paymentNo] = state
+	eventID := "sandbox_evt_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	notification := PaymentNotification{
+		ProviderEventID: eventID, PaymentNo: paymentNo, Provider: g.provider,
+		Status: status, AmountCents: state.AmountCents, FailureReason: reason,
+	}
+	notification.Signature = g.sign(notification)
+	g.mu.Unlock()
+	_ = callback(context.Background(), notification)
+}
+
+func (g *SandboxPaymentGateway) Refund(_ context.Context, paymentNo string, amountCents int64) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	state, ok := g.byNo[paymentNo]
+	if !ok {
+		return ErrPaymentNotFound
+	}
+	if state.AmountCents != amountCents {
+		return ErrPaymentAmountMismatch
+	}
+	if state.Status == "refunded" {
+		return nil
+	}
+	if state.Status != "success" {
+		return ErrPaymentNotRefundable
+	}
+	state.Status = "refunded"
+	g.byNo[paymentNo] = state
 	return nil
 }
 
-func (g *BalancePaymentGateway) Credit(
-	ctx context.Context,
-	tx *gorm.DB,
-	userID, amountCents int64,
-) error {
-	if amountCents <= 0 {
-		return nil
+func (g *SandboxPaymentGateway) VerifyNotification(notification PaymentNotification) bool {
+	if notification.Provider != g.provider || notification.ProviderEventID == "" ||
+		notification.PaymentNo == "" || notification.AmountCents <= 0 ||
+		(notification.Status != "success" && notification.Status != "failed") {
+		return false
 	}
-	return tx.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).
-		Update("balance_cents", gorm.Expr("balance_cents + ?", amountCents)).Error
+	return hmac.Equal([]byte(g.sign(notification)), []byte(notification.Signature))
+}
+
+func (g *SandboxPaymentGateway) sign(notification PaymentNotification) string {
+	mac := hmac.New(sha256.New, g.secret)
+	fmt.Fprintf(mac, "%s|%s|%s|%s|%d", notification.Provider,
+		notification.ProviderEventID,
+		notification.PaymentNo, notification.Status, notification.AmountCents)
+	return hex.EncodeToString(mac.Sum(nil))
 }

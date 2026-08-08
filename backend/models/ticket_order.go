@@ -23,6 +23,7 @@ type PaymentStatus string
 
 const (
 	PaymentStatusUnpaid    PaymentStatus = "unpaid"
+	PaymentStatusFailed    PaymentStatus = "failed"
 	PaymentStatusPaid      PaymentStatus = "paid"
 	PaymentStatusRefunding PaymentStatus = "refunding"
 	PaymentStatusRefunded  PaymentStatus = "refunded"
@@ -75,6 +76,7 @@ type TicketOrder struct {
 	Items                 []TicketOrderItem     `gorm:"foreignKey:OrderID" json:"items,omitempty"`
 	Attendees             []TicketOrderAttendee `gorm:"foreignKey:OrderID" json:"attendees,omitempty"`
 	Tickets               []AdmissionTicket     `gorm:"foreignKey:OrderID" json:"tickets,omitempty"`
+	Payments              []PaymentTransaction  `gorm:"foreignKey:OrderID" json:"payments,omitempty"`
 }
 
 // IdempotencyKey 只在同一用户内唯一，允许不同用户使用相同的客户端请求键。
@@ -97,6 +99,54 @@ type TicketOrderItem struct {
 
 func (TicketOrderItem) TableName() string {
 	return "ticket_order_item"
+}
+
+type PaymentTransactionStatus string
+
+const (
+	PaymentTransactionPending  PaymentTransactionStatus = "pending"
+	PaymentTransactionSuccess  PaymentTransactionStatus = "success"
+	PaymentTransactionFailed   PaymentTransactionStatus = "failed"
+	PaymentTransactionClosed   PaymentTransactionStatus = "closed"
+	PaymentTransactionRefunded PaymentTransactionStatus = "refunded"
+)
+
+// PaymentTransaction stores the platform-side payment order. It never stores
+// a user's bank or wallet balance; the provider owns that money.
+type PaymentTransaction struct {
+	Base
+	PaymentNo         string                   `gorm:"size:64;uniqueIndex;not null" json:"payment_no"`
+	OrderID           int64                    `gorm:"not null;index" json:"order_id,string"`
+	UserID            int64                    `gorm:"not null;index" json:"user_id,string"`
+	Provider          string                   `gorm:"size:32;not null" json:"provider"`
+	ProviderPaymentID string                   `gorm:"size:128;not null" json:"provider_payment_id"`
+	AmountCents       int64                    `gorm:"not null" json:"amount_cents"`
+	Status            PaymentTransactionStatus `gorm:"size:16;not null;index" json:"status"`
+	Scenario          string                   `gorm:"size:16;not null;default:'success'" json:"scenario"`
+	FailureReason     string                   `gorm:"size:256;not null;default:''" json:"failure_reason"`
+	ExpiresAt         time.Time                `gorm:"not null;index" json:"expires_at"`
+	PaidAt            *time.Time               `json:"paid_at,omitempty"`
+	RefundedAt        *time.Time               `json:"refunded_at,omitempty"`
+}
+
+func (PaymentTransaction) TableName() string {
+	return "payment_transaction"
+}
+
+// PaymentCallback makes provider webhooks auditable and idempotent.
+type PaymentCallback struct {
+	Base
+	ProviderEventID string     `gorm:"size:128;uniqueIndex;not null" json:"provider_event_id"`
+	PaymentNo       string     `gorm:"size:64;index;not null" json:"payment_no"`
+	Provider        string     `gorm:"size:32;not null" json:"provider"`
+	Status          string     `gorm:"size:16;not null" json:"status"`
+	AmountCents     int64      `gorm:"not null" json:"amount_cents"`
+	Payload         string     `gorm:"type:json;not null" json:"-"`
+	ProcessedAt     *time.Time `json:"processed_at,omitempty"`
+}
+
+func (PaymentCallback) TableName() string {
+	return "payment_callback"
 }
 
 // TicketOrderAttendee 是下单时的实名观演人快照。

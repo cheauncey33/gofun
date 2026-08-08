@@ -36,6 +36,12 @@ ticket_qr:
   # 轮换密钥后把旧 secret 放这里，旧二维码仍可验签；新票只用 secret 签发。
   previous_secrets: []
 
+payment:
+  provider: "sandbox"
+  # 生产环境通过 PAYMENT_SANDBOX_SECRET 注入；留空时进程启动生成一次性密钥。
+  sandbox_secret: ""
+  sandbox_callback_delay_ms: 500
+
 snowflake:
   node_id: 1
 
@@ -54,7 +60,7 @@ pprof:
 
 telemetry:
   enabled: false
-  service_name: "fuchang-ticketing"
+  service_name: "gofun-ticketing"
   otlp_endpoint: "127.0.0.1:4317"
   insecure: true
   sample_ratio: 0.05

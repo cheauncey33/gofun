@@ -6,7 +6,6 @@ import api from '../api'
 const route = useRoute()
 const router = useRouter()
 const order = ref(null)
-const user = ref(null)
 const phase = ref('loading')
 const failureReason = ref('')
 const confirmOpen = ref(false)
@@ -14,6 +13,7 @@ const amountConfirmed = ref(false)
 const now = ref(Date.now())
 let clockTimer
 let queueTimer
+let paymentTimer
 
 const money = cents => `¥${((cents || 0) / 100).toFixed(2)}`
 const maskedPhone = computed(() => {
@@ -31,6 +31,10 @@ const countdown = computed(() => {
 function resolvePhase(data) {
   if (data.status === 'queued') return 'queueing'
   if (data.status === 'paid') return 'success'
+  if (data.payment_status === 'failed') {
+    failureReason.value = '支付沙箱返回失败，可重新创建支付单'
+    return 'failure'
+  }
   if (data.status === 'pending_payment') return remainingSeconds.value > 0 ? 'cashier' : 'expired'
   failureReason.value = data.cancel_reason || (data.status === 'cancelled' ? '订单已取消' : '订单创建失败')
   return 'failure'
@@ -57,12 +61,21 @@ function scheduleQueuePoll() {
   queueTimer = setTimeout(() => loadOrder(), 1400)
 }
 
+function schedulePaymentPoll() {
+  clearTimeout(paymentTimer)
+  paymentTimer = setTimeout(async () => {
+    await loadOrder({ preserveUnknown: true })
+    if (phase.value === 'cashier' || phase.value === 'paying') schedulePaymentPoll()
+  }, 800)
+}
+
 async function confirmPayment() {
   confirmOpen.value = false
   phase.value = 'paying'
   try {
     await api.payOrder(order.value.id)
     await loadOrder({ preserveUnknown: true })
+    if (phase.value === 'cashier' || phase.value === 'paying') schedulePaymentPoll()
   } catch (error) {
     const status = error.response?.status
     if (!error.response || status === 408 || status >= 500) {
@@ -79,15 +92,22 @@ async function queryPaymentResult() {
   await loadOrder({ preserveUnknown: true })
 }
 
+function handleOrderStatus(event) {
+  if (String(event.detail?.order_id) !== String(route.params.id)) return
+  loadOrder({ preserveUnknown: true })
+}
+
 onMounted(async () => {
+  window.addEventListener('order:status', handleOrderStatus)
   clockTimer = setInterval(() => { now.value = Date.now() }, 1000)
-  const [, userResult] = await Promise.allSettled([loadOrder(), api.getUserInfo()])
-  if (userResult.status === 'fulfilled') user.value = userResult.value.data
+  await loadOrder()
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('order:status', handleOrderStatus)
   clearInterval(clockTimer)
   clearTimeout(queueTimer)
+  clearTimeout(paymentTimer)
 })
 </script>
 
@@ -127,8 +147,8 @@ onBeforeUnmount(() => {
           <label class="payment-method selected">
             <input checked type="radio" name="payment" />
             <i>¥</i>
-            <span><b>余额支付（演示通道）</b><small>当前为项目演示支付，不代表微信或支付宝已接入。</small></span>
-            <em>可用余额<br /><b>{{ money(user?.balance_cents) }}</b></em>
+            <span><b>支付沙箱（演示通道）</b><small>模拟外部支付机构回调，不读取或扣减 Gofun 账户余额。</small></span>
+            <em>异步回调<br /><b>已启用</b></em>
           </label>
           <div class="payment-method disabled" aria-disabled="true">
             <span class="future-icons">微 / 支</span>
@@ -178,9 +198,9 @@ onBeforeUnmount(() => {
         <button class="close-button" type="button" aria-label="关闭" @click="confirmOpen = false">×</button>
         <h2 id="confirm-title">确认支付</h2>
         <span>应付金额</span><strong>{{ money(order.total_amount_cents) }}</strong>
-        <div><small>支付方式</small><b>余额支付（演示通道）</b></div>
-        <p>确认后将从账户余额中扣款，请勿重复支付。</p>
-        <footer><button class="outline-button" type="button" @click="confirmOpen = false">取消</button><button class="primary-button" type="button" @click="confirmPayment">确认扣款</button></footer>
+        <div><small>支付方式</small><b>支付沙箱（演示通道）</b></div>
+        <p>确认后创建支付单，等待模拟支付机构异步回调；不会扣减 Gofun 账户余额。</p>
+        <footer><button class="outline-button" type="button" @click="confirmOpen = false">取消</button><button class="primary-button" type="button" @click="confirmPayment">创建支付单</button></footer>
       </section>
     </div>
   </main>

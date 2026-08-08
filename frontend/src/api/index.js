@@ -89,7 +89,7 @@ export default {
     }),
   getOrders: (params) => get('/orders', params),
   getOrderDetail: (id) => get(`/orders/${id}`),
-  payOrder: (id) => post(`/orders/${id}/pay`),
+  payOrder: (id, scenario = 'success') => post(`/orders/${id}/pay`, { scenario }),
   cancelOrder: (id, reason) => post(`/orders/${id}/cancel`, { reason }),
 
   // User

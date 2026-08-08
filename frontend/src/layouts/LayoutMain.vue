@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Location, Search, User } from '@element-plus/icons-vue'
 import api from '../api'
 import { useDiscovery } from '../stores/discovery'
+import { connectOrderSocket, disconnectOrderSocket } from '../stores/orderSocket'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,6 +26,7 @@ function updateOverHero() {
 }
 
 function logout() {
+  disconnectOrderSocket()
   localStorage.removeItem('access_token')
   localStorage.removeItem('refresh_token')
   localStorage.removeItem('token')
@@ -58,6 +60,7 @@ watch(() => state.keyword, (value) => {
 onMounted(async () => {
   window.addEventListener('scroll', updateOverHero, { passive: true })
   window.addEventListener('resize', updateOverHero)
+  if (token.value) connectOrderSocket()
   try {
     const res = await api.getCatalogMeta()
     applyMeta(res.data || {})
@@ -67,6 +70,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  disconnectOrderSocket()
   window.removeEventListener('scroll', updateOverHero)
   window.removeEventListener('resize', updateOverHero)
 })
@@ -75,7 +79,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="site-shell" :class="{ 'is-home': route.name === 'Home' }">
     <header class="site-header" :class="{ 'over-hero': overHero, 'home-fixed': route.name === 'Home' }">
-      <router-link class="brand" to="/" aria-label="赴场首页">赴场</router-link>
+      <router-link class="brand" to="/" aria-label="Gofun 首页">Gofun</router-link>
       <el-dropdown trigger="click" @command="selectCity">
         <button class="city-button" type="button">
           <el-icon><Location /></el-icon>
@@ -130,11 +134,10 @@ onBeforeUnmount(() => {
 
     <footer class="site-footer">
       <div>
-        <strong>赴场</strong>
+        <strong>Gofun</strong>
         <p>多主办方活动票务平台</p>
       </div>
       <p>赴热爱之场，见想见的人。</p>
-      <p>当前阶段 · 无选座电子票与在线核销</p>
     </footer>
   </div>
 </template>

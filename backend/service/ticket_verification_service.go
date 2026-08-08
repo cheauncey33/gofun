@@ -1,8 +1,6 @@
 package service
 
 import (
-	"gofun/container"
-	"gofun/models"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -10,6 +8,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"gofun/container"
+	"gofun/metrics"
+	"gofun/models"
 	"strconv"
 	"strings"
 	"time"
@@ -111,7 +112,14 @@ func (s *TicketVerificationService) Verify(
 	credential string,
 	sessionID int64,
 ) (*TicketVerificationResultView, error) {
+	verificationResult := "error"
+	defer func() {
+		metrics.TicketVerificationsTotal.WithLabelValues(verificationResult).Inc()
+	}()
 	if err := s.requireOrganizerAccess(ctx, organizerID, operatorUserID); err != nil {
+		if errors.Is(err, ErrTicketAccessDenied) {
+			verificationResult = "access_denied"
+		}
 		return nil, err
 	}
 	fingerprint := credentialFingerprint(credential)
@@ -228,6 +236,9 @@ func (s *TicketVerificationService) Verify(
 			return fmt.Errorf("未知电子票状态: %s", ticket.Status)
 		}
 	})
+	if err == nil && result != nil {
+		verificationResult = string(result.Result)
+	}
 	return result, err
 }
 

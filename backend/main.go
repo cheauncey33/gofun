@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"flag"
+	"fmt"
 	"gofun/common"
 	"gofun/config"
 	"gofun/container"
@@ -11,10 +14,8 @@ import (
 	"gofun/pkg/response"
 	apptelemetry "gofun/pkg/telemetry"
 	"gofun/pkg/validator"
+	"gofun/pkg/ws"
 	"gofun/service"
-	"context"
-	"flag"
-	"fmt"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -49,7 +50,7 @@ func main() {
 	}
 	defer logger.Sync()
 
-	logger.Log.Info("赴场票务服务启动中...")
+	logger.Log.Info("Gofun 票务服务启动中...")
 	gin.SetMode(cfg.Server.Mode)
 
 	shutdownTelemetry, err := apptelemetry.Setup(context.Background(), cfg.Telemetry)
@@ -74,7 +75,9 @@ func main() {
 	userSvc := service.NewUserService(cont, cfg.JWT.ExpireSecs, cfg.JWT.RefreshExpireSecs)
 	ticketCatalogSvc := service.NewTicketCatalogService(cont)
 	ticketCatalogSvc.ConfigureInventory(cfg.Inventory)
-	ticketOrderSvc := service.NewTicketOrderService(cont, timeoutMinutes)
+	ticketOrderSvc := service.NewTicketOrderService(cont, timeoutMinutes, cfg.Payment)
+	orderHub := ws.NewHub()
+	ticketOrderSvc.ConfigureOrderEvents(orderHub)
 	ticketOrderSvc.ConfigureOutboxWriter(cfg.OrderOutbox)
 	ticketOrderSvc.ConfigureInventory(cfg.Inventory)
 	ticketVerificationSvc := service.NewTicketVerificationService(cont)
@@ -101,6 +104,7 @@ func main() {
 	rushSaleCtrl := controller.NewRushSaleController(rushSaleSvc)
 	eventCommentSvc := service.NewEventCommentService(cont)
 	eventCommentCtrl := controller.NewEventCommentController(eventCommentSvc)
+	orderSocketHandler := ws.NewHandler(orderHub, cfg.Cors.AllowOrigins...)
 	ticketCompensationSvc := service.NewTicketCompensationService(cont)
 	ticketCompensationSvc.ConfigureInventory(cfg.Inventory)
 	eventSearchCompensationSvc := service.NewEventSearchCompensationService(
@@ -127,7 +131,7 @@ func main() {
 		writeLimit = writeLimitMiddleware(writeLimiter)
 	}
 
-	// MySQL 是最终票额来源，启动时将票档剩余量写入赴场独立 Redis 命名空间。
+	// MySQL 是最终票额来源，启动时将票档剩余量写入 Gofun 独立 Redis 命名空间。
 	if err := ticketOrderSvc.WarmTicketQuota(context.Background()); err != nil {
 		logger.Log.Fatal("票档预热 Redis 失败", zap.Error(err))
 	}
@@ -178,6 +182,8 @@ func main() {
 		v1.POST("/register", userCtrl.Register)
 		v1.POST("/auth/refresh", userCtrl.Refresh)
 		v1.POST("/logout", userCtrl.Logout)
+		v1.GET("/ws", orderSocketHandler.Handle)
+		v1.POST("/payments/sandbox/callback", ticketOrderCtrl.PaymentCallback)
 
 		// 活动浏览无需登录；购票和主办方管理仍由各自的鉴权路由保护。
 		v1.GET("/events", ticketCatalogCtrl.ListPublishedEvents)
@@ -238,6 +244,7 @@ func main() {
 
 	// 后台 goroutine
 	mainCtx, cancel := context.WithCancel(context.Background())
+	go orderHub.Run(mainCtx)
 	go ticketOrderConsumer.Start(mainCtx, cfg.OrderConsumer)
 	go ticketOrderSvc.StartPaymentTimeoutConsumer(mainCtx, 2)
 	go ticketOrderSvc.StartTimeoutScanner(mainCtx)
@@ -247,6 +254,7 @@ func main() {
 	go ticketCompensationSvc.Start(mainCtx)
 	go eventSearchCompensationSvc.Start(mainCtx)
 	go eventCommentSvc.StartLikeCountFlusher(mainCtx)
+	go metrics.StartRuntimeCollector(mainCtx, cont.DB, cont.NewMQChannel, cont.MQQueueName)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),

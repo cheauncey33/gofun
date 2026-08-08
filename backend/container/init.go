@@ -1,14 +1,14 @@
 package container
 
 import (
+	"context"
+	"fmt"
 	"gofun/common"
 	"gofun/config"
 	"gofun/migrations"
 	"gofun/models"
 	"gofun/repository"
 	"gofun/search"
-	"context"
-	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -165,6 +165,8 @@ func ticketingSchemaModels() []interface{} {
 		&models.TicketOrderItem{},
 		&models.TicketOrderAttendee{},
 		&models.TicketOrderOutbox{},
+		&models.PaymentTransaction{},
+		&models.PaymentCallback{},
 		&models.RushSaleCampaign{},
 		&models.RushCampaignBucket{},
 		&models.AdmissionTicket{},

@@ -30,6 +30,7 @@ type Config struct {
 	DelayedOrder  OrderDelayConfig    `mapstructure:"delayed_order"`
 	RushSale      RushSaleConfig      `mapstructure:"rush_sale"`
 	Inventory     InventoryConfig     `mapstructure:"inventory"`
+	Payment       PaymentConfig       `mapstructure:"payment"`
 }
 
 type ServerConfig struct {
@@ -157,6 +158,12 @@ type RushSaleConfig struct {
 	CampaignCacheTTLMS int `mapstructure:"campaign_cache_ttl_ms"`
 }
 
+type PaymentConfig struct {
+	Provider               string `mapstructure:"provider"`
+	SandboxSecret          string `mapstructure:"sandbox_secret"`
+	SandboxCallbackDelayMS int    `mapstructure:"sandbox_callback_delay_ms"`
+}
+
 // InventoryConfig 票档/抢票 Redis+MySQL 同构分桶。
 // buckets_enabled=false 时保持单 key / 父表 remaining_quota 热路径。
 type InventoryConfig struct {
@@ -252,6 +259,9 @@ func Load(configPath string) (*Config, error) {
 		"inventory.bucket_count",
 		"inventory.min_quota_to_bucket",
 		"inventory.bucket_retry",
+		"payment.provider",
+		"payment.sandbox_secret",
+		"payment.sandbox_callback_delay_ms",
 	)
 
 	if err := v.ReadInConfig(); err != nil {
@@ -337,7 +347,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("pprof.port", 6060)
 
 	v.SetDefault("telemetry.enabled", false)
-	v.SetDefault("telemetry.service_name", "fuchang-ticketing")
+	v.SetDefault("telemetry.service_name", "gofun-ticketing")
 	v.SetDefault("telemetry.otlp_endpoint", "127.0.0.1:4317")
 	v.SetDefault("telemetry.insecure", true)
 	v.SetDefault("telemetry.sample_ratio", 0.05)
@@ -373,6 +383,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("inventory.bucket_count", 8)
 	v.SetDefault("inventory.min_quota_to_bucket", 64)
 	v.SetDefault("inventory.bucket_retry", 4)
+
+	v.SetDefault("payment.provider", "sandbox")
+	v.SetDefault("payment.sandbox_callback_delay_ms", 500)
 
 	v.SetDefault("elasticsearch.enabled", false)
 	v.SetDefault("elasticsearch.index", "fuchang_events")
@@ -466,6 +479,22 @@ func (c *Config) Validate() error {
 	}
 	if c.Inventory.BucketRetry < 0 {
 		return fmt.Errorf("inventory.bucket_retry 必须大于等于0")
+	}
+	c.Payment.Provider = strings.ToLower(strings.TrimSpace(c.Payment.Provider))
+	if c.Payment.Provider == "" {
+		c.Payment.Provider = "sandbox"
+	}
+	if c.Payment.Provider != "sandbox" {
+		return fmt.Errorf("payment.provider 当前仅支持 sandbox")
+	}
+	if c.Payment.SandboxSecret != "" && len(c.Payment.SandboxSecret) < 16 {
+		return fmt.Errorf("payment.sandbox_secret 至少需要 16 个字符")
+	}
+	if c.Payment.SandboxCallbackDelayMS <= 0 {
+		c.Payment.SandboxCallbackDelayMS = 500
+	}
+	if c.Payment.SandboxCallbackDelayMS > 60000 {
+		return fmt.Errorf("payment.sandbox_callback_delay_ms 不能超过 60000")
 	}
 	if c.OrderConsumer.WorkerCount == 0 {
 		c.OrderConsumer.WorkerCount = 4

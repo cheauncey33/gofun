@@ -46,6 +46,11 @@ function scheduleQueuePoll() {
   queueTimer = setTimeout(() => load(), 1400)
 }
 
+function handleOrderStatus(event) {
+  if (String(event.detail?.order_id) !== String(route.params.id)) return
+  load()
+}
+
 async function cancel(reason = '用户主动取消') {
   const paid = order.value?.status === 'paid'
   try {
@@ -66,8 +71,14 @@ async function cancel(reason = '用户主动取消') {
   }
 }
 
-onMounted(load)
-onBeforeUnmount(() => clearTimeout(queueTimer))
+onMounted(() => {
+  window.addEventListener('order:status', handleOrderStatus)
+  load()
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('order:status', handleOrderStatus)
+  clearTimeout(queueTimer)
+})
 </script>
 
 <template>
@@ -136,7 +147,7 @@ onBeforeUnmount(() => clearTimeout(queueTimer))
             :class="ticketStatus[admissionTicket.status]?.tone"
           >
             <div class="ticket-copy">
-              <span>赴场电子票 {{ admissionTicket.sequence_no }}</span>
+              <span>Gofun 电子票 {{ admissionTicket.sequence_no }}</span>
               <h3>{{ admissionTicket.order_item?.event_title_snapshot }}</h3>
               <p>
                 {{ admissionTicket.order_item?.tier_name_snapshot }} ·
@@ -198,7 +209,7 @@ header > strong { color: #ef715c; font-size: 30px; }
 .pulse-lines i:first-child { height: 40%; }
 @keyframes pulse { 0%,100% { opacity: .35; transform: scaleY(.7); } 50% { opacity: 1; transform: scaleY(1); } }
 .ticket { min-height: 210px; padding: 30px; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-soft); display: grid; grid-template-columns: 170px 1fr 130px; gap: 30px; align-items: center; position: relative; overflow: hidden; }
-.ticket::after { content: '赴场'; position: absolute; right: -10px; bottom: -35px; color: rgba(181,52,41,.06); font: 800 110px var(--font-display); }
+.ticket::after { content: 'Gofun'; position: absolute; right: -10px; bottom: -35px; color: rgba(181,52,41,.06); font: 800 110px var(--font-display); }
 .ticket-date { display: grid; gap: 10px; padding-right: 25px; border-right: 1px dashed var(--line-strong); }
 .ticket span, .ticket small { color: var(--muted); font-size: 10px; letter-spacing: .12em; }
 .ticket-date strong { font-family: var(--font-display); line-height: 1.6; }
