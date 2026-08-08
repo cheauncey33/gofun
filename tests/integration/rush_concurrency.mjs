@@ -4,7 +4,7 @@
  * 2) 同用户超限购并发 → 成功数 ≤ per_user_limit
  * 3) 多用户抢小库存 → 成功数 = total_quota，其余失败
  *
- * 用法（fuchang-it backend 已启动，admin/admin123 可用）:
+ * 用法（gofun-it backend 已启动，admin/admin123 可用）:
  *   $env:BASE_URL='http://127.0.0.1:18080/api/v1'
  *   node tests/integration/rush_concurrency.mjs
  */

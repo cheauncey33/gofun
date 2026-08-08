@@ -47,7 +47,7 @@ pprof:
 
 telemetry:
   enabled: true
-  service_name: "fuchang-ticketing-it"
+  service_name: "gofun-ticketing-it"
   otlp_endpoint: "127.0.0.1:4317"
   insecure: true
   sample_ratio: 0.01

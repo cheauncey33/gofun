@@ -19,6 +19,9 @@ services:
       JWT_EXPIRE_SECS: 3600
       JWT_REFRESH_EXPIRE_SECS: 86400
       TICKET_QR_SECRET: fuchang-integration-ticket-qr-secret-only
+      PAYMENT_PROVIDER: sandbox
+      PAYMENT_SANDBOX_SECRET: fuchang-integration-payment-secret-only
+      PAYMENT_SANDBOX_CALLBACK_DELAY_MS: "100"
       SNOWFLAKE_NODE_ID: 9
       ORDER_CONSUMER_WORKER_COUNT: 2
       ORDER_CONSUMER_PREFETCH_COUNT: 2

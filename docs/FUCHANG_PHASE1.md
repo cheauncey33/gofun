@@ -1,4 +1,4 @@
-# 赴场第一阶段改造说明
+# Gofun 第一阶段改造说明
 
 ## 1. 真正解决的问题
 
@@ -13,9 +13,9 @@
 2. 主办方维护场馆、活动、场次和票档。
 3. 用户浏览已发布活动，选择票档购票。
 4. 热门场次可配置限时开售。
-5. 支付仍使用项目内余额，用来验证订单状态与并发一致性，不伪装成真实支付渠道。
+5. 支付使用内置支付沙箱：支付单由沙箱创建，订单只等待异步回调，不读取或扣减 Gofun 账户余额。
 
-暂不实现选座、实名观演人、电子票、核销、第三方支付、结算和活动取消批量退款。
+本阶段仍不实现选座、真实微信/支付宝渠道、结算分账和离线核销设备同步。
 
 ## 3. 核心模型
 
@@ -25,6 +25,7 @@
 - `EventSession`：演出时间、销售时间、场馆、状态和版本号。
 - `TicketTier`：价格（分）、总票额、剩余票额、销量、限购和版本号。
 - `TicketOrder / TicketOrderItem`：订单状态、支付状态、来源、幂等键和活动快照。
+- `PaymentTransaction / PaymentCallback`：平台侧支付单、沙箱/渠道回调和幂等审计，不保存用户外部余额。
 - `RushSaleCampaign`：限时价格、独立票额、个人限购和开售时间。
 
 订单明细保存活动、场次、场馆、地址和票档名称快照。否则主办方修改活动后，
@@ -56,9 +57,10 @@ POST /api/v1/orders
 ### 支付与超时
 
 ```text
-pending_payment -> 余额按分原子扣减 -> paid
+pending_payment -> 创建 payment_transaction -> provider callback(success) -> paid -> 签发电子票
+provider callback(failed) -> payment_status=failed，可重试
 pending_payment 到期 -> cancelled -> MySQL 与 Redis 归还票额
-paid 取消 -> 退款余额并归还票额
+paid 取消 -> provider refund -> payment_status=refunded，并归还票额
 ```
 
 ### 崩溃恢复

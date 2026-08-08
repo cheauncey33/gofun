@@ -2,7 +2,7 @@
  * 抢票幂等回归：同幂等键连续/并发 Execute，
  * 应只产生一笔订单，且不应永久多扣 Redis 票额。
  *
- * 用法（fuchang-it 已启动）:
+ * 用法（gofun-it 已启动）:
  *   $env:BASE_URL='http://127.0.0.1:18080/api/v1'
  *   $env:RUSH_CAMPAIGN_ID='<id>'
  *   node tests/integration/rush_idempotency.mjs

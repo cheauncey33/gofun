@@ -111,6 +111,7 @@ export async function bootstrapRushCampaign({
     tierID,
     organizerID,
     eventID,
+    sessionID,
     owner,
     totalQuota,
     perUserLimit,

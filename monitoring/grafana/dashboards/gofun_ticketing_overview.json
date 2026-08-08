@@ -1,0 +1,96 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 500 }, { "color": "red", "value": 2000 }] }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto", "wideLayout": true },
+      "targets": [{ "expr": "max(outbox_buffer_len)", "legendFormat": "buffer", "refId": "A" }],
+      "title": "Outbox Buffer Length",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 150 }, { "color": "red", "value": 300 }] }, "unit": "ms" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto", "wideLayout": true },
+      "targets": [{ "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{method=\"POST\",path=\"/api/v1/rush-sales/:id/execute\"}[5m]))) * 1000", "legendFormat": "p99", "refId": "A" }],
+      "title": "Rush Execute P99",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 100 }, { "color": "red", "value": 500 }] }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto", "wideLayout": true },
+      "targets": [{ "expr": "increase(mysql_innodb_row_lock_waits_total[5m])", "legendFormat": "5m waits", "refId": "A" }],
+      "title": "InnoDB Row Lock Waits / 5m",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1000 }, { "color": "red", "value": 5000 }] }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto", "wideLayout": true },
+      "targets": [{ "expr": "max by (queue) (mq_queue_ready_messages)", "legendFormat": "{{queue}}", "refId": "A" }],
+      "title": "RabbitMQ Ready Backlog",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 12, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 4, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" } }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 7 },
+      "id": 5,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "expr": "outbox_buffer_len", "legendFormat": "outbox buffer", "refId": "A" }, { "expr": "mq_queue_ready_messages", "legendFormat": "MQ ready {{queue}}", "refId": "B" }],
+      "title": "Outbox → MQ Backlog",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 12, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 4, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" } }, "unit": "ms" }, "overrides": [] },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 7 },
+      "id": 6,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{method=\"POST\",path=\"/api/v1/rush-sales/:id/execute\"}[5m]))) * 1000", "legendFormat": "rush p99", "refId": "A" }],
+      "title": "Rush Execute P99 Trend",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 12, "lineWidth": 2, "showPoints": "never" } }, "overrides": [] },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 16 },
+      "id": 7,
+      "options": { "legend": { "calcs": ["lastNotNull", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi" } },
+      "targets": [{ "expr": "sum by (result) (rate(payment_callbacks_total[5m]))", "legendFormat": "payment {{result}}", "refId": "A" }],
+      "title": "Payment Callback Results",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 12, "lineWidth": 2, "showPoints": "never" } }, "overrides": [] },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 16 },
+      "id": 8,
+      "options": { "legend": { "calcs": ["lastNotNull", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi" } },
+      "targets": [{ "expr": "sum by (result) (rate(ticket_verifications_total[5m]))", "legendFormat": "verification {{result}}", "refId": "A" }],
+      "title": "Ticket Verification Results",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 40,
+  "tags": ["gofun", "ticketing", "outbox", "rush-sale"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "timezone": "browser",
+  "title": "Gofun 票务核心链路",
+  "uid": "gofun-ticketing",
+  "version": 1
+}

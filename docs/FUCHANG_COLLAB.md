@@ -1,4 +1,4 @@
-# 赴场协作文档
+# Gofun 协作文档
 
 本文档供 Cursor / Codex / 人工在同一仓库并行改票务时对齐进度。
 事实以当前代码为准；阶段文档（`FUCHANG_*.md`）描述目标，本文件描述**正在发生的协作状态**。
@@ -47,7 +47,7 @@
 | B2 Outbox | `004_ticket_order_outbox` + `StartOutboxPublisher` |
 | B3 限流/压测/指标 | 写路径 IP 限流；`ticket_smoke`/`ticket_rush_spike`；OrdersCreated/MQ/Compensation |
 | C1 核销强化 | session_id 约束 + 今日统计 |
-| C2 支付适配层 | `PaymentGateway` / `BalancePaymentGateway` |
+| C2 支付适配层 | `PaymentGateway` / `SandboxPaymentGateway` / 回调幂等表 |
 | C3 密钥轮换 | `ticket_qr.previous_secrets` 多密钥验签 |
 
 ### 仍开放 / 建议下轮
@@ -55,7 +55,7 @@
 1. **抢票并发集成测试**：同幂等键 + 换 token 双 Lua。
 2. **限时开售多数量 UI**：`per_user_limit > 1`。
 3. **后端 snack 死代码删除**：`product_*` / `seckill_*` / snack `order_*`（确认无回滚需求后）。
-4. **真实支付渠道**：在 `PaymentGateway` 上接微信/校园支付。
+4. **真实支付渠道**：在 `PaymentGateway` 上接微信/支付宝，并补渠道查询、对账和退款重试。
 
 ## 协作规则
 

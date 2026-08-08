@@ -48,3 +48,44 @@ jobs:
       - name: build
         working-directory: frontend
         run: npm run build
+
+  integration:
+    name: Ticketing payment and verification E2E
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Start disposable integration stack
+        run: docker compose -p gofun-it -f tests/integration/docker-compose.ticketing.yml up -d --build
+
+      - name: Wait for backend
+        run: |
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:18080/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Payment, ticket issuance and verification E2E
+        run: node tests/integration/payment_verification_e2e.mjs
+
+      - name: Collect integration logs
+        if: always()
+        run: docker compose -p gofun-it -f tests/integration/docker-compose.ticketing.yml logs --no-color > integration-compose.log
+
+      - name: Upload integration logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-compose-logs
+          path: integration-compose.log
+
+      - name: Tear down disposable stack
+        if: always()
+        run: docker compose -p gofun-it -f tests/integration/docker-compose.ticketing.yml down -v --remove-orphans

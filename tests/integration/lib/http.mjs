@@ -1,5 +1,5 @@
 /**
- * 赴场 IT 公共 HTTP 小工具。Authorization 头直接传 JWT（无 Bearer）。
+ * Gofun IT 公共 HTTP 小工具。Authorization 头直接传 JWT（无 Bearer）。
  */
 export function baseURL() {
   return process.env.BASE_URL || "http://127.0.0.1:18080/api/v1";

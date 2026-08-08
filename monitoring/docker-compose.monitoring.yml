@@ -1,9 +1,7 @@
-version: "3.8"
-
 services:
   prometheus:
     image: prom/prometheus:latest
-    container_name: whu_prometheus
+    container_name: gofun_prometheus
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
@@ -19,22 +17,23 @@ services:
 
   grafana:
     image: grafana/grafana:latest
-    container_name: whu_grafana
+    container_name: gofun_grafana
     volumes:
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/provisioning/dashboards.yml:/etc/grafana/provisioning/dashboards/default.yml:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - ./grafana/datasources:/etc/grafana/provisioning/datasources
-      - grafana_data:/var/lib/grafana
+      - gofun_grafana_data:/var/lib/grafana
     ports:
       - "3000:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/whu_snack_overview.json
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/gofun_ticketing_overview.json
     restart: unless-stopped
 
   jaeger:
     image: jaegertracing/all-in-one:latest
-    container_name: whu_jaeger
+    container_name: gofun_jaeger
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     ports:
@@ -45,4 +44,4 @@ services:
 
 volumes:
   prometheus_data:
-  grafana_data:
+  gofun_grafana_data:
