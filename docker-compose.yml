@@ -18,7 +18,7 @@ services:
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 8080
       SERVER_MODE: release
-      MYSQL_DSN: "snack:${MYSQL_PASSWORD}@tcp(mysql:3306)/whu_snack_go?charset=utf8mb4&parseTime=True&loc=Local"
+      MYSQL_DSN: "gofun:${MYSQL_PASSWORD}@tcp(mysql:3306)/gofun?charset=utf8mb4&parseTime=True&loc=Local"
       REDIS_ADDR: redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_URL: amqp://snack:${RABBITMQ_PASSWORD}@rabbitmq:5672/
@@ -41,14 +41,14 @@ services:
       - "3307:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: whu_snack_go
-      MYSQL_USER: snack
+      MYSQL_DATABASE: gofun
+      MYSQL_USER: gofun
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       TZ: Asia/Shanghai
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -usnack -p$$MYSQL_PASSWORD --silent"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -ugofun -p$$MYSQL_PASSWORD --silent"]
       interval: 10s
       timeout: 5s
       retries: 10

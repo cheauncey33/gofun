@@ -1,13 +1,9 @@
 /**
- * 抢票混合负载并发阶梯压测。
- *
- * 每位用户先提交一次首次下单；随后按固定随机种子分配为：
- * - 70% 使用新幂等键重复提交，应命中单用户限购拒绝；
- * - 30% 使用原幂等键重试，应返回原订单而不是创建新订单。
- *
+ * 抢票混合负载并发阶梯压测�? *
+ * 每位用户先提交一次首次下单；随后按固定随机种子分配为�? * - 70% 使用新幂等键重复提交，应命中单用户限购拒绝；
+ * - 30% 使用原幂等键重试，应返回原订单而不是创建新订单�? *
  * 请求启动和重试间隔带有可复现抖动。CONCURRENCY_STEPS 是每档最大并发，
- * 不把随机数当作不可重现的“随机并发”。
- */
+ * 不把随机数当作不可重现的“随机并发”�? */
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -32,7 +28,7 @@ const resultsDir = process.env.RESULTS_DIR || join("tests", "load", "results", r
 const metricsURL = process.env.METRICS_URL || "http://127.0.0.1:18080/metrics";
 const monitorContainers = String(
   process.env.MONITOR_CONTAINERS ||
-  "whu-snack-go-capacity-backend-load,whu-snack-go-capacity-mysql-1,whu-snack-go-capacity-redis-1,whu-snack-go-capacity-rabbitmq-1",
+  "gofun-capacity-backend-load,gofun-capacity-mysql-1,gofun-capacity-redis-1,gofun-capacity-rabbitmq-1",
 ).split(",").map((value) => value.trim()).filter(Boolean);
 
 if (concurrencySteps.length === 0) throw new Error("CONCURRENCY_STEPS must contain positive integers");
@@ -287,7 +283,7 @@ function mulberry32(seed) {
 function renderMarkdown(data) {
   const groups = new Map();
   for (const row of data.results) groups.set(row.concurrency, [...(groups.get(row.concurrency) || []), row]);
-  const lines = ["# 抢票混合负载并发阶梯压测", "", `- 成功下单用户：${data.workload.success_users}`, `- 混合比例：首次下单 50%，限购重复 ${data.workload.limit_repeat_ratio * 100}%，幂等重试 ${data.workload.idempotent_retry_ratio * 100}%`, `- 随机种子：${data.workload.seed}`, "", "| 最大并发 | 轮次 | 总 QPS 中位 | execute p99 中位 | MQ 追平中位 | 成功建单 | 限购拒绝 | 幂等同单 |", "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"];
+  const lines = ["# 抢票混合负载并发阶梯压测", "", `- 成功下单用户�?{data.workload.success_users}`, `- 混合比例：首次下�?50%，限购重�?${data.workload.limit_repeat_ratio * 100}%，幂等重�?${data.workload.idempotent_retry_ratio * 100}%`, `- 随机种子�?{data.workload.seed}`, "", "| 最大并�?| 轮次 | �?QPS 中位 | execute p99 中位 | MQ 追平中位 | 成功建单 | 限购拒绝 | 幂等同单 |", "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"];
   for (const [concurrency, rows] of [...groups.entries()].sort(([a], [b]) => a - b)) {
     lines.push(`| ${concurrency} | ${rows.length} | ${median(rows.map((row) => row.total_qps))} | ${median(rows.map((row) => row.execute.latency_ms.p99))}ms | ${median(rows.map((row) => row.drain_seconds))}s | ${median(rows.map((row) => row.outcome.primary_successes))}/${data.workload.success_users} | ${median(rows.map((row) => row.outcome.limit_repeat_rejected))}/${median(rows.map((row) => row.outcome.limit_repeat_attempts))} | ${median(rows.map((row) => row.outcome.idempotent_retry_same_order))}/${median(rows.map((row) => row.outcome.idempotent_retry_attempts))} |`);
   }

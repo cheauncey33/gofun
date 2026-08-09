@@ -4,7 +4,7 @@ server:
   mode: "release"
 
 mysql:
-  dsn: "snack:snack123456@tcp(127.0.0.1:3307)/whu_snack_go?charset=utf8mb4&parseTime=True&loc=Local"
+  dsn: "gofun:gofun123456@tcp(127.0.0.1:3307)/gofun?charset=utf8mb4&parseTime=True&loc=Local"
   max_idle_conns: 10
   max_open_conns: 100
   conn_max_lifetime: 300

@@ -1,10 +1,10 @@
 /**
  * 库存分桶验收（需 backend inventory.buckets_enabled=true）：
- * 1) 小库存 (<min_quota_to_bucket) → MySQL 仅 1 个 bucket 行
- * 2) 大库存 → bucket_count 个 bucket 行；列表余量 = SUM
+ * 1) 小库�?(<min_quota_to_bucket) �?MySQL �?1 �?bucket �?
+ * 2) 大库�?�?bucket_count �?bucket 行；列表余量 = SUM
  * 3) 抢票个人限购仍全局
  *
- * 可选：MYSQL_CONTAINER / MYSQL_* 用于 docker exec 查表行数。
+ * 可选：MYSQL_CONTAINER / MYSQL_* 用于 docker exec 查表行数�?
  */
 import { assert, http, purchaseBody, registerAndLogin } from "./lib/http.mjs";
 import { bootstrapRushCampaign } from "./lib/catalog_bootstrap.mjs";
@@ -12,7 +12,7 @@ import { execFileSync } from "node:child_process";
 
 const base = process.env.BASE_URL || "http://127.0.0.1:18080/api/v1";
 process.env.BASE_URL = base;
-const mysqlContainer = process.env.MYSQL_CONTAINER || "whu-snack-go-capacity-mysql-1";
+const mysqlContainer = process.env.MYSQL_CONTAINER || "gofun-capacity-mysql-1";
 const mysqlUser = process.env.MYSQL_USER || "fuchang";
 const mysqlPassword = process.env.MYSQL_PASSWORD || "fuchang-it-mysql";
 const mysqlDB = process.env.MYSQL_DB || "fuchang_ticketing_it";

@@ -25,13 +25,13 @@ services:
       INVENTORY_BUCKET_COUNT: "${INVENTORY_BUCKET_COUNT:-8}"
       INVENTORY_MIN_QUOTA_TO_BUCKET: "${INVENTORY_MIN_QUOTA_TO_BUCKET:-64}"
       INVENTORY_BUCKET_RETRY: "${INVENTORY_BUCKET_RETRY:-4}"
-    container_name: whu-snack-go-capacity-backend-load
+    container_name: gofun-capacity-backend-load
 
   mysql:
-    container_name: whu-snack-go-capacity-mysql-1
+    container_name: gofun-capacity-mysql-1
 
   redis:
-    container_name: whu-snack-go-capacity-redis-1
+    container_name: gofun-capacity-redis-1
 
   rabbitmq:
-    container_name: whu-snack-go-capacity-rabbitmq-1
+    container_name: gofun-capacity-rabbitmq-1

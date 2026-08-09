@@ -4,7 +4,7 @@ server:
   mode: "debug"  # debug | release | test
 
 mysql:
-  dsn: "root:root@tcp(127.0.0.1:3306)/whu_snack_go?charset=utf8mb4&parseTime=True&loc=Local"
+  dsn: "gofun:gofun123456@tcp(127.0.0.1:3306)/gofun?charset=utf8mb4&parseTime=True&loc=Local"
   max_idle_conns: 10
   max_open_conns: 100
   conn_max_lifetime: 300

@@ -1,6 +1,6 @@
 /**
- * 多热点造数：直接写 MySQL（+ 可选分桶行）并预热 Redis。
- * 比逐条 HTTP bootstrap 快一个数量级，适合 HOTSPOTS=8/16 扫描。
+ * 多热点造数：直接写 MySQL�? 可选分桶行）并预热 Redis�?
+ * 比逐条 HTTP bootstrap 快一个数量级，适合 HOTSPOTS=8/16 扫描�?
  */
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -69,8 +69,8 @@ function sqlDate(offsetMs) {
 
 /**
  * @param {object} opts
- * @param {number} opts.count 热点（活动/票档/抢票）数量
- * @param {number} opts.quotaPerCampaign 每个 campaign 的剩余票额
+ * @param {number} opts.count 热点（活�?票档/抢票）数�?
+ * @param {number} opts.quotaPerCampaign 每个 campaign 的剩余票�?
  * @param {number} [opts.perUserLimit]
  * @param {string} [opts.label]
  * @returns {Promise<Array<{campaignID:string,tierID:string,eventID:string,quota:number}>>}
@@ -89,11 +89,11 @@ export async function seedMultiHotspotCampaigns({
   }
 
   const cfg = {
-    mysqlContainer: env("MYSQL_CONTAINER", "whu-snack-go-capacity-mysql-1"),
+    mysqlContainer: env("MYSQL_CONTAINER", "gofun-capacity-mysql-1"),
     mysqlUser: env("MYSQL_USER", "fuchang"),
     mysqlPassword: env("MYSQL_PASSWORD", "fuchang-it-mysql"),
     mysqlDB: env("MYSQL_DB", "fuchang_ticketing_it"),
-    redisContainer: env("REDIS_CONTAINER", "whu-snack-go-capacity-redis-1"),
+    redisContainer: env("REDIS_CONTAINER", "gofun-capacity-redis-1"),
     redisPassword: env("REDIS_PASSWORD", "fuchang-it-redis"),
   };
   const bucketsEnabled = String(env("INVENTORY_BUCKETS_ENABLED", "false")).toLowerCase() === "true";
@@ -112,7 +112,7 @@ export async function seedMultiHotspotCampaigns({
   const orgID = mysqlExec(
     `
 INSERT INTO organizer (name, slug, contact_name, contact_phone, status, audit_status, create_time, update_time)
-VALUES (${sqlString(`${label}-主办方-${suffix}`)}, ${sqlString(slug)}, 'MH', '13800000000', 'active', 'approved', NOW(3), NOW(3));
+VALUES (${sqlString(`${label}-主办�?${suffix}`)}, ${sqlString(slug)}, 'MH', '13800000000', 'active', 'approved', NOW(3), NOW(3));
 SELECT LAST_INSERT_ID();
 `.trim(),
     cfg,
@@ -129,7 +129,7 @@ VALUES (${orgID}, ${adminID}, 'owner', 'active', NOW(3), NOW(3));
   const venueID = mysqlExec(
     `
 INSERT INTO venue (organizer_id, name, city, district, address, timezone, status, create_time, update_time)
-VALUES (${orgID}, ${sqlString("多热点压测场馆")}, '武汉', '洪山区', 'Load Test Rd 1', 'Asia/Shanghai', 'active', NOW(3), NOW(3));
+VALUES (${orgID}, ${sqlString("多热点压测场�?)}, '武汉', '洪山�?, 'Load Test Rd 1', 'Asia/Shanghai', 'active', NOW(3), NOW(3));
 SELECT LAST_INSERT_ID();
 `.trim(),
     cfg,
@@ -282,11 +282,11 @@ VALUES ${rushRows};
     });
   }
 
-  // redis-cli --pipe 在部分镜像不可用；逐条 SET 对几十个 key 足够快。
+  // redis-cli --pipe 在部分镜像不可用；逐条 SET 对几十个 key 足够快�?
   for (const args of redisPipe) {
     const out = redisCli(args, cfg);
     if (out && !out.includes("OK") && !/^\d+$/.test(out)) {
-      // redis-cli -a 会先打 Warning 行；只要最终不是错误即可。
+      // redis-cli -a 会先�?Warning 行；只要最终不是错误即可�?
       if (/ERR|WRONGPASS|NOAUTH/i.test(out)) {
         throw new Error(`redis set failed: ${out}`);
       }

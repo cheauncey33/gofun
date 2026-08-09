@@ -17,22 +17,22 @@ $env:LOAD_USER_PREFIX = "cluster_"
 $env:RUN_LABEL = $RunLabel
 $env:RESULTS_DIR = "tests/load/results/$RunLabel"
 $env:MONITOR_CONTAINERS = @(
-    "whu-snack-go-cluster-frontend-1",
-    "whu-snack-go-cluster-backend-1-1",
-    "whu-snack-go-cluster-backend-2-1",
-    "whu-snack-go-cluster-backend-3-1",
-    "whu-snack-go-cluster-mysql-primary-1",
-    "whu-snack-go-cluster-mysql-replica-1",
-    "whu-snack-go-cluster-redis-primary-1",
-    "whu-snack-go-cluster-redis-replica-1",
-    "whu-snack-go-cluster-rabbitmq-1-1",
-    "whu-snack-go-cluster-rabbitmq-2-1",
-    "whu-snack-go-cluster-rabbitmq-3-1",
-    "whu-snack-go-cluster-rabbitmq-lb-1"
+    "gofun-cluster-frontend-1",
+    "gofun-cluster-backend-1-1",
+    "gofun-cluster-backend-2-1",
+    "gofun-cluster-backend-3-1",
+    "gofun-cluster-mysql-primary-1",
+    "gofun-cluster-mysql-replica-1",
+    "gofun-cluster-redis-primary-1",
+    "gofun-cluster-redis-replica-1",
+    "gofun-cluster-rabbitmq-1-1",
+    "gofun-cluster-rabbitmq-2-1",
+    "gofun-cluster-rabbitmq-3-1",
+    "gofun-cluster-rabbitmq-lb-1"
 ) -join ","
-$env:MYSQL_CONTAINER = "whu-snack-go-cluster-mysql-primary-1"
-$env:REDIS_CONTAINER = "whu-snack-go-cluster-redis-primary-1"
-$env:RABBITMQ_CONTAINER = "whu-snack-go-cluster-rabbitmq-1-1"
+$env:MYSQL_CONTAINER = "gofun-cluster-mysql-primary-1"
+$env:REDIS_CONTAINER = "gofun-cluster-redis-primary-1"
+$env:RABBITMQ_CONTAINER = "gofun-cluster-rabbitmq-1-1"
 $env:ORDER_OUTBOX_WRITE_MODE = "batch"
 $env:ORDER_CONSUMER_WORKER_COUNT = "2x3"
 $env:ORDER_CONSUMER_PREFETCH_COUNT = "5"

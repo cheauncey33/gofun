@@ -2,7 +2,7 @@ x-backend-environment: &backend-environment
   SERVER_HOST: 0.0.0.0
   SERVER_PORT: 8080
   SERVER_MODE: release
-  MYSQL_DSN: "snack:${MYSQL_PASSWORD}@tcp(mysql-primary:3306)/whu_snack_go?charset=utf8mb4&parseTime=True&loc=Local"
+  MYSQL_DSN: "gofun:${MYSQL_PASSWORD}@tcp(mysql-primary:3306)/gofun?charset=utf8mb4&parseTime=True&loc=Local"
   MYSQL_MAX_IDLE_CONNS: 10
   MYSQL_MAX_OPEN_CONNS: 50
   REDIS_ADDR: ""
@@ -114,8 +114,8 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_ROOT_HOST: "%"
-      MYSQL_DATABASE: whu_snack_go
-      MYSQL_USER: snack
+      MYSQL_DATABASE: gofun
+      MYSQL_USER: gofun
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       TZ: Asia/Shanghai
     command:
