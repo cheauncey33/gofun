@@ -98,73 +98,73 @@
   },
   "resources": {
     "containers": {
-      "whu-snack-go-cluster-frontend-1": {
+      "gofun-cluster-frontend-1": {
         "cpu_pct_avg": 2.14,
         "cpu_pct_max": 3.56,
         "memory_bytes_max": 13254000.64,
         "pids_max": 13
       },
-      "whu-snack-go-cluster-backend-1-1": {
+      "gofun-cluster-backend-1-1": {
         "cpu_pct_avg": 18.33,
         "cpu_pct_max": 27.62,
         "memory_bytes_max": 19933429.76,
         "pids_max": 20
       },
-      "whu-snack-go-cluster-backend-2-1": {
+      "gofun-cluster-backend-2-1": {
         "cpu_pct_avg": 18.73,
         "cpu_pct_max": 26.34,
         "memory_bytes_max": 19650314.24,
         "pids_max": 19
       },
-      "whu-snack-go-cluster-backend-3-1": {
+      "gofun-cluster-backend-3-1": {
         "cpu_pct_avg": 19.6,
         "cpu_pct_max": 27.47,
         "memory_bytes_max": 19744686.08,
         "pids_max": 20
       },
-      "whu-snack-go-cluster-mysql-primary-1": {
+      "gofun-cluster-mysql-primary-1": {
         "cpu_pct_avg": 41.77,
         "cpu_pct_max": 62.85,
         "memory_bytes_max": 498597888,
         "pids_max": 81
       },
-      "whu-snack-go-cluster-mysql-replica-1": {
+      "gofun-cluster-mysql-replica-1": {
         "cpu_pct_avg": 38.63,
         "cpu_pct_max": 101.44,
         "memory_bytes_max": 465987174.4,
         "pids_max": 44
       },
-      "whu-snack-go-cluster-redis-primary-1": {
+      "gofun-cluster-redis-primary-1": {
         "cpu_pct_avg": 1.63,
         "cpu_pct_max": 3.37,
         "memory_bytes_max": 15162408.96,
         "pids_max": 6
       },
-      "whu-snack-go-cluster-redis-replica-1": {
+      "gofun-cluster-redis-replica-1": {
         "cpu_pct_avg": 0.32,
         "cpu_pct_max": 0.35,
         "memory_bytes_max": 6577717.248,
         "pids_max": 6
       },
-      "whu-snack-go-cluster-rabbitmq-1-1": {
+      "gofun-cluster-rabbitmq-1-1": {
         "cpu_pct_avg": 56.84,
         "cpu_pct_max": 157.44,
         "memory_bytes_max": 142711193.6,
         "pids_max": 49
       },
-      "whu-snack-go-cluster-rabbitmq-2-1": {
+      "gofun-cluster-rabbitmq-2-1": {
         "cpu_pct_avg": 5.89,
         "cpu_pct_max": 9.53,
         "memory_bytes_max": 142920908.8,
         "pids_max": 46
       },
-      "whu-snack-go-cluster-rabbitmq-3-1": {
+      "gofun-cluster-rabbitmq-3-1": {
         "cpu_pct_avg": 84.35,
         "cpu_pct_max": 147.37,
         "memory_bytes_max": 200173158.4,
         "pids_max": 88
       },
-      "whu-snack-go-cluster-rabbitmq-lb-1": {
+      "gofun-cluster-rabbitmq-lb-1": {
         "cpu_pct_avg": 1.32,
         "cpu_pct_max": 2,
         "memory_bytes_max": 80404807.68,

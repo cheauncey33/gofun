@@ -161,7 +161,7 @@
       },
       "resources": {
         "containers": {
-          "whu-snack-go-capacity-backend-load": {
+          "gofun-capacity-backend-load": {
             "cpu_pct_avg": 139.73,
             "cpu_pct_max": 166.82,
             "memory_bytes_max": 57839452.16,

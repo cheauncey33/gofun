@@ -10,5 +10,4 @@ backend/.gopath
 **/.DS_Store
 .backup
 mineru_vlm_output
-backend/WHU_Snack_GO
 deploy/.env

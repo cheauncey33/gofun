@@ -156,25 +156,25 @@
   },
   "resources": {
     "containers": {
-      "whu-snack-go-capacity-backend-load": {
+      "gofun-capacity-backend-load": {
         "cpu_pct_avg": 66.26,
         "cpu_pct_max": 146.74,
         "memory_bytes_max": 35536240.64,
         "pids_max": 26
       },
-      "whu-snack-go-capacity-mysql-1": {
+      "gofun-capacity-mysql-1": {
         "cpu_pct_avg": 61.59,
         "cpu_pct_max": 99.99,
         "memory_bytes_max": 708313088,
         "pids_max": 61
       },
-      "whu-snack-go-capacity-redis-1": {
+      "gofun-capacity-redis-1": {
         "cpu_pct_avg": 3.69,
         "cpu_pct_max": 17.62,
         "memory_bytes_max": 18129879.04,
         "pids_max": 6
       },
-      "whu-snack-go-capacity-rabbitmq-1": {
+      "gofun-capacity-rabbitmq-1": {
         "cpu_pct_avg": 134.52,
         "cpu_pct_max": 316.4,
         "memory_bytes_max": 221983539.2,

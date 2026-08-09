@@ -1,7 +1,7 @@
 {
   "sample_count": 32,
   "containers": {
-    "whu-snack-go-capacity-backend-load": {
+    "gofun-capacity-backend-load": {
       "cpu_pct_avg": 139.73,
       "cpu_pct_max": 166.82,
       "memory_bytes_max": 57839452.16,
@@ -35,7 +35,7 @@
     {
       "at": "2026-08-07T09:18:52.814Z",
       "type": "container",
-      "name": "whu-snack-go-capacity-backend-load",
+      "name": "gofun-capacity-backend-load",
       "cpu_pct": 26.91,
       "memory_bytes": 28605153.28,
       "pids": 24,
@@ -76,7 +76,7 @@
     {
       "at": "2026-08-07T09:18:54.937Z",
       "type": "container",
-      "name": "whu-snack-go-capacity-backend-load",
+      "name": "gofun-capacity-backend-load",
       "cpu_pct": 166.82,
       "memory_bytes": 54148464.64,
       "pids": 25,
@@ -117,7 +117,7 @@
     {
       "at": "2026-08-07T09:18:57.956Z",
       "type": "container",
-      "name": "whu-snack-go-capacity-backend-load",
+      "name": "gofun-capacity-backend-load",
       "cpu_pct": 156.04,
       "memory_bytes": 50845450.24,
       "pids": 27,
@@ -158,7 +158,7 @@
     {
       "at": "2026-08-07T09:19:00.966Z",
       "type": "container",
-      "name": "whu-snack-go-capacity-backend-load",
+      "name": "gofun-capacity-backend-load",
       "cpu_pct": 150.16,
       "memory_bytes": 52302970.88,
       "pids": 28,
@@ -199,7 +199,7 @@
     {
       "at": "2026-08-07T09:19:02.985Z",
       "type": "container",
-      "name": "whu-snack-go-capacity-backend-load",
+      "name": "gofun-capacity-backend-load",
       "cpu_pct": 153.55,
       "memory_bytes": 51935969.28,
       "pids": 28,
@@ -240,7 +240,7 @@
     {
       "at": "2026-08-07T09:19:05.005Z",
       "type": "container",
-      "name": "whu-snack-go-capacity-backend-load",
+      "name": "gofun-capacity-backend-load",
       "cpu_pct": 159.21,
       "memory_bytes": 48066723.84,
       "pids": 28,
@@ -281,7 +281,7 @@
     {
       "at": "2026-08-07T09:19:08.022Z",
       "type": "container",
-      "name": "whu-snack-go-capacity-backend-load",
+      "name": "gofun-capacity-backend-load",
       "cpu_pct": 146.99,
       "memory_bytes": 49629102.08,
       "pids": 30,
@@ -322,7 +322,7 @@
     {
       "at": "2026-08-07T09:19:10.039Z",
       "type": "container",
-      "name": "whu-snack-go-capacity-backend-load",
+      "name": "gofun-capacity-backend-load",
       "cpu_pct": 158.17,
       "memory_bytes": 57839452.16,
       "pids": 30,

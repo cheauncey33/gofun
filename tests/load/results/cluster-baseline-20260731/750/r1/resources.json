@@ -1,73 +1,73 @@
 {
   "sample_count": 150,
   "containers": {
-    "whu-snack-go-cluster-frontend-1": {
+    "gofun-cluster-frontend-1": {
       "cpu_pct_avg": 2.21,
       "cpu_pct_max": 3.55,
       "memory_bytes_max": 14040432.64,
       "pids_max": 13
     },
-    "whu-snack-go-cluster-backend-1-1": {
+    "gofun-cluster-backend-1-1": {
       "cpu_pct_avg": 20.9,
       "cpu_pct_max": 42.18,
       "memory_bytes_max": 23949475.84,
       "pids_max": 20
     },
-    "whu-snack-go-cluster-backend-2-1": {
+    "gofun-cluster-backend-2-1": {
       "cpu_pct_avg": 21.8,
       "cpu_pct_max": 35.59,
       "memory_bytes_max": 27304919.04,
       "pids_max": 22
     },
-    "whu-snack-go-cluster-backend-3-1": {
+    "gofun-cluster-backend-3-1": {
       "cpu_pct_avg": 20.34,
       "cpu_pct_max": 33.55,
       "memory_bytes_max": 24243077.12,
       "pids_max": 21
     },
-    "whu-snack-go-cluster-mysql-primary-1": {
+    "gofun-cluster-mysql-primary-1": {
       "cpu_pct_avg": 49.09,
       "cpu_pct_max": 75.04,
       "memory_bytes_max": 558576435.2,
       "pids_max": 94
     },
-    "whu-snack-go-cluster-mysql-replica-1": {
+    "gofun-cluster-mysql-replica-1": {
       "cpu_pct_avg": 43.03,
       "cpu_pct_max": 105.49,
       "memory_bytes_max": 478884659.2,
       "pids_max": 44
     },
-    "whu-snack-go-cluster-redis-primary-1": {
+    "gofun-cluster-redis-primary-1": {
       "cpu_pct_avg": 1.04,
       "cpu_pct_max": 3.68,
       "memory_bytes_max": 18832424.96,
       "pids_max": 12
     },
-    "whu-snack-go-cluster-redis-replica-1": {
+    "gofun-cluster-redis-replica-1": {
       "cpu_pct_avg": 0.52,
       "cpu_pct_max": 2.15,
       "memory_bytes_max": 8371830.784,
       "pids_max": 6
     },
-    "whu-snack-go-cluster-rabbitmq-1-1": {
+    "gofun-cluster-rabbitmq-1-1": {
       "cpu_pct_avg": 105.81,
       "cpu_pct_max": 251.79,
       "memory_bytes_max": 211392921.6,
       "pids_max": 91
     },
-    "whu-snack-go-cluster-rabbitmq-2-1": {
+    "gofun-cluster-rabbitmq-2-1": {
       "cpu_pct_avg": 32.29,
       "cpu_pct_max": 134.4,
       "memory_bytes_max": 207408332.8,
       "pids_max": 88
     },
-    "whu-snack-go-cluster-rabbitmq-3-1": {
+    "gofun-cluster-rabbitmq-3-1": {
       "cpu_pct_avg": 35.26,
       "cpu_pct_max": 129.14,
       "memory_bytes_max": 208142336,
       "pids_max": 88
     },
-    "whu-snack-go-cluster-rabbitmq-lb-1": {
+    "gofun-cluster-rabbitmq-lb-1": {
       "cpu_pct_avg": 1.37,
       "cpu_pct_max": 2.15,
       "memory_bytes_max": 80195092.48,
@@ -101,7 +101,7 @@
     {
       "at": "2026-07-30T18:15:08.397Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-frontend-1",
+      "name": "gofun-cluster-frontend-1",
       "cpu_pct": 0,
       "memory_bytes": 12341739.52,
       "pids": 13,
@@ -111,7 +111,7 @@
     {
       "at": "2026-07-30T18:15:08.397Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-1-1",
+      "name": "gofun-cluster-backend-1-1",
       "cpu_pct": 1.97,
       "memory_bytes": 22271754.24,
       "pids": 20,
@@ -121,7 +121,7 @@
     {
       "at": "2026-07-30T18:15:08.397Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-2-1",
+      "name": "gofun-cluster-backend-2-1",
       "cpu_pct": 1.94,
       "memory_bytes": 22240296.96,
       "pids": 21,
@@ -131,7 +131,7 @@
     {
       "at": "2026-07-30T18:15:08.397Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-3-1",
+      "name": "gofun-cluster-backend-3-1",
       "cpu_pct": 2.07,
       "memory_bytes": 21831352.32,
       "pids": 20,
@@ -141,7 +141,7 @@
     {
       "at": "2026-07-30T18:15:08.397Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "name": "gofun-cluster-mysql-primary-1",
       "cpu_pct": 3.78,
       "memory_bytes": 547566387.2,
       "pids": 77,
@@ -151,7 +151,7 @@
     {
       "at": "2026-07-30T18:15:08.397Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "name": "gofun-cluster-mysql-replica-1",
       "cpu_pct": 0.69,
       "memory_bytes": 472802918.4,
       "pids": 44,
@@ -161,7 +161,7 @@
     {
       "at": "2026-07-30T18:15:08.397Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-primary-1",
+      "name": "gofun-cluster-redis-primary-1",
       "cpu_pct": 0.29,
       "memory_bytes": 16179527.68,
       "pids": 6,
@@ -171,7 +171,7 @@
     {
       "at": "2026-07-30T18:15:08.397Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-replica-1",
+      "name": "gofun-cluster-redis-replica-1",
       "cpu_pct": 0.28,
       "memory_bytes": 7540310.016,
       "pids": 6,
@@ -181,7 +181,7 @@
     {
       "at": "2026-07-30T18:15:08.397Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "name": "gofun-cluster-rabbitmq-1-1",
       "cpu_pct": 1,
       "memory_bytes": 149946368,
       "pids": 49,
@@ -191,7 +191,7 @@
     {
       "at": "2026-07-30T18:15:08.397Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "name": "gofun-cluster-rabbitmq-2-1",
       "cpu_pct": 1.13,
       "memory_bytes": 148373504,
       "pids": 46,
@@ -201,7 +201,7 @@
     {
       "at": "2026-07-30T18:15:08.397Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "name": "gofun-cluster-rabbitmq-3-1",
       "cpu_pct": 58.44,
       "memory_bytes": 203843174.4,
       "pids": 88,
@@ -211,7 +211,7 @@
     {
       "at": "2026-07-30T18:15:08.397Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "name": "gofun-cluster-rabbitmq-lb-1",
       "cpu_pct": 0.04,
       "memory_bytes": 78873886.72,
       "pids": 13,
@@ -252,7 +252,7 @@
     {
       "at": "2026-07-30T18:15:11.515Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-frontend-1",
+      "name": "gofun-cluster-frontend-1",
       "cpu_pct": 3.3,
       "memory_bytes": 12803112.96,
       "pids": 13,
@@ -262,7 +262,7 @@
     {
       "at": "2026-07-30T18:15:11.515Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-1-1",
+      "name": "gofun-cluster-backend-1-1",
       "cpu_pct": 21.36,
       "memory_bytes": 22890414.08,
       "pids": 20,
@@ -272,7 +272,7 @@
     {
       "at": "2026-07-30T18:15:11.515Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-2-1",
+      "name": "gofun-cluster-backend-2-1",
       "cpu_pct": 33.77,
       "memory_bytes": 24725422.08,
       "pids": 21,
@@ -282,7 +282,7 @@
     {
       "at": "2026-07-30T18:15:11.515Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-3-1",
+      "name": "gofun-cluster-backend-3-1",
       "cpu_pct": 30.87,
       "memory_bytes": 24243077.12,
       "pids": 20,
@@ -292,7 +292,7 @@
     {
       "at": "2026-07-30T18:15:11.515Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "name": "gofun-cluster-mysql-primary-1",
       "cpu_pct": 75.04,
       "memory_bytes": 553648128,
       "pids": 84,
@@ -302,7 +302,7 @@
     {
       "at": "2026-07-30T18:15:11.515Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "name": "gofun-cluster-mysql-replica-1",
       "cpu_pct": 103.52,
       "memory_bytes": 476682649.6,
       "pids": 44,
@@ -312,7 +312,7 @@
     {
       "at": "2026-07-30T18:15:11.515Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-primary-1",
+      "name": "gofun-cluster-redis-primary-1",
       "cpu_pct": 0.35,
       "memory_bytes": 16011755.52,
       "pids": 6,
@@ -322,7 +322,7 @@
     {
       "at": "2026-07-30T18:15:11.515Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-replica-1",
+      "name": "gofun-cluster-redis-replica-1",
       "cpu_pct": 0.39,
       "memory_bytes": 7376732.16,
       "pids": 6,
@@ -332,7 +332,7 @@
     {
       "at": "2026-07-30T18:15:11.515Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "name": "gofun-cluster-rabbitmq-1-1",
       "cpu_pct": 11.45,
       "memory_bytes": 152043520,
       "pids": 49,
@@ -342,7 +342,7 @@
     {
       "at": "2026-07-30T18:15:11.515Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "name": "gofun-cluster-rabbitmq-2-1",
       "cpu_pct": 40.69,
       "memory_bytes": 150680371.2,
       "pids": 46,
@@ -352,7 +352,7 @@
     {
       "at": "2026-07-30T18:15:11.515Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "name": "gofun-cluster-rabbitmq-3-1",
       "cpu_pct": 8.18,
       "memory_bytes": 150575513.6,
       "pids": 46,
@@ -362,7 +362,7 @@
     {
       "at": "2026-07-30T18:15:11.515Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "name": "gofun-cluster-rabbitmq-lb-1",
       "cpu_pct": 1.45,
       "memory_bytes": 79398174.72,
       "pids": 13,
@@ -403,7 +403,7 @@
     {
       "at": "2026-07-30T18:15:14.542Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-frontend-1",
+      "name": "gofun-cluster-frontend-1",
       "cpu_pct": 2.79,
       "memory_bytes": 13400801.28,
       "pids": 13,
@@ -413,7 +413,7 @@
     {
       "at": "2026-07-30T18:15:14.542Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-1-1",
+      "name": "gofun-cluster-backend-1-1",
       "cpu_pct": 42.18,
       "memory_bytes": 23949475.84,
       "pids": 20,
@@ -423,7 +423,7 @@
     {
       "at": "2026-07-30T18:15:14.542Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-2-1",
+      "name": "gofun-cluster-backend-2-1",
       "cpu_pct": 23.73,
       "memory_bytes": 27304919.04,
       "pids": 21,
@@ -433,7 +433,7 @@
     {
       "at": "2026-07-30T18:15:14.542Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-3-1",
+      "name": "gofun-cluster-backend-3-1",
       "cpu_pct": 26.06,
       "memory_bytes": 24117248,
       "pids": 20,
@@ -443,7 +443,7 @@
     {
       "at": "2026-07-30T18:15:14.542Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "name": "gofun-cluster-mysql-primary-1",
       "cpu_pct": 70.42,
       "memory_bytes": 555011276.8,
       "pids": 94,
@@ -453,7 +453,7 @@
     {
       "at": "2026-07-30T18:15:14.542Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "name": "gofun-cluster-mysql-replica-1",
       "cpu_pct": 105.49,
       "memory_bytes": 477521510.4,
       "pids": 44,
@@ -463,7 +463,7 @@
     {
       "at": "2026-07-30T18:15:14.542Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-primary-1",
+      "name": "gofun-cluster-redis-primary-1",
       "cpu_pct": 3.68,
       "memory_bytes": 16536043.52,
       "pids": 6,
@@ -473,7 +473,7 @@
     {
       "at": "2026-07-30T18:15:14.542Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-replica-1",
+      "name": "gofun-cluster-redis-replica-1",
       "cpu_pct": 0.34,
       "memory_bytes": 7331643.392,
       "pids": 6,
@@ -483,7 +483,7 @@
     {
       "at": "2026-07-30T18:15:14.542Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "name": "gofun-cluster-rabbitmq-1-1",
       "cpu_pct": 146.56,
       "memory_bytes": 152148377.6,
       "pids": 49,
@@ -493,7 +493,7 @@
     {
       "at": "2026-07-30T18:15:14.542Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "name": "gofun-cluster-rabbitmq-2-1",
       "cpu_pct": 9.68,
       "memory_bytes": 150365798.4,
       "pids": 46,
@@ -503,7 +503,7 @@
     {
       "at": "2026-07-30T18:15:14.542Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "name": "gofun-cluster-rabbitmq-3-1",
       "cpu_pct": 9.63,
       "memory_bytes": 150994944,
       "pids": 46,
@@ -513,7 +513,7 @@
     {
       "at": "2026-07-30T18:15:14.542Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "name": "gofun-cluster-rabbitmq-lb-1",
       "cpu_pct": 1.56,
       "memory_bytes": 79660318.72,
       "pids": 13,
@@ -554,7 +554,7 @@
     {
       "at": "2026-07-30T18:15:17.571Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-frontend-1",
+      "name": "gofun-cluster-frontend-1",
       "cpu_pct": 2.79,
       "memory_bytes": 12886999.04,
       "pids": 13,
@@ -564,7 +564,7 @@
     {
       "at": "2026-07-30T18:15:17.571Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-1-1",
+      "name": "gofun-cluster-backend-1-1",
       "cpu_pct": 28.74,
       "memory_bytes": 23634903.04,
       "pids": 20,
@@ -574,7 +574,7 @@
     {
       "at": "2026-07-30T18:15:17.571Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-2-1",
+      "name": "gofun-cluster-backend-2-1",
       "cpu_pct": 35.59,
       "memory_bytes": 24536678.4,
       "pids": 22,
@@ -584,7 +584,7 @@
     {
       "at": "2026-07-30T18:15:17.571Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-3-1",
+      "name": "gofun-cluster-backend-3-1",
       "cpu_pct": 19.13,
       "memory_bytes": 22890414.08,
       "pids": 21,
@@ -594,7 +594,7 @@
     {
       "at": "2026-07-30T18:15:17.571Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "name": "gofun-cluster-mysql-primary-1",
       "cpu_pct": 63.75,
       "memory_bytes": 554067558.4,
       "pids": 80,
@@ -604,7 +604,7 @@
     {
       "at": "2026-07-30T18:15:17.571Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "name": "gofun-cluster-mysql-replica-1",
       "cpu_pct": 95.33,
       "memory_bytes": 477940940.8,
       "pids": 44,
@@ -614,7 +614,7 @@
     {
       "at": "2026-07-30T18:15:17.571Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-primary-1",
+      "name": "gofun-cluster-redis-primary-1",
       "cpu_pct": 0.77,
       "memory_bytes": 16022241.28,
       "pids": 6,
@@ -624,7 +624,7 @@
     {
       "at": "2026-07-30T18:15:17.571Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-replica-1",
+      "name": "gofun-cluster-redis-replica-1",
       "cpu_pct": 0.4,
       "memory_bytes": 8371830.784,
       "pids": 6,
@@ -634,7 +634,7 @@
     {
       "at": "2026-07-30T18:15:17.571Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "name": "gofun-cluster-rabbitmq-1-1",
       "cpu_pct": 12.12,
       "memory_bytes": 152882380.8,
       "pids": 49,
@@ -644,7 +644,7 @@
     {
       "at": "2026-07-30T18:15:17.571Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "name": "gofun-cluster-rabbitmq-2-1",
       "cpu_pct": 9.13,
       "memory_bytes": 151728947.2,
       "pids": 46,
@@ -654,7 +654,7 @@
     {
       "at": "2026-07-30T18:15:17.571Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "name": "gofun-cluster-rabbitmq-3-1",
       "cpu_pct": 8.88,
       "memory_bytes": 151204659.2,
       "pids": 46,
@@ -664,7 +664,7 @@
     {
       "at": "2026-07-30T18:15:17.571Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "name": "gofun-cluster-rabbitmq-lb-1",
       "cpu_pct": 1.73,
       "memory_bytes": 79167488,
       "pids": 13,
@@ -705,7 +705,7 @@
     {
       "at": "2026-07-30T18:15:20.604Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-frontend-1",
+      "name": "gofun-cluster-frontend-1",
       "cpu_pct": 2.81,
       "memory_bytes": 13694402.56,
       "pids": 13,
@@ -715,7 +715,7 @@
     {
       "at": "2026-07-30T18:15:20.604Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-1-1",
+      "name": "gofun-cluster-backend-1-1",
       "cpu_pct": 24.81,
       "memory_bytes": 22764584.96,
       "pids": 20,
@@ -725,7 +725,7 @@
     {
       "at": "2026-07-30T18:15:20.604Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-2-1",
+      "name": "gofun-cluster-backend-2-1",
       "cpu_pct": 33.03,
       "memory_bytes": 22963814.4,
       "pids": 22,
@@ -735,7 +735,7 @@
     {
       "at": "2026-07-30T18:15:20.604Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-3-1",
+      "name": "gofun-cluster-backend-3-1",
       "cpu_pct": 33.55,
       "memory_bytes": 23477616.64,
       "pids": 21,
@@ -745,7 +745,7 @@
     {
       "at": "2026-07-30T18:15:20.604Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "name": "gofun-cluster-mysql-primary-1",
       "cpu_pct": 66.75,
       "memory_bytes": 557527859.2,
       "pids": 81,
@@ -755,7 +755,7 @@
     {
       "at": "2026-07-30T18:15:20.604Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "name": "gofun-cluster-mysql-replica-1",
       "cpu_pct": 69.72,
       "memory_bytes": 477102080,
       "pids": 44,
@@ -765,7 +765,7 @@
     {
       "at": "2026-07-30T18:15:20.604Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-primary-1",
+      "name": "gofun-cluster-redis-primary-1",
       "cpu_pct": 0.51,
       "memory_bytes": 16273899.52,
       "pids": 6,
@@ -775,7 +775,7 @@
     {
       "at": "2026-07-30T18:15:20.604Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-replica-1",
+      "name": "gofun-cluster-redis-replica-1",
       "cpu_pct": 0.33,
       "memory_bytes": 7331643.392,
       "pids": 6,
@@ -785,7 +785,7 @@
     {
       "at": "2026-07-30T18:15:20.604Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "name": "gofun-cluster-rabbitmq-1-1",
       "cpu_pct": 151.69,
       "memory_bytes": 151833804.8,
       "pids": 49,
@@ -795,7 +795,7 @@
     {
       "at": "2026-07-30T18:15:20.604Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "name": "gofun-cluster-rabbitmq-2-1",
       "cpu_pct": 8.7,
       "memory_bytes": 151099801.6,
       "pids": 46,
@@ -805,7 +805,7 @@
     {
       "at": "2026-07-30T18:15:20.604Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "name": "gofun-cluster-rabbitmq-3-1",
       "cpu_pct": 110.64,
       "memory_bytes": 208142336,
       "pids": 88,
@@ -815,7 +815,7 @@
     {
       "at": "2026-07-30T18:15:20.604Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "name": "gofun-cluster-rabbitmq-lb-1",
       "cpu_pct": 1.81,
       "memory_bytes": 78905344,
       "pids": 13,
@@ -856,7 +856,7 @@
     {
       "at": "2026-07-30T18:15:22.623Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-frontend-1",
+      "name": "gofun-cluster-frontend-1",
       "cpu_pct": 3.55,
       "memory_bytes": 13662945.28,
       "pids": 13,
@@ -866,7 +866,7 @@
     {
       "at": "2026-07-30T18:15:22.623Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-1-1",
+      "name": "gofun-cluster-backend-1-1",
       "cpu_pct": 28.82,
       "memory_bytes": 23372759.04,
       "pids": 20,
@@ -876,7 +876,7 @@
     {
       "at": "2026-07-30T18:15:22.623Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-2-1",
+      "name": "gofun-cluster-backend-2-1",
       "cpu_pct": 28.75,
       "memory_bytes": 23110615.04,
       "pids": 22,
@@ -886,7 +886,7 @@
     {
       "at": "2026-07-30T18:15:22.623Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-3-1",
+      "name": "gofun-cluster-backend-3-1",
       "cpu_pct": 30.33,
       "memory_bytes": 23708303.36,
       "pids": 21,
@@ -896,7 +896,7 @@
     {
       "at": "2026-07-30T18:15:22.623Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "name": "gofun-cluster-mysql-primary-1",
       "cpu_pct": 70.16,
       "memory_bytes": 557318144,
       "pids": 80,
@@ -906,7 +906,7 @@
     {
       "at": "2026-07-30T18:15:22.623Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "name": "gofun-cluster-mysql-replica-1",
       "cpu_pct": 16.99,
       "memory_bytes": 477311795.2,
       "pids": 44,
@@ -916,7 +916,7 @@
     {
       "at": "2026-07-30T18:15:22.623Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-primary-1",
+      "name": "gofun-cluster-redis-primary-1",
       "cpu_pct": 0.5,
       "memory_bytes": 16441671.68,
       "pids": 6,
@@ -926,7 +926,7 @@
     {
       "at": "2026-07-30T18:15:22.623Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-replica-1",
+      "name": "gofun-cluster-redis-replica-1",
       "cpu_pct": 0.44,
       "memory_bytes": 7597981.696,
       "pids": 6,
@@ -936,7 +936,7 @@
     {
       "at": "2026-07-30T18:15:22.623Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "name": "gofun-cluster-rabbitmq-1-1",
       "cpu_pct": 251.79,
       "memory_bytes": 211392921.6,
       "pids": 91,
@@ -946,7 +946,7 @@
     {
       "at": "2026-07-30T18:15:22.623Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "name": "gofun-cluster-rabbitmq-2-1",
       "cpu_pct": 102.3,
       "memory_bytes": 207408332.8,
       "pids": 88,
@@ -956,7 +956,7 @@
     {
       "at": "2026-07-30T18:15:22.623Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "name": "gofun-cluster-rabbitmq-3-1",
       "cpu_pct": 9.59,
       "memory_bytes": 150680371.2,
       "pids": 46,
@@ -966,7 +966,7 @@
     {
       "at": "2026-07-30T18:15:22.623Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "name": "gofun-cluster-rabbitmq-lb-1",
       "cpu_pct": 1.69,
       "memory_bytes": 79146516.48,
       "pids": 13,
@@ -1007,7 +1007,7 @@
     {
       "at": "2026-07-30T18:15:24.642Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-frontend-1",
+      "name": "gofun-cluster-frontend-1",
       "cpu_pct": 2.65,
       "memory_bytes": 12415139.84,
       "pids": 13,
@@ -1017,7 +1017,7 @@
     {
       "at": "2026-07-30T18:15:24.642Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-1-1",
+      "name": "gofun-cluster-backend-1-1",
       "cpu_pct": 23.71,
       "memory_bytes": 22124953.6,
       "pids": 20,
@@ -1027,7 +1027,7 @@
     {
       "at": "2026-07-30T18:15:24.642Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-2-1",
+      "name": "gofun-cluster-backend-2-1",
       "cpu_pct": 24,
       "memory_bytes": 22638755.84,
       "pids": 22,
@@ -1037,7 +1037,7 @@
     {
       "at": "2026-07-30T18:15:24.642Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-3-1",
+      "name": "gofun-cluster-backend-3-1",
       "cpu_pct": 23.89,
       "memory_bytes": 23372759.04,
       "pids": 21,
@@ -1047,7 +1047,7 @@
     {
       "at": "2026-07-30T18:15:24.642Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "name": "gofun-cluster-mysql-primary-1",
       "cpu_pct": 57.25,
       "memory_bytes": 558052147.2,
       "pids": 80,
@@ -1057,7 +1057,7 @@
     {
       "at": "2026-07-30T18:15:24.642Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "name": "gofun-cluster-mysql-replica-1",
       "cpu_pct": 10.12,
       "memory_bytes": 478150656,
       "pids": 44,
@@ -1067,7 +1067,7 @@
     {
       "at": "2026-07-30T18:15:24.642Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-primary-1",
+      "name": "gofun-cluster-redis-primary-1",
       "cpu_pct": 0.32,
       "memory_bytes": 16452157.44,
       "pids": 6,
@@ -1077,7 +1077,7 @@
     {
       "at": "2026-07-30T18:15:24.642Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-replica-1",
+      "name": "gofun-cluster-redis-replica-1",
       "cpu_pct": 0.31,
       "memory_bytes": 7323254.784,
       "pids": 6,
@@ -1087,7 +1087,7 @@
     {
       "at": "2026-07-30T18:15:24.642Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "name": "gofun-cluster-rabbitmq-1-1",
       "cpu_pct": 134.04,
       "memory_bytes": 152358092.8,
       "pids": 49,
@@ -1097,7 +1097,7 @@
     {
       "at": "2026-07-30T18:15:24.642Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "name": "gofun-cluster-rabbitmq-2-1",
       "cpu_pct": 8.06,
       "memory_bytes": 150994944,
       "pids": 46,
@@ -1107,7 +1107,7 @@
     {
       "at": "2026-07-30T18:15:24.642Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "name": "gofun-cluster-rabbitmq-3-1",
       "cpu_pct": 9.7,
       "memory_bytes": 151728947.2,
       "pids": 46,
@@ -1117,7 +1117,7 @@
     {
       "at": "2026-07-30T18:15:24.642Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "name": "gofun-cluster-rabbitmq-lb-1",
       "cpu_pct": 1.93,
       "memory_bytes": 79901491.2,
       "pids": 13,
@@ -1158,7 +1158,7 @@
     {
       "at": "2026-07-30T18:15:26.650Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-frontend-1",
+      "name": "gofun-cluster-frontend-1",
       "cpu_pct": 2.7,
       "memory_bytes": 12729712.64,
       "pids": 13,
@@ -1168,7 +1168,7 @@
     {
       "at": "2026-07-30T18:15:26.650Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-1-1",
+      "name": "gofun-cluster-backend-1-1",
       "cpu_pct": 20.6,
       "memory_bytes": 22229811.2,
       "pids": 20,
@@ -1178,7 +1178,7 @@
     {
       "at": "2026-07-30T18:15:26.650Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-2-1",
+      "name": "gofun-cluster-backend-2-1",
       "cpu_pct": 20.52,
       "memory_bytes": 22942842.88,
       "pids": 22,
@@ -1188,7 +1188,7 @@
     {
       "at": "2026-07-30T18:15:26.650Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-3-1",
+      "name": "gofun-cluster-backend-3-1",
       "cpu_pct": 21.43,
       "memory_bytes": 23246929.92,
       "pids": 21,
@@ -1198,7 +1198,7 @@
     {
       "at": "2026-07-30T18:15:26.650Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "name": "gofun-cluster-mysql-primary-1",
       "cpu_pct": 50.28,
       "memory_bytes": 556793856,
       "pids": 79,
@@ -1208,7 +1208,7 @@
     {
       "at": "2026-07-30T18:15:26.650Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "name": "gofun-cluster-mysql-replica-1",
       "cpu_pct": 9.14,
       "memory_bytes": 478465228.8,
       "pids": 44,
@@ -1218,7 +1218,7 @@
     {
       "at": "2026-07-30T18:15:26.650Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-primary-1",
+      "name": "gofun-cluster-redis-primary-1",
       "cpu_pct": 2.1,
       "memory_bytes": 15927869.44,
       "pids": 6,
@@ -1228,7 +1228,7 @@
     {
       "at": "2026-07-30T18:15:26.650Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-replica-1",
+      "name": "gofun-cluster-redis-replica-1",
       "cpu_pct": 2.15,
       "memory_bytes": 7585398.784,
       "pids": 6,
@@ -1238,7 +1238,7 @@
     {
       "at": "2026-07-30T18:15:26.650Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "name": "gofun-cluster-rabbitmq-1-1",
       "cpu_pct": 119.13,
       "memory_bytes": 152567808,
       "pids": 49,
@@ -1248,7 +1248,7 @@
     {
       "at": "2026-07-30T18:15:26.650Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "name": "gofun-cluster-rabbitmq-2-1",
       "cpu_pct": 8.23,
       "memory_bytes": 151728947.2,
       "pids": 46,
@@ -1258,7 +1258,7 @@
     {
       "at": "2026-07-30T18:15:26.650Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "name": "gofun-cluster-rabbitmq-3-1",
       "cpu_pct": 129.14,
       "memory_bytes": 152148377.6,
       "pids": 46,
@@ -1268,7 +1268,7 @@
     {
       "at": "2026-07-30T18:15:26.650Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "name": "gofun-cluster-rabbitmq-lb-1",
       "cpu_pct": 2.15,
       "memory_bytes": 80195092.48,
       "pids": 13,
@@ -1309,7 +1309,7 @@
     {
       "at": "2026-07-30T18:15:28.668Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-frontend-1",
+      "name": "gofun-cluster-frontend-1",
       "cpu_pct": 1.49,
       "memory_bytes": 14040432.64,
       "pids": 13,
@@ -1319,7 +1319,7 @@
     {
       "at": "2026-07-30T18:15:28.668Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-1-1",
+      "name": "gofun-cluster-backend-1-1",
       "cpu_pct": 12.84,
       "memory_bytes": 21139292.16,
       "pids": 20,
@@ -1329,7 +1329,7 @@
     {
       "at": "2026-07-30T18:15:28.668Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-2-1",
+      "name": "gofun-cluster-backend-2-1",
       "cpu_pct": 12.81,
       "memory_bytes": 22166896.64,
       "pids": 22,
@@ -1339,7 +1339,7 @@
     {
       "at": "2026-07-30T18:15:28.668Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-3-1",
+      "name": "gofun-cluster-backend-3-1",
       "cpu_pct": 12.04,
       "memory_bytes": 21967667.2,
       "pids": 21,
@@ -1349,7 +1349,7 @@
     {
       "at": "2026-07-30T18:15:28.668Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "name": "gofun-cluster-mysql-primary-1",
       "cpu_pct": 30.42,
       "memory_bytes": 558157004.8,
       "pids": 77,
@@ -1359,7 +1359,7 @@
     {
       "at": "2026-07-30T18:15:28.668Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "name": "gofun-cluster-mysql-replica-1",
       "cpu_pct": 9.5,
       "memory_bytes": 478884659.2,
       "pids": 44,
@@ -1369,7 +1369,7 @@
     {
       "at": "2026-07-30T18:15:28.668Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-primary-1",
+      "name": "gofun-cluster-redis-primary-1",
       "cpu_pct": 0.33,
       "memory_bytes": 16190013.44,
       "pids": 6,
@@ -1379,7 +1379,7 @@
     {
       "at": "2026-07-30T18:15:28.668Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-replica-1",
+      "name": "gofun-cluster-redis-replica-1",
       "cpu_pct": 0.32,
       "memory_bytes": 7589593.088,
       "pids": 6,
@@ -1389,7 +1389,7 @@
     {
       "at": "2026-07-30T18:15:28.668Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "name": "gofun-cluster-rabbitmq-1-1",
       "cpu_pct": 229.9,
       "memory_bytes": 152882380.8,
       "pids": 49,
@@ -1399,7 +1399,7 @@
     {
       "at": "2026-07-30T18:15:28.668Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "name": "gofun-cluster-rabbitmq-2-1",
       "cpu_pct": 134.4,
       "memory_bytes": 151833804.8,
       "pids": 46,
@@ -1409,7 +1409,7 @@
     {
       "at": "2026-07-30T18:15:28.668Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "name": "gofun-cluster-rabbitmq-3-1",
       "cpu_pct": 7.95,
       "memory_bytes": 151519232,
       "pids": 46,
@@ -1419,7 +1419,7 @@
     {
       "at": "2026-07-30T18:15:28.668Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "name": "gofun-cluster-rabbitmq-lb-1",
       "cpu_pct": 1.3,
       "memory_bytes": 79377203.2,
       "pids": 13,
@@ -1460,7 +1460,7 @@
     {
       "at": "2026-07-30T18:15:30.152Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-frontend-1",
+      "name": "gofun-cluster-frontend-1",
       "cpu_pct": 0.07,
       "memory_bytes": 13075742.72,
       "pids": 13,
@@ -1470,7 +1470,7 @@
     {
       "at": "2026-07-30T18:15:30.152Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-1-1",
+      "name": "gofun-cluster-backend-1-1",
       "cpu_pct": 4.01,
       "memory_bytes": 20950548.48,
       "pids": 20,
@@ -1480,7 +1480,7 @@
     {
       "at": "2026-07-30T18:15:30.152Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-2-1",
+      "name": "gofun-cluster-backend-2-1",
       "cpu_pct": 3.84,
       "memory_bytes": 22229811.2,
       "pids": 22,
@@ -1490,7 +1490,7 @@
     {
       "at": "2026-07-30T18:15:30.152Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-backend-3-1",
+      "name": "gofun-cluster-backend-3-1",
       "cpu_pct": 4.01,
       "memory_bytes": 22502440.96,
       "pids": 21,
@@ -1500,7 +1500,7 @@
     {
       "at": "2026-07-30T18:15:30.152Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-primary-1",
+      "name": "gofun-cluster-mysql-primary-1",
       "cpu_pct": 3.01,
       "memory_bytes": 558576435.2,
       "pids": 77,
@@ -1510,7 +1510,7 @@
     {
       "at": "2026-07-30T18:15:30.152Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-mysql-replica-1",
+      "name": "gofun-cluster-mysql-replica-1",
       "cpu_pct": 9.84,
       "memory_bytes": 478570086.4,
       "pids": 44,
@@ -1520,7 +1520,7 @@
     {
       "at": "2026-07-30T18:15:30.152Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-primary-1",
+      "name": "gofun-cluster-redis-primary-1",
       "cpu_pct": 1.52,
       "memory_bytes": 18832424.96,
       "pids": 12,
@@ -1530,7 +1530,7 @@
     {
       "at": "2026-07-30T18:15:30.152Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-redis-replica-1",
+      "name": "gofun-cluster-redis-replica-1",
       "cpu_pct": 0.27,
       "memory_bytes": 7581204.48,
       "pids": 6,
@@ -1540,7 +1540,7 @@
     {
       "at": "2026-07-30T18:15:30.152Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-1-1",
+      "name": "gofun-cluster-rabbitmq-1-1",
       "cpu_pct": 0.42,
       "memory_bytes": 152253235.2,
       "pids": 49,
@@ -1550,7 +1550,7 @@
     {
       "at": "2026-07-30T18:15:30.152Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-2-1",
+      "name": "gofun-cluster-rabbitmq-2-1",
       "cpu_pct": 0.54,
       "memory_bytes": 150785228.8,
       "pids": 46,
@@ -1560,7 +1560,7 @@
     {
       "at": "2026-07-30T18:15:30.152Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-3-1",
+      "name": "gofun-cluster-rabbitmq-3-1",
       "cpu_pct": 0.46,
       "memory_bytes": 150994944,
       "pids": 46,
@@ -1570,7 +1570,7 @@
     {
       "at": "2026-07-30T18:15:30.152Z",
       "type": "container",
-      "name": "whu-snack-go-cluster-rabbitmq-lb-1",
+      "name": "gofun-cluster-rabbitmq-lb-1",
       "cpu_pct": 0.03,
       "memory_bytes": 78873886.72,
       "pids": 13,
