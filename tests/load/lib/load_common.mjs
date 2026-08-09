@@ -8,7 +8,6 @@ export const cfg = {
   adminPassword: process.env.ADMIN_PASSWORD || "admin123",
   loadUserPrefix: process.env.LOAD_USER_PREFIX || "load_user_",
   loadPassword: process.env.LOAD_PASSWORD || "123456",
-  dormId: Number(process.env.DORM_ID || 1),
   durationSeconds: Number(process.env.DURATION_SECONDS || 60),
   concurrency: Number(process.env.CONCURRENCY || 50),
   thinkMs: Number(process.env.THINK_MS || 0),
@@ -181,7 +180,7 @@ export async function ensureUser(username, password = cfg.loadPassword, metrics)
 
   try {
     await httpJson("POST", "/register", {
-      body: { username, password, dorm_id: cfg.dormId },
+      body: { username, password },
       label: "register",
       metrics,
       okStatuses: [200, 400],

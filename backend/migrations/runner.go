@@ -23,7 +23,6 @@ func (SchemaMigration) TableName() string {
 }
 
 var baselineTables = []string{
-	"dormitory",
 	"user",
 	"organizer",
 	"organizer_member",

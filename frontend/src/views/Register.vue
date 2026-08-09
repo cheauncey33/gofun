@@ -83,7 +83,7 @@ async function handleRegister() {
   if (!valid) return
   loading.value = true
   try {
-    await api.register(form.username, form.password, form.dorm_id || 1)
+    await api.register(form.username, form.password)
     ElMessage.success('注册成功，请登录')
     router.push('/login')
   } catch (e) {

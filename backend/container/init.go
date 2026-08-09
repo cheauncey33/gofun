@@ -129,17 +129,11 @@ func initDB(cfg config.MySQLConfig, tracingEnabled bool) (*gorm.DB, error) {
 	var adminCount int64
 	db.Model(&models.User{}).Where("role = ?", "admin").Count(&adminCount)
 	if adminCount == 0 {
-		var dorm models.Dormitory
-		if err := db.Where(models.Dormitory{BuildingName: "默认宿舍", RoomNumber: "000"}).
-			FirstOrCreate(&dorm).Error; err != nil {
-			return nil, fmt.Errorf("创建默认管理员宿舍失败: %w", err)
-		}
 		hashed, _ := bcrypt.GenerateFromPassword([]byte("admin123"), 12)
 		db.Where(models.User{Username: "admin"}).Assign(models.User{
 			Password:     string(hashed),
 			Balance:      9999,
 			BalanceCents: 999900,
-			DormID:       dorm.ID,
 			Role:         "admin",
 		}).FirstOrCreate(&models.User{})
 		log.Println("默认管理员已创建: admin / admin123")
@@ -152,7 +146,6 @@ func initDB(cfg config.MySQLConfig, tracingEnabled bool) (*gorm.DB, error) {
 // ticketingSchemaModels 用于测试票务模型边界；运行时结构由 migrations/*.sql 决定。
 func ticketingSchemaModels() []interface{} {
 	return []interface{}{
-		&models.Dormitory{},
 		&models.User{},
 		&models.Organizer{},
 		&models.OrganizerMember{},

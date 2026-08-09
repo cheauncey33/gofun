@@ -1,17 +1,6 @@
 -- Gofun 票务 V1 数据库基线。
 -- 该文件冻结主办方、活动、场次、票档、订单和限时开售的最小运行结构。
 
-CREATE TABLE IF NOT EXISTS `dormitory` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
-  `update_time` datetime(3) DEFAULT NULL,
-  `create_time` datetime(3) DEFAULT NULL,
-  `delete_time` datetime(3) DEFAULT NULL,
-  `building_name` varchar(64) NOT NULL,
-  `room_number` varchar(32) NOT NULL,
-  PRIMARY KEY (`id`),
-  KEY `idx_dormitory_delete_time` (`delete_time`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
--- statement
 CREATE TABLE IF NOT EXISTS `user` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `update_time` datetime(3) DEFAULT NULL,
@@ -23,14 +12,11 @@ CREATE TABLE IF NOT EXISTS `user` (
   `balance_cents` bigint NOT NULL DEFAULT 100000,
   `phone` varchar(20) DEFAULT NULL,
   `avatar_url` varchar(512) DEFAULT NULL,
-  `dorm_id` bigint DEFAULT NULL,
   `role` varchar(16) DEFAULT 'user',
   `last_login_at` datetime(3) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uni_user_username` (`username`),
-  KEY `idx_user_delete_time` (`delete_time`),
-  KEY `fk_user_dorm` (`dorm_id`),
-  CONSTRAINT `fk_user_dorm` FOREIGN KEY (`dorm_id`) REFERENCES `dormitory` (`id`)
+  KEY `idx_user_delete_time` (`delete_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 -- statement
 CREATE TABLE IF NOT EXISTS `organizer` (

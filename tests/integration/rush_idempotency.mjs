@@ -36,7 +36,7 @@ async function http(method, path, { token, body, headers = {} } = {}) {
 
 async function ensureUser() {
   await http("POST", "/register", {
-    body: { username, password, dorm_id: 1 },
+    body: { username, password },
   });
   const login = await http("POST", "/login", { body: { username, password } });
   const token = login.data?.data?.access_token || login.data?.data?.token;

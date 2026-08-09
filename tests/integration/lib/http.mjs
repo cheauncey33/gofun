@@ -31,7 +31,7 @@ export async function registerAndLogin(username, password = "12345678") {
   let lastErr = null;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const reg = await http("POST", "/register", {
-      body: { username, password, dorm_id: 1 },
+      body: { username, password },
     });
     // 已存在 / 成功都继续登录；429 则退避重试
     if (reg.status === 429) {

@@ -40,7 +40,6 @@ func testMySQLDSN(t *testing.T) string {
 // 覆盖三条核心保证：不超卖、幂等重试、单笔限购。
 
 var ticketIntegrationModels = []interface{}{
-	&models.Dormitory{},
 	&models.User{},
 	&models.Organizer{},
 	&models.OrganizerMember{},
@@ -164,12 +163,7 @@ func (e *orderIntegrationEnv) seedPurchasableTier(t *testing.T, totalQuota, purc
 
 func (e *orderIntegrationEnv) newUser(t *testing.T, username string) *models.User {
 	t.Helper()
-	// user.dorm_id 有 fk_user_dorm 外键且零值为 0，必须先建真实 dormitory 并关联。
-	dorm := models.Dormitory{BuildingName: "测试楼-" + username}
-	if err := e.db.Create(&dorm).Error; err != nil {
-		t.Fatalf("create dormitory: %v", err)
-	}
-	u := models.User{Username: username, Password: "x", Role: "user", DormID: dorm.ID}
+	u := models.User{Username: username, Password: "x", Role: "user"}
 	if err := e.db.Create(&u).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}

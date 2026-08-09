@@ -36,7 +36,6 @@ export default function () {
     const registerPayload = JSON.stringify({
       username: "testuser" + __VU,
       password: "123456",
-      dorm_id: 1,
     });
     const regRes = http.post(`${BASE_URL}/register`, registerPayload, {
       headers: { "Content-Type": "application/json" },

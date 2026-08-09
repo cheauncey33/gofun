@@ -69,7 +69,7 @@ const newIdempotencyKey = () => {
 export default {
   // Auth
   login: (username, password) => post('/login', { username, password }),
-  register: (username, password, dorm_id = 1) => post('/register', { username, password, dorm_id }),
+  register: (username, password) => post('/register', { username, password }),
   logout: (refresh_token) => post('/logout', { refresh_token }),
 
   // Event discovery

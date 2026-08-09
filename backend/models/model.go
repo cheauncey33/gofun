@@ -13,12 +13,6 @@ type Base struct {
 	DeleteTime gorm.DeletedAt `gorm:"index;column:delete_time"`
 }
 
-type Dormitory struct {
-	Base
-	BuildingName string `gorm:"size:64;column:building_name;not null"`
-	RoomNumber   string `gorm:"size:32;column:room_number;not null"`
-}
-
 // TODO: float64 money fields should migrate to int64 cents or shopspring/decimal.
 type User struct {
 	Base
@@ -28,8 +22,6 @@ type User struct {
 	BalanceCents int64      `gorm:"not null;default:100000" json:"balance_cents"`
 	Phone        *string    `gorm:"size:20" json:"phone"`
 	AvatarURL    string     `gorm:"size:512" json:"avatar_url"`
-	DormID       int64      `json:"dorm_id"`
-	Dorm         Dormitory  `gorm:"foreignKey:DormID" json:"dorm,omitempty"`
 	Role         string     `gorm:"size:16;default:'user'" json:"role"`
 	LastLoginAt  *time.Time `json:"last_login_at"`
 }

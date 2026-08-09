@@ -17,7 +17,6 @@ type LoginReq struct {
 type RegisterReq struct {
 	Username string `json:"username" binding:"required,username"`
 	Password string `json:"password" binding:"required,password"`
-	DormID   int64  `json:"dorm_id" binding:"required,gt=0"`
 }
 
 type RefreshReq struct {
@@ -42,7 +41,7 @@ func (ctrl *UserController) Register(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
 		return
 	}
-	if err := ctrl.userSvc.Register(req.Username, req.Password, req.DormID); err != nil {
+	if err := ctrl.userSvc.Register(req.Username, req.Password); err != nil {
 		response.Error(c, http.StatusBadRequest, response.CodeUserExists, err.Error())
 		return
 	}
