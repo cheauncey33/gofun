@@ -11,7 +11,7 @@
 | Cursor（本会话） | Code review + 缺陷修复 + 维护本协作文档 |
 | 用户 | 需求拍板、验收、决定是否提交/开 PR |
 
-## 当前状态（2026-07-21）
+## 当前状态（2026-08-09）
 
 ### 已完成基线（Codex）
 
@@ -42,20 +42,21 @@
 | A1 下架/停售/取消活动 | 已落地 API + 主办方台按钮 |
 | A2 批量退款 | `BatchRefundEvent` + 取消活动联动 |
 | A3 排队体验 | OrderDetail 自动轮询 + 横幅 |
-| A4 清零食前端遗留 | 已删未引用 views/admin/cart；后端 snack 代码仍归档 |
+| A4 边界整理 | 已完成；运行代码、文档和脚本已统一到当前票务路径 |
 | B1 票额对账 | `TicketCompensationService` 5min |
 | B2 Outbox | `004_ticket_order_outbox` + `StartOutboxPublisher` |
 | B3 限流/压测/指标 | 写路径 IP 限流；`ticket_smoke`/`ticket_rush_spike`；OrdersCreated/MQ/Compensation |
 | C1 核销强化 | session_id 约束 + 今日统计 |
-| C2 支付适配层 | `PaymentGateway` / `SandboxPaymentGateway` / 回调幂等表 |
+| C2 支付适配层 | `PaymentGateway` / `SandboxPaymentGateway` / 回调幂等表 / 支付沙箱 E2E |
 | C3 密钥轮换 | `ticket_qr.previous_secrets` 多密钥验签 |
 
 ### 仍开放 / 建议下轮
 
 1. **抢票并发集成测试**：同幂等键 + 换 token 双 Lua。
 2. **限时开售多数量 UI**：`per_user_limit > 1`。
-3. **后端 snack 死代码删除**：`product_*` / `seckill_*` / snack `order_*`（确认无回滚需求后）。
-4. **真实支付渠道**：在 `PaymentGateway` 上接微信/支付宝，并补渠道查询、对账和退款重试。
+3. **支付生产化**：沙箱回调调度仍在进程内；真实渠道还需查询、对账、退款重试、重启恢复和更强幂等。
+4. **支付并发边界**：统一支付回调、超时关单和退款的锁顺序，并补崩溃/并发测试。
+5. **文档与验收**：补齐多票、并发核验和退款组合的自动化验收。
 
 ## 协作规则
 
@@ -87,3 +88,4 @@ docs/FUCHANG_COLLAB.md                    # 本文件
 
 - **2026-07-22**：验收 IT 栈；活动封面已有 Unsplash 图；重建 `15173` 前端含用户向信任文案；新增 `tests/integration/rush_idempotency.mjs`（同幂等键换 token 通过）。
 - **2026-07-21 Cursor**：完成 review 所列 P1/P2 修复；抢票 API 增加购票信息；列表返回 `real_name_required` / `event_title`；新增本协作文档；落地 Sprint A/B/C 最小切片。
+- **2026-08-09**：完成文档统一；收敛面试材料与测试计划，补充支付沙箱的实际边界和当前验收覆盖范围。

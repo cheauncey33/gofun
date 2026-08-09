@@ -33,7 +33,7 @@ Gofun 是一个用 Go 构建的多主办方活动票务平台，核心难点是 
   → 返回「排队中」，用户轮询/WebSocket 拿结果
   → Outbox publisher 异步投递 RabbitMQ（confirm）
   → Consumer 事务确认：MySQL 分桶扣减、订单 queued→pending_payment
-  → 支付（余额）→ 出票 / 超时关单 → 释放库存
+  → 创建支付单 → 支付沙箱异步回调 → 出票 / 超时关单 → 释放库存
   → 补偿对账：周期性对齐 Redis 与 MySQL 票额（只下调/补缺）
 ```
 
@@ -75,7 +75,7 @@ npm.cmd run build
 
 ```powershell
 # 起压测栈（capacity 单实例 + 8 桶）
-docker compose -p whu-snack-go-capacity `
+docker compose -p gofun-capacity `
   -f tests/integration/docker-compose.ticketing.yml `
   -f tests/load/docker-compose.capacity.yml up -d
 
@@ -86,11 +86,13 @@ node tests/load/k6/run_peak_sweep.mjs
 
 详见 [tests/load/k6/README.md](tests/load/k6/README.md)。
 
+支付目前只支持内置 sandbox provider，不代表已接入真实支付渠道。沙箱回调调度保存在进程内，重启恢复、渠道查询、对账和退款重试仍是生产化工作。
+
 ## 重要一致性约定
 
 - MySQL 是票务订单和票额的最终事实来源；Redis 是前置并发闸门。
 - Redis 键使用 `fuchang:ticket:*` 与 `fuchang:rush:*` 命名空间；RabbitMQ 队列用 `fuchang.order.*`。
-- 上述 `fuchang` 仅是存量 Redis/MQ 的兼容命名空间，不是产品名称；产品对外统一为 **Gofun**。迁移命名空间前需先完成旧键、队列和历史消息迁移。
+- 上述 `fuchang` 仅是 Redis/MQ 的兼容命名空间，不是产品名称；产品对外统一为 **Gofun**。迁移命名空间前需先完成相关键、队列和历史消息迁移。
 - 票务金额一律 `int64` 分。
 - `queued` 表示订单凭据已创建、消费者尚未完成 MySQL 票额确认，**不是支付成功**。
 
@@ -98,4 +100,6 @@ node tests/load/k6/run_peak_sweep.mjs
 
 - [性能与压测报告](docs/PERFORMANCE.md) — 峰值数据、分桶 v1→v2 复盘
 - [一致性设计](docs/CONSISTENCY.md) — 预扣 / Outbox / 幂等 / 补偿
-- [第一阶段范围](docs/FUCHANG_PHASE1.md) · [主办方闭环](docs/FUCHANG_ORGANIZER_CLOSURE.md) · [电子票与核销](docs/FUCHANG_ADMISSION_TICKET.md)
+- [第一阶段范围](docs/FUCHANG_PHASE1.md) · [一致性设计](docs/CONSISTENCY.md)
+- [支付沙箱](docs/FUCHANG_PAYMENT_SANDBOX.md) · [主办方闭环](docs/FUCHANG_ORGANIZER_CLOSURE.md) · [电子票与核销](docs/FUCHANG_ADMISSION_TICKET.md)
+- [协作状态](docs/FUCHANG_COLLAB.md)

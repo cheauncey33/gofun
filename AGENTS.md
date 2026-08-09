@@ -1,8 +1,8 @@
 # AGENTS.md
 
 This file is the fast-start guide for Codex agents working in this repository.
-Keep it accurate and practical. Prefer facts from the current code over older
-README text.
+Keep it accurate and practical. Prefer facts from the current code over copied
+or outdated descriptions.
 
 ## How To Collaborate With The User
 
@@ -24,17 +24,17 @@ README text.
 - Backend: Go, Gin, GORM, MySQL, Redis, RabbitMQ, Snowflake IDs, outbox pattern.
 - Frontend: Vue 3, Vite, Element Plus, Vue Router, Axios.
 - Core flows: normal ticket purchase + rush sale execute; Redis Lua quota pre-deduct → outbox → RabbitMQ async finalize.
-- Docs: `docs/FUCHANG_PHASE1.md`, `docs/FUCHANG_INTERVIEW.md`, `interview-prep/00_CONTEXT_LOCK.md`.
+- Docs: `docs/FUCHANG_PHASE1.md`, `docs/CONSISTENCY.md`, `docs/FUCHANG_PAYMENT_SANDBOX.md`, `interview-prep/00_CONTEXT_LOCK.md`.
 - Monitoring: Prometheus `/metrics`, Grafana under `monitoring/`.
 
-Legacy snack-commerce code has been removed; do not reference product/seckill/user-lock paths in new answers.
+新回答只引用当前票务路径和实现。
 
 ## Useful Commands
 
 Run backend commands from `backend/`:
 
 ```powershell
-go build -o whu-snack-go .
+go build -o gofun-server .
 go run . -config ./config/config.yaml
 go test ./... -count=1
 go test ./models/ -run TestOrderStatus -v
@@ -85,14 +85,16 @@ Important directories:
 
 - `backend/main.go`: startup, dependency wiring, routes, background goroutines.
 - `backend/container/`: builds DB, Redis, RabbitMQ, Snowflake, repositories.
-  It also fills legacy `common.*` globals for middleware compatibility.
-- `backend/common/`: legacy globals, JWT auth, admin auth, rate limiting,
+  It also fills compatibility `common.*` globals for middleware.
+- `backend/common/`: compatibility globals, JWT auth, admin auth, rate limiting,
   RabbitMQ helpers.
 - `backend/controller/`: thin Gin handlers. They validate input, read user ID,
   call service, and wrap responses.
 - `backend/service/`: business logic. Most important files are
-  `order_service.go`, `order_consumer.go`, `order_timeout.go`,
-  `seckill_service.go`, and `compensation_service.go`.
+  `ticket_catalog_service.go`, `ticket_order_service.go`,
+  `rush_sale_service.go`, `ticket_order_timeout.go`,
+  `ticket_order_outbox_publish.go`, `payment_gateway.go`,
+  `ticket_verification_service.go`, and `ticket_compensation_service.go`.
 - `backend/repository/`: GORM data access interfaces and implementations.
 - `backend/models/`: GORM models and order state machine.
 - `backend/pkg/`: reusable packages such as `response`, `apperr`, `lock`,
@@ -110,139 +112,114 @@ Important directories:
 5. Build services and controllers.
 6. Setup order timeout queue infrastructure.
 7. Start WebSocket Hub.
-8. Warm product stock into Redis.
+8. Warm ticket-tier quota into Redis when the runtime configuration enables it.
 9. Register routes and middleware.
 10. Start background goroutines:
-    - RabbitMQ order consumer.
-    - RabbitMQ order timeout consumer.
+    - RabbitMQ ticket-order consumer.
+    - RabbitMQ Outbox publisher.
+    - RabbitMQ payment-timeout consumer.
     - HTTP server.
     - IP limiter cleanup every 30 minutes.
-    - stock compensation every 5 minutes.
+    - ticket-quota compensation on its configured interval.
 11. Wait for OS signal and shut down through context cancellation.
 
-## Normal Order Flow
+## Ticket Order Flow
 
-The normal order entry point is `OrderService.CreateOrder`.
+普通购票和抢票最终都进入票务订单异步链路。
 
 ```text
-frontend api.createOrder()
--> POST /api/v1/orders
--> OrderController.CreateOrder
--> OrderService.CreateOrder
--> normalize item quantities
--> Redis user lock: lock:order:user:<userID>
--> optional idempotency SETNX: order:idempotency:<userID>:<key>
--> Redis Lua pre-deducts snack:stock:<productID>
--> publish OrderMessage to RabbitMQ
--> return before MySQL order is created
+frontend API
+-> ticket-order or rush-sale controller
+-> validate event, tier, quantity, limit and idempotency key
+-> Redis Lua pre-deducts ticket-tier quota
+-> writes ticket-order Outbox row
+-> publisher-confirmed RabbitMQ delivery
+-> ticket-order consumer creates TicketOrder(pending_payment) and items
+-> publishes payment-timeout message
+-> pushes queued / pending_payment WebSocket events
 ```
 
 The real order row is created asynchronously:
 
 ```text
-OrderConsumerService workers
+TicketOrder consumer
 -> RabbitMQ delivery channel
--> OrderService.ProcessOrderTask
--> DB transaction
--> validate products
--> decrement MySQL product stock
--> create Order(status=Pending) and OrderItems
--> increment sales_count
--> create SeckillOrder if this came from seckill
--> publish delayed timeout message
--> push WebSocket "created" event
+-> DB transaction creates TicketOrder(pending_payment) and items
+-> publishes delayed payment-timeout message
+-> pushes order status WebSocket event
 ```
 
 Important consequence:
 
 - "create order API returned success" does not guarantee the order is already
   queryable in MySQL.
-- "order created" still means `Pending`, not paid.
+- `pending_payment` means inventory was reserved and payment is still
+  pending; it is not payment success.
+- MySQL is the final source of truth; Redis is the front-door quota guard.
 
 ## Payment, Cancellation, And Order States
 
-Current order states in `models/model.go`:
+Current ticket-order states are `queued`, `pending_payment`,
+`paid`, `cancelled` and `refunded`. Payment
+transactions are `pending`, `paid`, `failed` or
+`refunded`.
 
 ```text
-Pending(1)
-Paid(2)
-Completed(3)
-Cancelled(5)
 ```
 
 Allowed transitions:
 
 ```text
-Pending -> Paid
-Pending -> Cancelled
-Paid -> Completed
-Paid -> Cancelled
-Completed -> Cancelled
-Cancelled -> terminal
 ```
 
-The project uses a pay-when-paid model:
+支付成功才允许订单进入 `paid` 并签发电子票；支付失败、超时和
+取消不会签发电子票。状态变更由 service 校验并在数据库事务中条件更新。
+取消待支付订单恢复预扣库存；退款订单恢复库存并撤销或标记对应电子票。
+票务支付不读取或扣减用户历史余额字段。
 
-- Create order: reserve stock only. Do not deduct user balance.
-- Pay order: `Pending -> Paid`, deduct balance atomically in the same DB
-  transaction.
-- Cancel pending order: restore stock only.
-- Cancel paid/completed order: restore stock and refund balance.
-- `HasBeenPaid()` is the source of truth for refund decisions.
+## Payment Timeout Flow
 
-## Order Timeout Flow
-
-`OrderTimeoutService` uses RabbitMQ delayed behavior through a delay queue and
-dead-letter routing:
+`TicketOrderService` publishes a delayed payment-timeout message through
+RabbitMQ delay/dead-letter routing:
 
 ```text
-ProcessOrderTask success
--> PublishDelayedOrderTimeout(orderID, userID)
--> message waits in order_delay_queue with per-message TTL
--> expired message routes to order_timeout_queue
--> timeout worker checks order
--> if still Pending, conditionally update to Cancelled
--> restore MySQL stock
--> after transaction commit, restore Redis stock
--> push WebSocket timeout_cancelled event
+ticket order created
+-> payment-timeout message waits with per-message TTL
+-> expired message reaches payment-timeout consumer
+-> consumer checks order and payment state
+-> if still pending_payment, conditionally update to cancelled
+-> restore ticket quota
+-> push timeout_cancelled event
 ```
 
 The conditional update avoids double handling when payment and timeout race.
 
-## Seckill Flow
+## Rush Sale Flow
 
-Seckill service has a special Redis front door, then reuses the normal order
-consumer flow.
+Rush sale has a Redis front door, then reuses the ticket-order Outbox and
+RabbitMQ consumer flow.
 
 ```text
-admin warmup
--> Redis seckill:stock:<activityID>
--> user requests token
--> Redis seckill:token:<activityID>:<userID>, TTL 60s
--> user executes seckill
--> Redis Lua checks token, stock, per-user limit
--> deduct seckill stock and increment user count
--> publish OrderMessage with SeckillActivityID and SeckillPrice
--> normal RabbitMQ consumer creates the order
+organizer prepares event and tier quota
+-> user opens the rush-sale endpoint
+-> service validates time window, tier, quota and per-user limit
+-> Redis Lua atomically reserves quota and records idempotency
+-> writes ticket-order Outbox row
+-> RabbitMQ consumer creates a pending_payment ticket order
 ```
 
-Important Redis keys:
-
-- `snack:stock:<productID>`: normal product stock.
-- `seckill:stock:<activityID>`: seckill stock.
-- `seckill:user_count:<activityID>`: per-user seckill purchase count hash.
-- `seckill:token:<activityID>:<userID>`: one-shot seckill token.
-- `lock:*`: Redis distributed locks.
+Redis keys are ticket quota, rush-sale, idempotency, rate-limit and lock keys.
+Use the key constants and service implementation as the source of truth.
 
 ## Goroutines And Channels
 
 The project uses explicit goroutines and channels in business code:
 
-- `main.go` starts WebSocket Hub, order consumer, timeout consumer, HTTP server,
-  IP limiter cleanup, and stock compensation goroutines.
-- `service/order_consumer.go` starts multiple worker goroutines based on
+- `main.go` starts WebSocket Hub, ticket-order consumer, Outbox publisher,
+  payment-timeout consumer, HTTP server, IP limiter cleanup and compensation.
+- `service/ticket_order_consumer.go` starts multiple workers from
   `order_consumer.worker_count`.
-- `service/order_timeout.go` starts timeout worker goroutines.
+- `service/ticket_order_timeout.go` starts payment-timeout workers.
 - `pkg/ws/hub.go` defines custom channels:
   - `register chan *Client`
   - `unregister chan *Client`
@@ -263,7 +240,9 @@ Important files:
   events.
 - `frontend/src/layouts/LayoutMain.vue`: shell layout, cart drawer, checkout,
   user refresh, socket lifecycle.
-- `frontend/src/views/SeckillDetail.vue`: token request and seckill execution.
+- `frontend/src/views/EventDetail.vue`, `Checkout.vue`, and `Cashier.vue`: event,
+  ticket selection, checkout and sandbox payment.
+- `frontend/src/views/OrganizerConsole.vue`: organizer overview and management.
 - `frontend/src/views/OrderDetail.vue`: pay, cancel, refund, confirm actions.
 
 IDs from the Go API are serialized as strings by `json:",string"`. The frontend
@@ -291,17 +270,15 @@ often converts IDs to numbers for cart operations.
 
 ## Data And Consistency Conventions
 
-- MySQL is the final source of truth for orders and product stock.
-- Redis is a front-side inventory and concurrency guard.
-- Stock compensation only pulls Redis down when Redis stock is greater than
-  MySQL stock, or recreates missing Redis stock.
-- Publisher confirms are enabled for normal order publishing.
-- `OrderMessage.OrderID` is generated before publishing. Consumer checks for an
-  existing order ID to make processing idempotent.
+- MySQL is the final source of truth for ticket orders, payments, tickets and quota.
+- Redis is a front-side quota and concurrency guard.
+- Quota compensation repairs missing or over-reserved Redis values from MySQL.
+- Publisher confirms are enabled for ticket-order Outbox publishing.
+- Outbox/order identifiers are generated before publishing; consumer checks existing
+  rows so retries remain idempotent.
 - Distributed lock implementation is in `pkg/lock/redis_lock.go`: `SETNX` with
   UUID value and Lua release.
-- Money is currently `float64` despite GORM decimal tags. This is a known risk;
-  prefer `int64` cents or a decimal library for future serious money changes.
+- Payment amounts use `int64` cents.
 - GORM uses `SingularTable: true`.
 - Models embed `Base` with soft delete via `gorm.DeletedAt`.
 - Snowflake IDs are `int64` and JSON-encoded as strings.
@@ -312,8 +289,9 @@ often converts IDs to numbers for cart operations.
 - Local config: `backend/config/config.yaml`.
 - Docker `.env` is copied from `deploy/env.example`.
 - Important config sections: `server`, `mysql`, `redis`, `rabbitmq`, `jwt`,
-  `snowflake`, `log`, `ratelimit`, `order_consumer`, `cors`, `delayed_order`.
-- On startup, if no admin exists, the app creates `admin` / `admin123`.
+  `snowflake`, `log`, `ratelimit`, `order_consumer`,
+  `order_outbox`, `delayed_order`, `payment`, `ticket_qr` and `cors`.
+- Database changes are applied by versioned migrations in `backend/migrations/runner.go`.
 
 ## Testing And Validation Strategy
 
@@ -340,7 +318,7 @@ cd frontend
 npm.cmd run build
 ```
 
-For order/seckill changes, do not rely only on unit tests. Validate the runtime
+For order/rush-sale/payment changes, do not rely only on unit tests. Validate the runtime
 chain when possible:
 
 ```text
@@ -351,10 +329,10 @@ config -> DB/Redis/RabbitMQ connections -> HTTP route -> Redis key changes
 ## Common Pitfalls
 
 - Do not assume order creation is synchronous.
-- Do not deduct balance during order creation; payment owns balance deduction.
-- Do not refund pending orders; pending orders were never paid.
-- Do not bypass `CanTransitionTo()` and `HasBeenPaid()` for order status logic.
-- Do not update product stock in MySQL without considering Redis stock refresh.
+- Do not describe `pending_payment` as payment success.
+- Do not issue tickets before a verified successful payment callback.
+- Do not refund a payment or revoke a ticket without checking payment and ticket status.
+- Do not update MySQL quota without considering Redis reconciliation.
 - Do not add a server cart unless explicitly requested; the current cart is
   frontend-local.
 - Do not introduce a second dependency wiring style. New code should prefer
@@ -370,11 +348,12 @@ For most future work, start with these files:
 ```text
 backend/main.go
 backend/container/init.go
-backend/models/model.go
-backend/service/order_service.go
-backend/service/order_consumer.go
-backend/service/order_timeout.go
-backend/service/seckill_service.go
+backend/models/ticket_order.go
+backend/service/ticket_order_service.go
+backend/service/ticket_order_consumer.go
+backend/service/ticket_order_timeout.go
+backend/service/payment_gateway.go
+backend/service/ticket_verification_service.go
 backend/pkg/ws/hub.go
 frontend/src/api/index.js
 frontend/src/layouts/LayoutMain.vue

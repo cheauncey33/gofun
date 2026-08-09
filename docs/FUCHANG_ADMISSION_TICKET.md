@@ -20,9 +20,14 @@
 
 - `001_ticketing_baseline.sql`：冻结主办方、活动、票档和票务订单的 V1 最小结构。
 - `002_admission_ticket.sql`：增加电子票与核销记录。
+- `003_checkout_experience.sql`：增加联系人、实名观演人和购票须知快照。
+- `004_ticket_order_outbox.sql`：增加订单 Outbox。
+- `005_event_comment.sql`：增加活动评论。
+- `006_inventory_buckets.sql`：增加票档库存分桶。
+- `007_payment_sandbox.sql`：增加支付单、支付回调和沙箱审计字段。
 - `schema_migration`：记录已经执行的版本。
 
-旧数据库首次启动时，迁移器会确认 V1 的 11 张表全部存在后登记基线；如果只存在部分表，
+已有数据库首次启动时，迁移器会确认 V1 的 11 张表全部存在后登记基线；如果只存在部分表，
 启动会失败，不会把残缺结构误标为完成。新数据库按文件名顺序执行全部迁移。
 
 MySQL 的 DDL 不具备完整事务回滚能力。迁移使用 `CREATE TABLE IF NOT EXISTS` 降低重复执行风险，
@@ -57,7 +62,7 @@ MySQL 的 DDL 不具备完整事务回滚能力。迁移使用 `CREATE TABLE IF 
 -> 提交
 ```
 
-回调失败不会出票，订单保持待支付并记录 `payment_status=failed`，允许重新创建支付单；支付超时由订单超时消费者关单并释放票额。
+回调失败不会出票，订单保持待支付并记录 `payment_status=failed`，允许重新创建支付单；支付超时由订单超时消费者关单并释放票额。当前沙箱回调调度保存在进程内，重启恢复和真实渠道查询不在本阶段。
 
 退款会先检查订单中是否有 `used` 电子票：
 
@@ -113,10 +118,14 @@ cd ../frontend
 npm.cmd run build
 ```
 
-集成环境中至少验证：
+集成验收目标：
 
 1. 购买 2 张并支付后生成 2 张电子票。
 2. 同一票码并发核销，只有一次 `success`。
 3. 核销后的订单不能退款。
 4. 未核销订单退款后所有电子票为 `revoked`。
 5. 作废票核销返回 `revoked`，并留下失败记录。
+
+当前 `tests/integration/payment_verification_e2e.mjs` 已覆盖单票成功出票、失败回调、
+超时/重试、非法回调和重复核验等基础路径；上面的多票、并发核验和退款组合仍是完整
+验收清单，不应写成已经由该脚本全部覆盖。

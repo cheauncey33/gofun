@@ -5,7 +5,7 @@
 - 场景：单活动单票档抢票，`STEPS=1500`，`RUNS=3`，`wave=50`，consumer `4×5`，outbox `batch`。
 - Before：`capacity-final-c4p5-20260731`（`SELECT FOR UPDATE` + 条件 UPDATE）。
 - After：`capacity-after-condupdate-1500-v2-20260731`（去掉票档/活动 `FOR UPDATE`，仅条件 UPDATE；订单行仍 `FOR UPDATE`）。
-- After 栈：`whu-snack-go-capacity` + 当前代码镜像；采样账号已修正为 `fuchang` / `fuchang-it-*`。
+- After 栈：`gofun-capacity` + 当前代码镜像；采样账号为 `fuchang` / `fuchang-it-*`。
 - 两轮不在同一时刻、同一冷热状态，存在 Docker Desktop / 主机噪声；结论以中位数为主。
 
 ## 三轮明细

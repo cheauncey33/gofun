@@ -41,3 +41,7 @@ tests/load/k6/fixtures/*.json
 # 构建/测试临时输出
 backend/_build_out.txt
 backend/_test_out.txt
+
+# Codex 审查/构建缓存
+.frontend-build-review/
+.gocache-review/

@@ -32,7 +32,7 @@
 
 1. **合格峰值（自定义 SLO：成功率≥99% 且 p99≤300ms）≈ 1100~1450 req/s**，对应 VUS 100~200。
 2. VUS 提到 500/1000 后 req/s 不再明显上升（≈1400~1450），但 p99 升到 1~2 秒——**这是用延迟换并发，不是更好的工作点**。瓶颈在入口侧，而非库存扣减。
-3. 与旧 Node `wave=50` 对比：旧脚本 ~570 success_qps 被「波串行 + 墙钟口径」卡住；k6 恒定 VU 下，同量级入口已达 ~780~1100+ req/s，口径更标准。
+3. k6 恒定 VU 下，VUS 100～200 是本机测试的低延迟高吞吐区间；VUS 500 以上吞吐不再明显增加而 p99 显著上升。
 
 ## 二、库存热点优化：分桶 v1 → v2
 
@@ -71,7 +71,7 @@
 ```powershell
 # 1. 起压测栈（capacity 单实例 + 8 桶）
 $env:INVENTORY_BUCKETS_ENABLED='true'
-docker compose -p whu-snack-go-capacity `
+docker compose -p gofun-capacity `
   -f tests/integration/docker-compose.ticketing.yml `
   -f tests/load/docker-compose.capacity.yml up -d
 

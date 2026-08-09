@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Gofun** — event ticketing platform (Go + Vue 3). Normal purchase and rush-sale execute use Redis quota pre-deduct, transactional outbox, and RabbitMQ async order finalization. See `docs/FUCHANG_PHASE1.md` for scope; `interview-prep/00_CONTEXT_LOCK.md` for interview facts.
 
-> Legacy snack-commerce architecture below is **outdated**; prefer `backend/main.go` and ticketing services when editing docs.
+支付目前只实现内置 sandbox provider；以下说明以当前票务代码为准，不能把沙箱写成真实支付渠道。
 
 ## Development Commands
 
@@ -16,7 +16,7 @@ All commands run from `backend/`:
 
 ```bash
 # Build
-cd backend && go build -o whu-snack-go .
+cd backend && go build -o gofun-server .
 
 # Run (requires running MySQL, Redis, RabbitMQ)
 go run . -config ./config/config.yaml
@@ -36,8 +36,8 @@ go test ./... -coverprofile=coverage.out
 ### Frontend (Vue 3 + Vite)
 
 ```bash
-cd frontend && npm install && npm run dev      # dev server on :5173
-cd frontend && npm run build                    # production build → dist/
+cd frontend && npm.cmd install && npm.cmd run dev # dev server on :5173
+cd frontend && npm.cmd run build                  # production build → dist/
 ```
 
 ### Docker Compose (full stack)
@@ -62,7 +62,7 @@ Write scenarios mutate real data — use a dedicated DB/Redis/queue. See `tests/
 
 ### Monitoring stack
 
-`monitoring/docker-compose.monitoring.yml` runs Prometheus + Grafana separately from the app stack, scraping the backend's `/metrics` endpoint. Grafana dashboard: `monitoring/grafana/dashboards/whu_snack_overview.json`.
+`monitoring/docker-compose.monitoring.yml` runs Prometheus + Grafana separately from the app stack, scraping the backend's `/metrics` endpoint. Grafana dashboard: `monitoring/grafana/dashboards/gofun_ticketing_overview.json`.
 
 ## Architecture
 
@@ -74,86 +74,68 @@ controller → service → repository → models (GORM)
           container (DI: DB, Redis, MQ, Snowflake, repos)
 ```
 
-- **`container/`** — DI container that wires DB, Redis, RabbitMQ, Snowflake, and repositories. Also sets legacy `common` package globals for middleware compatibility.
-- **`common/`** — Global singletons (`common.DB`, `common.RDB`, `common.MQChannel`, `common.Node`) plus auth middleware, JWT, rate limiting, and RabbitMQ helpers. Partially legacy — new code prefers `container.Container`.
+- **`container/`** — DI container that wires DB, Redis, RabbitMQ, Snowflake, and repositories. Also sets compatibility `common` package globals for middleware.
+- **`common/`** — Compatibility globals (`common.DB`, `common.RDB`, `common.MQChannel`, `common.Node`) plus auth middleware, JWT, rate limiting, and RabbitMQ helpers. New code prefers `container.Container`.
 - **`controller/`** — Gin handlers. Thin: validate input, call service, return response.
 - **`service/`** — Business logic. Services receive `*container.Container` or individual dependencies.
-- **`repository/`** — Interface-based data access over GORM. Interfaces (e.g. `OrderRepository`, `ProductRepository`) are defined alongside implementations.
+- **`repository/`** — Interface-based data access over GORM. Ticket catalog and ticket order repositories are defined alongside implementations.
 - **`models/`** — GORM model structs with soft-delete via `gorm.DeletedAt`. Includes order state machine (`CanTransitionTo`).
 - **`pkg/`** — Reusable packages: `response` (JSON response helpers + error codes), `apperr` (typed app errors), `lock` (Redis distributed lock), `logger` (zap + lumberjack), `middleware` (request ID), `validator` (custom validations).
-- **`metrics/`** — Prometheus metrics exposed at `/metrics`, with middleware tracking HTTP requests, order events, seckill outcomes, and MQ messages.
+- **`metrics/`** — Prometheus metrics exposed at `/metrics`, with middleware tracking HTTP requests, ticket-order events, payment, verification, and MQ messages.
 - **`config/`** — Viper-based config with YAML file + env var overrides. `GlobalConfig` singleton.
 
 ### Order flow (async)
 
 ```
-User request → controller → service.CreateOrder
-  → Idempotency check: if idempotency_key present, SETNX <idempotency_key> (10min TTL)
-    prevents duplicate submissions; released on failure or after order completes
-  → User-level distributed lock (lock:order:user:<userID>) prevents concurrent orders
-  → Redis Lua script pre-deducts stock (snack:stock:<productID>)
-  → Publish OrderMessage to RabbitMQ order_queue (persistent, publisher-confirms)
-  → Return immediately (user sees "order processing")
+User request → controller → TicketOrderService
+  → request validation and idempotency check
+  → Redis Lua pre-deducts ticket-tier quota
+  → writes ticket-order Outbox row
+  → publisher-confirmed RabbitMQ delivery
+  → returns queued / processing state
 
-Consumer worker (order_consumer.go):
-  → ProcessOrderTask: DB transaction validates products, deducts MySQL stock,
-    creates Order (status=Pending) + OrderItems — balance is NOT deducted here
-  → On non-retryable error: rollback Redis reserved stock + release idempotency key, Ack
-  → On retryable error: publish to retry queue (x-retry-count header)
-  → After max retries: publish to DLQ via DLX
-  → On success: publish delayed timeout message (auto-cancel if not paid in time)
+Consumer:
+  → DB transaction creates TicketOrder (pending_payment) and order items
+  → publishes payment-timeout message
+  → timeout worker conditionally cancels still-pending orders
 
-Payment (separate step): user calls PayOrder → DB transaction conditionally
-  updates Pending→Paid AND deducts balance atomically (RowsAffected==0 rejects
-  concurrent pays/timeouts). This "pay-when-paid" model means cancel of a
-  Pending order only restores stock (no refund needed).
+Payment:
+  → creates or reuses a payment transaction
+  → SandboxPaymentGateway schedules an asynchronous signed callback
+  → callback validates signature, amount, provider and transaction state
+  → DB transaction marks payment and order paid
+  → paid order issues electronic tickets
 ```
 
 ### Order state machine
 
-7 states: `Pending(1) → Paid(2) → Delivering(3) → Delivered(4)`. Terminal: `Cancelled(5)`, `Refunded(7)`. `Refunding(6)` is an intermediate state before `Refunded`.
+Ticket order states are `queued`, `pending_payment`, `paid`, `cancelled`, and `refunded`; payment states are `pending`, `paid`, `failed`, and `refunded`.
 
-Transitions are defined in `models/model.go:orderTransitionMap`. `HasBeenPaid()` determines whether cancel requires balance refund (Paid/Delivering/Delivered/Refunding/Refunded = was paid) or just stock restoration (Pending/Cancelled = never paid).
+Order/payment transitions are guarded by service checks and database conditions. A paid order can issue and later revoke tickets; a pending order must not issue tickets.
 
 ### Background goroutines (started in main.go)
 
 | Goroutine | Interval | Purpose |
 |-----------|----------|---------|
-| Order consumer | event-driven (RabbitMQ) | Processes order_queue + retry_queue messages |
-| Timeout consumer | event-driven (RabbitMQ) | Listens on order_timeout_queue for expired orders |
-| Stock compensation | 5 min | Compares Redis vs MySQL stock, resets Redis if oversold |
+| Ticket-order consumer | event-driven (RabbitMQ) | Persists queued ticket orders |
+| Outbox publisher | configured workers | Publishes pending rows with confirm and recovery |
+| Payment-timeout consumer | event-driven (RabbitMQ) | Cancels expired pending-payment orders |
+| Inventory compensation | periodic | Reconciles Redis quota against MySQL |
 | IP limiter cleanup | 30 min | Removes stale per-IP rate limiters |
 
 ### Order timeout (delayed queue)
 
 ```
-OrderTimeoutService publishes to order_delay_queue with TTL (default 15min).
-When TTL expires, message routes to order_timeout_queue via DLX.
-Timeout worker: if order still pending → cancel, restore stock + balance.
+Ticket order service publishes a delayed payment-timeout message.
+When it expires, the timeout worker conditionally cancels the still-pending order
+and restores quota. Payment and timeout may race, so the database condition is
+the final guard.
 ```
 
-### Seckill (flash sale)
+### Inventory compensation
 
-```
-1. Admin calls warmup → loads activity stock into Redis (seckill:stock:<id>)
-   with TTL = time until activity end
-2. User requests token → HMAC-SHA256(activityID:userID:timestamp) stored in
-   Redis as seckill:token:<activityID>:<userID> with 60s TTL
-3. User executes seckill: Lua script atomically:
-   a. Validates token (GET + DEL to one-shot the token)
-   b. Checks stock (seckill:stock:<id>)
-   c. Checks per-user limit (seckill:user_count:<id> hash)
-   d. Deducts stock + increments user count
-   e. Extends TTL on stock/user keys
-   → Publishes OrderMessage to MQ (same consumer flow as normal orders)
-```
-
-Seckill Redis keys auto-expire when the activity ends (TTL = endTime - now).
-Admin operations (update/delete) refresh or clear Redis keys accordingly.
-
-### Stock compensation
-
-Runs every 5 minutes: scans all products, compares Redis stock vs MySQL stock. If Redis > MySQL (oversell risk), resets Redis to MySQL value.
+Runs periodically for ticket tiers. MySQL remains the final source of truth;
+compensation only repairs missing or over-reserved Redis quota.
 
 ### Authentication
 
@@ -187,14 +169,15 @@ JWT with access + refresh tokens. `AuthMiddleware` validates `Authorization: Bea
 ## Key Conventions
 
 - **Error codes**: 5-digit business codes: 4xxxx client errors, 5xxxx server errors, 6xxxx business errors. See `pkg/response/error_code.go`.
-- **Money**: `float64` in models (known issue — TODO comments recommend migrating to int64 cents or `shopspring/decimal`).
+- **Money**: Ticket payment amounts use `int64` cents. Do not reintroduce floating-point money arithmetic.
 - **Snowflake IDs**: All entity IDs are Snowflake int64, serialized as strings in JSON via `json:",string"` tag on `Base.ID`.
 - **Soft delete**: All models embed `Base` with `gorm.DeletedAt`.
-- **Redis keys**: `snack:stock:<productID>` for normal inventory, `seckill:stock:<activityID>` for seckill, `lock:*` for distributed locks.
+- **Redis keys**: Ticket quota, rush-sale, idempotency, rate-limit and lock keys use the current ticket namespace; inspect the service before adding a key.
 - **Distributed locks**: `pkg/lock.WithLock` uses Redis SETNX + Lua script release (UUID-based ownership) to prevent deadlocks.
 - **Publisher confirms**: RabbitMQ channel is set to confirm mode; `PublishPersistent` waits for broker ack with 5s timeout.
 - **Config**: All config keys are env-overridable (e.g. `MYSQL_DSN`, `REDIS_PASSWORD`). The `.env` file is used by Docker Compose only. `backend/config/config.example.yaml` is the canonical reference; `backend/config/config.yaml` is gitignored (local dev).
-- **Config sections**: `server`, `mysql`, `redis`, `rabbitmq`, `jwt`, `snowflake`, `log`, `ratelimit`, `cors`, `order_consumer` (worker_count, prefetch_count, max_retries), `delayed_order` (timeout_minutes default 15, lock_timeout_sec default 10).
+- **Config sections**: `server`, `mysql`, `redis`, `rabbitmq`, `jwt`, `snowflake`, `log`, `ratelimit`, `cors`, `order_outbox`, `delayed_order`, `payment`, `ticket_qr` and telemetry settings.
 - **GORM table naming**: `SingularTable: true` — table names match struct names exactly (no pluralization).
-- **Auto-admin seed**: On startup, if no admin user exists in DB, creates `admin`/`admin123` with role="admin" and balance=9999 (see `container/init.go`).
-- **GORM AutoMigrate**: All models are auto-migrated on startup. The `uni_user_phone` index on `user` table is explicitly dropped (legacy workaround).
+- **Admin seed**: Local startup may seed an initial admin account; use the configured bootstrap behavior and change credentials outside development.
+- **Migrations**: Database changes are applied by `backend/migrations/runner.go` in filename order. Do not document startup automatic table changes as the production schema mechanism.
+- **Known payment boundary**: Sandbox callback scheduling is in-memory. Restart recovery, real-channel querying, reconciliation, retryable refunds, and stronger callback/timeout concurrency handling are not complete.

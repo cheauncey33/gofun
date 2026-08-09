@@ -6,7 +6,7 @@
 - Before：`capacity-final-c4p5-20260731`（单行 `remaining_quota` 热路径；条件 UPDATE）。
 - Buckets v1：`capacity-buckets-8-1500-20260731`（8 桶开启，但消费仍每单更新父表 `sold_count`）。
 - Buckets v2：`capacity-buckets-8-noparent-1500-20260731`（8 桶；父表退出热路径，仅桶行扣减；售罄时才触碰父表 status）。
-- 栈：`whu-snack-go-capacity`，`INVENTORY_BUCKETS_ENABLED=true`，`bucket_count=8`。
+- 栈：`gofun-capacity`，`INVENTORY_BUCKETS_ENABLED=true`，`bucket_count=8`。
 
 ## 三轮明细
 

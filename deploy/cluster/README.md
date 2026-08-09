@@ -5,7 +5,7 @@
 ## 启动
 
 ```powershell
-docker compose -p whu-snack-go-cluster `
+docker compose -p gofun-cluster `
   --env-file deploy/cluster/env.example `
   -f docker-compose.cluster.yml up -d --build
 ```
@@ -15,10 +15,10 @@ docker compose -p whu-snack-go-cluster `
 ## 验证
 
 ```powershell
-docker exec whu-snack-go-cluster-rabbitmq-1-1 rabbitmqctl cluster_status
-docker exec whu-snack-go-cluster-rabbitmq-1-1 rabbitmqctl list_queues name type state online
-docker exec whu-snack-go-cluster-redis-sentinel-1-1 redis-cli -p 26379 SENTINEL master ticketing-master
-docker exec whu-snack-go-cluster-mysql-replica-1 mysql -uroot -pcluster-root-password -e "SHOW REPLICA STATUS\G"
+docker exec gofun-cluster-rabbitmq-1-1 rabbitmqctl cluster_status
+docker exec gofun-cluster-rabbitmq-1-1 rabbitmqctl list_queues name type state online
+docker exec gofun-cluster-redis-sentinel-1-1 redis-cli -p 26379 SENTINEL master ticketing-master
+docker exec gofun-cluster-mysql-replica-1 mysql -uroot -pcluster-root-password -e "SHOW REPLICA STATUS\G"
 powershell.exe -ExecutionPolicy Bypass -File tests/load/run_cluster_staircase.ps1
 ```
 
@@ -27,7 +27,7 @@ powershell.exe -ExecutionPolicy Bypass -File tests/load/run_cluster_staircase.ps
 保留数据卷：
 
 ```powershell
-docker compose -p whu-snack-go-cluster `
+docker compose -p gofun-cluster `
   --env-file deploy/cluster/env.example `
   -f docker-compose.cluster.yml down
 ```
@@ -35,7 +35,7 @@ docker compose -p whu-snack-go-cluster `
 删除该集群的测试数据卷：
 
 ```powershell
-docker compose -p whu-snack-go-cluster `
+docker compose -p gofun-cluster `
   --env-file deploy/cluster/env.example `
   -f docker-compose.cluster.yml down -v
 ```

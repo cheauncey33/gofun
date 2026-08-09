@@ -20,9 +20,9 @@ k6 version
 ## 1. 起压测栈
 
 ```powershell
-cd D:\newProgram\whu_-snack_-go
+cd D:\newProgram\gofun
 $env:INVENTORY_BUCKETS_ENABLED='true'
-docker compose -p whu-snack-go-capacity `
+docker compose -p gofun-capacity `
   -f tests/integration/docker-compose.ticketing.yml `
   -f tests/load/docker-compose.capacity.yml up -d
 ```
@@ -45,13 +45,13 @@ node tests/load/k6/prepare_rush_fixture.mjs
 
 ## 3. 跑 k6
 
-恒定 50 VU / 30s（对照旧 wave=50）：
+恒定 50 VU / 30s：
 
 ```powershell
 k6 run -e VUS=50 -e DURATION=30s tests/load/k6/rush_execute.js
 ```
 
-拉高并发（对照 wave=200/500/1000）：
+拉高并发：
 
 ```powershell
 k6 run -e VUS=200 -e DURATION=30s tests/load/k6/rush_execute.js
@@ -94,11 +94,9 @@ node tests/load/k6/run_peak_sweep.mjs
 | p99 | **~153ms** |
 | 业务成功率 | **100%** |
 
-对比：旧 Node `wave=50` 的 `success_qps≈570` 是「成功单数/发压墙钟」且波串行；k6 恒定 50 VU 循环打，吞吐更高、口径也更标准。
-
 ## 注意
 
 1. 夹具里的 JWT 会过期，压测前重新 `prepare_rush_fixture.mjs`。
-2. **每轮干净吞吐对比请重新 prepare**（换新 campaign）；复用旧夹具容易先撞上个人限购。
+2. **每轮干净吞吐测试请重新 prepare**（换新 campaign）；复用已使用夹具容易先撞上个人限购。
 3. capacity 栈已把写限流配额拉高；若用普通配置，429 会先打满。
-4. k6 与 Node wave 脚本数字不会完全相同（发压模型不同），以各自报告里的定义为准。
+4. 不同发压模型的数字不能直接横比，必须同时记录请求模型、夹具、限购和数据规模。
