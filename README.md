@@ -16,12 +16,12 @@ Gofun 是一个用 Go 构建的多主办方活动票务平台，核心难点是 
 |------|------|------|
 | **入口抢票** | Redis Lua 原子校验「活动票额 + 底层票档 + 个人限购」，预扣后异步落单 | `service/rush_sale_service.go` |
 | **库存热点优化** | MySQL 票档按 `userID % N` 分桶，父表退出热路径 | InnoDB `row_lock_waits` **降约 80%**，MQ 追平 **23s→11s** |
-| **入口吞吐** | k6 恒定 VU 阶梯压测 | 合格峰值（成功率≥99% 且 p99≤300ms）约 **1100~1450 req/s** |
+| **入口吞吐** | k6 恒定 VU 阶梯压测 | 观测极限约 **1450 req/s**；严格 p99≤300ms 时应按 VU 档位单独报告，不能把 1450 当作稳定 SLO 吞吐 |
 | **写一致性** | 订单 + Outbox 同事务，publisher `SKIP LOCKED` 抢占投递，broker confirm | `service/ticket_order_outbox_publish.go` |
 | **幂等** | `X-Idempotency-Key` + DB 唯一约束 + Redis 缓存 + 消费按 order_id 查重 | 重复提交/重试/重投递均不重复落单 |
 | **超时关单** | RabbitMQ 延时队列 + DB 扫描兜底，条件 UPDATE 防支付/超时竞态 | `service/ticket_order_timeout.go` |
 
-> 完整数据与复盘见 **[性能与压测报告](docs/PERFORMANCE.md)**、**[一致性设计](docs/CONSISTENCY.md)**。
+> 完整数据与复盘见 **[性能与压测报告](docs/PERFORMANCE.md)**、**[配置组合矩阵与项目收敛](docs/PERFORMANCE_MATRIX.md)**、**[一致性设计](docs/CONSISTENCY.md)**。
 
 ## 核心链路
 
@@ -86,6 +86,16 @@ node tests/load/k6/run_peak_sweep.mjs
 
 详见 [tests/load/k6/README.md](tests/load/k6/README.md)。
 
+如果要比较“单行/分桶 × sync/batch”四个组合，使用隔离矩阵运行器：
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File tests/load/run_capacity_matrix.ps1 `
+  -Cases baseline-sync,baseline-batch,buckets-sync,buckets-batch `
+  -Steps 500,1000 -Runs 2
+```
+
+当前收敛建议：单机容量/开售档采用 `buckets-batch`（MQ 追平和锁竞争更好）；`baseline-batch` 保留为入口成功建单吞吐对照；`sync`、单行库存和 Sentinel/quorum 集群分别作为一致性回退、对照和故障演练档。具体证据和边界见 [配置组合矩阵与项目收敛](docs/PERFORMANCE_MATRIX.md)。
+
 支付目前只支持内置 sandbox provider，不代表已接入真实支付渠道。沙箱回调调度保存在进程内，重启恢复、渠道查询、对账和退款重试仍是生产化工作。
 
 ## 重要一致性约定
@@ -99,7 +109,12 @@ node tests/load/k6/run_peak_sweep.mjs
 ## 文档导航
 
 - [性能与压测报告](docs/PERFORMANCE.md) — 峰值数据、分桶 v1→v2 复盘
+- [第二阶段链路压测证据](docs/STAGE2_LOAD_EVIDENCE_20260810.md) — HTTP、Outbox、RabbitMQ、消费者和库存预约状态分开评估
+- [第三阶段独立库存库网格压测证据](docs/STAGE3_SHARD_GRID_20260810.md) — 单库/独立库存库/消费者扩容的 VUS=50/100/200 对比
+- [三阶段库存与消费链路改造方案](docs/THREE_STAGE_REFACTOR_PLAN.md) — 事务优化、库存事件化、批量合并与物理分片路线
 - [一致性设计](docs/CONSISTENCY.md) — 预扣 / Outbox / 幂等 / 补偿
 - [第一阶段范围](docs/FUCHANG_PHASE1.md) · [一致性设计](docs/CONSISTENCY.md)
 - [支付沙箱](docs/FUCHANG_PAYMENT_SANDBOX.md) · [主办方闭环](docs/FUCHANG_ORGANIZER_CLOSURE.md) · [电子票与核销](docs/FUCHANG_ADMISSION_TICKET.md)
 - [协作状态](docs/FUCHANG_COLLAB.md)
+- [配置组合矩阵与项目收敛](docs/PERFORMANCE_MATRIX.md)
+- [项目经历与组件说明](docs/PROJECT_EXPERIENCE.md)

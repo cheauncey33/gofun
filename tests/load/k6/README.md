@@ -77,6 +77,24 @@ node tests/load/k6/run_peak_sweep.mjs
 
 摘要目录：`tests/load/results/<RUN_LABEL>/peak-summary.md`
 
+## 4. Docker network mode
+
+Windows 上的 k6 通过 `127.0.0.1:宿主机端口` 压测时，会经过 Docker Desktop 的端口转发。高 VU 测试建议让 k6 运行在 Compose 网络内，直接访问 `http://backend:8080`：
+
+```powershell
+docker pull grafana/k6:latest
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
+  tests/load/k6/run_full_chain_baseline.ps1 `
+  -Project gofun-k6docker `
+  -Vus 100,200,500 `
+  -Duration 20s `
+  -DrainSeconds 720 `
+  -FastPrepare `
+  -K6InDocker
+```
+
+`-K6InDocker` 会自动把 k6 加入 `${Project}_default` 网络，并使用 `http://backend:8080/api/v1`；默认不加该开关时，仍使用 Windows 本机 k6 和宿主机端口。
+
 ## 读数口径
 
 - **http_req_rate**：k6 观测到的请求吞吐（更接近标准入口 QPS）
