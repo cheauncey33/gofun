@@ -21,7 +21,11 @@ const userCount = Number(process.env.K6_USERS || 500);
 const setupConcurrency = Number(process.env.SETUP_CONCURRENCY || 20);
 const totalQuota = Number(process.env.RUSH_TOTAL_QUOTA || 100000);
 // 活动单笔限购上限为 20；吞吐压测靠「多用户轮转」而不是单用户无限买。
-const perUserLimit = Math.min(Number(process.env.RUSH_PER_USER_LIMIT || 20), 20);
+const requestedPerUserLimit = Number(process.env.RUSH_PER_USER_LIMIT || 20);
+const perUserLimit =
+  process.env.K6_ALLOW_HIGH_PER_USER_LIMIT === "1"
+    ? Math.max(requestedPerUserLimit, 1)
+    : Math.min(requestedPerUserLimit, 20);
 const outPath =
   process.env.K6_FIXTURE ||
   join(root, "tests", "load", "k6", "fixtures", "rush_execute.json");

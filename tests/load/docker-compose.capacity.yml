@@ -2,15 +2,16 @@
 services:
   backend:
     environment:
-      ORDER_CONSUMER_WORKER_COUNT: "6"
-      ORDER_CONSUMER_PREFETCH_COUNT: "5"
-      ORDER_CONSUMER_MAX_RETRIES: "3"
-      ORDER_OUTBOX_WRITE_MODE: batch
-      ORDER_OUTBOX_PUBLISH_WORKERS: "4"
-      ORDER_OUTBOX_PUBLISH_BATCH: "200"
-      MYSQL_MAX_OPEN_CONNS: "100"
-      MYSQL_MAX_IDLE_CONNS: "10"
-      REDIS_POOL_SIZE: "100"
+      ORDER_CONSUMER_WORKER_COUNT: "${ORDER_CONSUMER_WORKER_COUNT:-6}"
+      ORDER_CONSUMER_PREFETCH_COUNT: "${ORDER_CONSUMER_PREFETCH_COUNT:-5}"
+      ORDER_CONSUMER_MAX_RETRIES: "${ORDER_CONSUMER_MAX_RETRIES:-3}"
+      DELAYED_ORDER_WORKER_COUNT: "${DELAYED_ORDER_WORKER_COUNT:-2}"
+      ORDER_OUTBOX_WRITE_MODE: "${ORDER_OUTBOX_WRITE_MODE:-batch}"
+      ORDER_OUTBOX_PUBLISH_WORKERS: "${ORDER_OUTBOX_PUBLISH_WORKERS:-4}"
+      ORDER_OUTBOX_PUBLISH_BATCH: "${ORDER_OUTBOX_PUBLISH_BATCH:-200}"
+      MYSQL_MAX_OPEN_CONNS: "${MYSQL_MAX_OPEN_CONNS:-100}"
+      MYSQL_MAX_IDLE_CONNS: "${MYSQL_MAX_IDLE_CONNS:-10}"
+      REDIS_POOL_SIZE: "${REDIS_POOL_SIZE:-100}"
       RATELIMIT_GLOBAL_RATE: "100000"
       RATELIMIT_GLOBAL_BURST: "100000"
       RATELIMIT_IP_RATE: "100000"
@@ -25,13 +26,21 @@ services:
       INVENTORY_BUCKET_COUNT: "${INVENTORY_BUCKET_COUNT:-8}"
       INVENTORY_MIN_QUOTA_TO_BUCKET: "${INVENTORY_MIN_QUOTA_TO_BUCKET:-64}"
       INVENTORY_BUCKET_RETRY: "${INVENTORY_BUCKET_RETRY:-4}"
-    container_name: gofun-capacity-backend-load
+      INVENTORY_BATCH_ENABLED: "${INVENTORY_BATCH_ENABLED:-false}"
+      INVENTORY_BATCH_SIZE: "${INVENTORY_BATCH_SIZE:-200}"
+      INVENTORY_BATCH_INTERVAL_MS: "${INVENTORY_BATCH_INTERVAL_MS:-50}"
+      INVENTORY_SHARD_ENABLED: "${INVENTORY_SHARD_ENABLED:-false}"
+      INVENTORY_SHARD_DSN: "${INVENTORY_SHARD_DSN:-fuchang:fuchang-it-mysql@tcp(mysql_inventory:3306)/fuchang_inventory_it?charset=utf8mb4&parseTime=True&loc=Local}"
+    container_name: "${CAPACITY_CONTAINER_PREFIX:-gofun-capacity}-backend-load"
 
   mysql:
-    container_name: gofun-capacity-mysql-1
+    container_name: "${CAPACITY_CONTAINER_PREFIX:-gofun-capacity}-mysql-1"
+
+  mysql_inventory:
+    container_name: "${CAPACITY_CONTAINER_PREFIX:-gofun-capacity}-mysql-inventory-1"
 
   redis:
-    container_name: gofun-capacity-redis-1
+    container_name: "${CAPACITY_CONTAINER_PREFIX:-gofun-capacity}-redis-1"
 
   rabbitmq:
-    container_name: gofun-capacity-rabbitmq-1
+    container_name: "${CAPACITY_CONTAINER_PREFIX:-gofun-capacity}-rabbitmq-1"

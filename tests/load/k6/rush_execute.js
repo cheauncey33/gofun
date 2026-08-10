@@ -46,6 +46,13 @@ const executeLatency = new Trend("rush_execute_latency", true);
 const executeSuccess = new Rate("rush_execute_success");
 const executeSoldOut = new Counter("rush_execute_sold_out");
 const executeRejected = new Counter("rush_execute_rejected");
+const executeBusinessRejected = new Counter("rush_execute_business_rejected");
+const executeRateLimited = new Counter("rush_execute_rate_limited");
+const executeServerError = new Counter("rush_execute_server_error");
+const executeServerErrorStatus = new Counter("rush_execute_server_error_status");
+const executeTransportError = new Counter("rush_execute_transport_error");
+const executeUnexpectedStatus = new Counter("rush_execute_unexpected_status");
+let transportErrorLogs = 0;
 
 const vus = Number(__ENV.VUS || 50);
 const duration = __ENV.DURATION || "30s";
@@ -120,7 +127,28 @@ export default function () {
   const rejected = res.status === 429 || res.status >= 500;
 
   executeSuccess.add(okBiz);
-  if (soldOut) executeSoldOut.add(1);
+  if (soldOut) {
+    executeSoldOut.add(1);
+    executeBusinessRejected.add(1);
+  } else if (res.status === 429) {
+    executeRateLimited.add(1);
+  } else if (res.status >= 500) {
+    executeServerError.add(1);
+    executeServerErrorStatus.add(1, { status: String(res.status) });
+    console.error(
+      `[rush_execute_server_error] status=${res.status} body=${String(res.body || "").slice(0, 512)}`,
+    );
+  } else if (res.status === 0 || res.error || res.error_code) {
+    executeTransportError.add(1);
+    if (transportErrorLogs < 100) {
+      transportErrorLogs += 1;
+      console.error(
+        `[rush_execute_transport_error] status=${res.status} error_code=${res.error_code || ""} error=${String(res.error || "")}`,
+      );
+    }
+  } else if (res.status !== 200) {
+    executeUnexpectedStatus.add(1);
+  }
   if (rejected) executeRejected.add(1);
 
   check(res, {
@@ -151,10 +179,34 @@ export function handleSummary(data) {
     rush_execute_success_rate: data.metrics.rush_execute_success?.values?.rate,
     rush_execute_sold_out: data.metrics.rush_execute_sold_out?.values?.count || 0,
     rush_execute_rejected: data.metrics.rush_execute_rejected?.values?.count || 0,
+    rush_execute_business_rejected:
+      data.metrics.rush_execute_business_rejected?.values?.count || 0,
+    rush_execute_rate_limited:
+      data.metrics.rush_execute_rate_limited?.values?.count || 0,
+    rush_execute_server_error:
+      data.metrics.rush_execute_server_error?.values?.count || 0,
+    rush_execute_server_error_statuses: collectTaggedCounts(
+      data.metrics,
+      "rush_execute_server_error_status",
+    ),
+    rush_execute_transport_error:
+      data.metrics.rush_execute_transport_error?.values?.count || 0,
+    rush_execute_unexpected_status:
+      data.metrics.rush_execute_unexpected_status?.values?.count || 0,
+    http_req_failed_rate: data.metrics.http_req_failed?.values?.rate || 0,
     checks: data.metrics.checks?.values,
   };
   return {
     stdout: `${JSON.stringify(summary, null, 2)}\n`,
     [__ENV.K6_SUMMARY || "tests/load/results/k6-rush-execute-summary.json"]: `${JSON.stringify(summary, null, 2)}\n`,
   };
+}
+
+function collectTaggedCounts(allMetrics, prefix) {
+  const result = {};
+  for (const [name, metric] of Object.entries(allMetrics || {})) {
+    if (name === prefix || !name.startsWith(`${prefix}{`)) continue;
+    result[name] = metric.values?.count || 0;
+  }
+  return result;
 }
