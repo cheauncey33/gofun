@@ -78,12 +78,7 @@ func main() {
 	ticketOrderSvc := service.NewTicketOrderService(cont, timeoutMinutes, cfg.Payment)
 	orderHub := ws.NewHub()
 	ticketOrderSvc.ConfigureOrderEvents(orderHub)
-	ticketOrderSvc.ConfigureOutboxWriter(cfg.OrderOutbox)
 	ticketOrderSvc.ConfigureInventory(cfg.Inventory)
-	inventoryReservationBatchSvc := service.NewInventoryReservationBatchService(
-		cont,
-		service.NewInventoryBucketSettings(cfg.Inventory),
-	)
 	ticketVerificationSvc := service.NewTicketVerificationService(cont)
 	rushSaleSvc := service.NewRushSaleService(
 		cont,
@@ -138,9 +133,6 @@ func main() {
 	// MySQL 是最终票额来源，启动时将票档剩余量写入 Gofun 独立 Redis 命名空间。
 	if err := ticketOrderSvc.WarmTicketQuota(context.Background()); err != nil {
 		logger.Log.Fatal("票档预热 Redis 失败", zap.Error(err))
-	}
-	if err := ticketOrderSvc.RecoverQueuedOrders(context.Background()); err != nil {
-		logger.Log.Fatal("queued 票务订单恢复失败", zap.Error(err))
 	}
 	if err := ticketOrderSvc.BackfillPaidAdmissionTickets(context.Background()); err != nil {
 		logger.Log.Fatal("历史已支付订单补签电子票失败", zap.Error(err))
@@ -253,12 +245,9 @@ func main() {
 	mainCtx, cancel := context.WithCancel(context.Background())
 	go orderHub.Run(mainCtx)
 	go ticketOrderConsumer.Start(mainCtx, cfg.OrderConsumer)
-	go inventoryReservationBatchSvc.Start(mainCtx)
 	go ticketOrderSvc.StartPaymentTimeoutConsumer(mainCtx, cfg.DelayedOrder.WorkerCount)
 	go ticketOrderSvc.StartTimeoutScanner(mainCtx)
 	go ticketOrderSvc.StartOutboxPublisher(mainCtx, cfg.OrderOutbox)
-	ticketOrderSvc.StartOutboxWriter(mainCtx)
-	go ticketOrderSvc.StartOutboxRecoverScanner(mainCtx)
 	go ticketCompensationSvc.Start(mainCtx)
 	go eventSearchCompensationSvc.Start(mainCtx)
 	go eventCommentSvc.StartLikeCountFlusher(mainCtx)

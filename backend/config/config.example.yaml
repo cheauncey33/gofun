@@ -80,39 +80,28 @@ ratelimit:
   write_burst: 10
 
 order_consumer:
-  worker_count: 4
+  worker_count: 6
   prefetch_count: 5
   max_retries: 3
 
-# Outbox 收敛配置：batch=订单同步落库，outbox 有界缓冲批量刷入（可用 sync 回退）。
+# 可靠 Outbox 配置：订单和 outbox 在同一主库事务中提交，随后异步发布到 MQ。
 order_outbox:
-  write_mode: batch
   publish_workers: 4
   publish_batch: 200
   tick_interval_ms: 200
-  buffer_batch_size: 50
-  flush_interval_ms: 8
-  max_buffer: 4000
-  recover_interval_sec: 2
 
 # 抢票活动元数据短缓存；0 可用于性能基线对照。
 rush_sale:
   campaign_cache_ttl_ms: 3000
 
-# 票档/抢票库存分桶（Redis+MySQL 同构）。默认关闭，保持单 key 热路径。
-# 开启前应对存量票档/活动执行拆桶（启动 EnsureInventoryBuckets 或迁移脚本）。
+# 票档/抢票库存分桶（Redis+MySQL 同库）。生产基线固定开启。
+# 启动时会幂等补齐存量票档/活动的分桶并预热 Redis。
 inventory:
-  buckets_enabled: false
-  bucket_count: 8
+  buckets_enabled: true
+  bucket_count: 32
   min_quota_to_bucket: 64
   bucket_retry: 4
-  # 实验性第二阶段：订单消费者只写库存预约记录，由批处理器合并扣减库存桶。
-  batch_enabled: false
-  batch_size: 200
-  batch_interval_ms: 50
-  # 第三阶段实验：库存桶和幂等账本使用独立 MySQL；订单主库仍保存 ticket_order。
-  shard_enabled: false
-  shard_dsn: ""
+  # 库存桶与 ticket_order 使用同一个主库事务完成扣减。
 
 # 支付窗口（分钟）。进入 pending_payment 后投递 RabbitMQ 延时关单（消息级 TTL + DLX）；
 # DB 扫描器作兜底（默认约 2 分钟一次）。

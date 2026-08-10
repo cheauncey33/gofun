@@ -10,13 +10,10 @@ param(
   [int]$OrderConsumerWorkers = 6,
   [int]$PaymentTimeoutWorkers = 2,
   [int]$OutboxPublishWorkers = 4,
-  [int]$InventoryBucketCount = 8,
-  [switch]$InventoryBatchEnabled,
-  [switch]$InventoryShardEnabled,
+  [int]$InventoryBucketCount = 32,
   [string]$BackendPort = "18580",
   [string]$ElasticsearchPort = "19602",
   [string]$MysqlPort = "13327",
-  [string]$InventoryMysqlPort = "13328",
   [string]$RedisPort = "16400",
   [string]$RabbitPort = "26073",
   [string]$RabbitManagementPort = "36073",
@@ -35,7 +32,6 @@ $capacityCompose = Join-Path $repo "tests\load\docker-compose.capacity.yml"
 $outputPath = Join-Path $repo $OutputDir
 $rabbitContainer = "${Project}-rabbitmq-1"
 $mysqlContainer = "${Project}-mysql-1"
-$inventoryMysqlContainer = "${Project}-mysql-inventory-1"
 $backendContainer = "${Project}-backend-load"
 $baseUrl = "http://127.0.0.1:$BackendPort/api/v1"
 $metricsUrl = "http://127.0.0.1:$BackendPort/metrics"
@@ -54,14 +50,28 @@ function Invoke-Compose {
   if ($LASTEXITCODE -ne 0) { throw "docker compose failed with exit code $LASTEXITCODE" }
 }
 
+function Wait-ForBackend {
+  $healthUrl = "http://127.0.0.1:$BackendPort/healthz"
+  $deadline = [DateTime]::UtcNow.AddSeconds(90)
+  do {
+    try {
+      $response = Invoke-WebRequest -UseBasicParsing -Uri $healthUrl -TimeoutSec 3
+      if ($response.StatusCode -eq 200) {
+        Write-Host "Backend ready: $healthUrl" -ForegroundColor DarkGreen
+        return
+      }
+    } catch {
+      # 数据库迁移初始化期间，HTTP 端口可能尚未可用。
+    }
+    }
+    Start-Sleep -Milliseconds 500
+  } while ([DateTime]::UtcNow -lt $deadline)
+  throw "backend health check timeout: $healthUrl"
+}
+
 function Invoke-DbQuery {
   param([string]$Query)
   @(docker exec -e MYSQL_PWD=fuchang-it-mysql $mysqlContainer mysql -ufuchang -N -B fuchang_ticketing_it -e $Query 2>$null)
-}
-
-function Invoke-InventoryDbQuery {
-  param([string]$Query)
-  @(docker exec -e MYSQL_PWD=fuchang-it-mysql $inventoryMysqlContainer mysql -ufuchang -N -B fuchang_inventory_it -e $Query 2>$null)
 }
 
 function Enable-MySqlStatementHistory {
@@ -179,6 +189,23 @@ WHERE w.ENGINE = 'INNODB';
   return $result
 }
 
+function Get-PrometheusSnapshot {
+  try {
+    $text = (Invoke-WebRequest -UseBasicParsing -Uri $metricsUrl -TimeoutSec 3).Content
+    $result = [ordered]@{}
+    $matches = [regex]::Matches($text, '(?m)^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+([0-9.eE+-]+)$')
+    foreach ($match in $matches) {
+      $name = $match.Groups[1].Value
+      $labels = $match.Groups[2].Value
+      $key = if ([string]::IsNullOrWhiteSpace($labels)) { $name } else { "$name{$labels}" }
+      $result[$key] = [double]$match.Groups[3].Value
+    }
+    return [pscustomobject]$result
+  } catch {
+    return [pscustomobject]@{}
+  }
+}
+
 function Get-DbSnapshot {
   param([string]$CampaignId)
   $orderCount = @(Invoke-DbQuery "SELECT COUNT(*) FROM ticket_order WHERE rush_sale_campaign_id = $CampaignId;")
@@ -186,16 +213,7 @@ function Get-DbSnapshot {
   $orderStatusRows = @(Invoke-DbQuery "SELECT status, COUNT(*) FROM ticket_order WHERE rush_sale_campaign_id = $CampaignId GROUP BY status ORDER BY status;")
   $outboxStatusRows = @(Invoke-DbQuery "SELECT o.status, COUNT(*) FROM ticket_order_outbox o JOIN ticket_order t ON t.id = o.order_id WHERE t.rush_sale_campaign_id = $CampaignId GROUP BY o.status ORDER BY o.status;")
   $pendingOutbox = @(Invoke-DbQuery "SELECT COUNT(*) FROM ticket_order_outbox o JOIN ticket_order t ON t.id = o.order_id WHERE t.rush_sale_campaign_id = $CampaignId AND o.status IN ('pending','publishing');")
-  $pendingInventory = @(Invoke-DbQuery "SELECT COUNT(*) FROM ticket_order WHERE rush_sale_campaign_id = $CampaignId AND inventory_desired_state <> inventory_applied_state;")
-  $inventoryStateRows = @(Invoke-DbQuery "SELECT inventory_desired_state, inventory_applied_state, COUNT(*) FROM ticket_order WHERE rush_sale_campaign_id = $CampaignId GROUP BY inventory_desired_state, inventory_applied_state ORDER BY inventory_desired_state, inventory_applied_state;")
-  $inventoryOperations = @()
-  $inventoryBuckets = @()
-  if ($InventoryShardEnabled) {
-    $inventoryOperations = @(Invoke-InventoryDbQuery "SELECT COUNT(*) FROM inventory_operation WHERE campaign_id = $CampaignId;")
-    $inventoryBuckets = @(Invoke-InventoryDbQuery "SELECT COUNT(*) FROM rush_campaign_bucket WHERE campaign_id = $CampaignId;")
-  } else {
-    $inventoryBuckets = @(Invoke-DbQuery "SELECT COUNT(*) FROM rush_campaign_bucket WHERE campaign_id = $CampaignId;")
-  }
+  $inventoryBuckets = @(Invoke-DbQuery "SELECT COUNT(*) FROM rush_campaign_bucket WHERE campaign_id = $CampaignId;")
 
   function Convert-StatusRows([object[]]$rows) {
     $result = [ordered]@{}
@@ -211,12 +229,9 @@ function Get-DbSnapshot {
     orders = if ($orderCount.Count -gt 0) { [int64]$orderCount[0] } else { 0 }
     outbox = if ($outboxCount.Count -gt 0) { [int64]$outboxCount[0] } else { 0 }
     pending_outbox = if ($pendingOutbox.Count -gt 0) { [int64]$pendingOutbox[0] } else { 0 }
-    inventory_pending = if ($pendingInventory.Count -gt 0) { [int64]$pendingInventory[0] } else { 0 }
-    inventory_operations = if ($inventoryOperations.Count -gt 0) { [int64]$inventoryOperations[0] } else { 0 }
     inventory_buckets = if ($inventoryBuckets.Count -gt 0) { [int64]$inventoryBuckets[0] } else { 0 }
     order_status = Convert-StatusRows $orderStatusRows
     outbox_status = Convert-StatusRows $outboxStatusRows
-    inventory_state = @($inventoryStateRows)
   }
 }
 
@@ -259,14 +274,15 @@ function Wait-ForDrain {
     $db = Get-DbSnapshot $CampaignId
     $sample = [pscustomobject]@{
       timestamp = (Get-Date).ToString("o")
+      phase = "drain"
       elapsed_seconds = [Math]::Round(((Get-Date) - $started).TotalSeconds, 1)
       rabbitmq = $rabbit
       mysql_lock_waits = @(Get-MySqlLockWaitSnapshot)
+      prometheus = Get-PrometheusSnapshot
       db = $db
     }
     $drainSamples.Add($sample)
-    $inventoryDrained = (-not $InventoryBatchEnabled -or $db.inventory_pending -eq 0)
-    if ($rabbit.work_queue_total -eq 0 -and $db.pending_outbox -eq 0 -and $inventoryDrained) {
+    if ($rabbit.work_queue_total -eq 0 -and $db.pending_outbox -eq 0) {
       $zeroStreak++
       if ($zeroStreak -ge 3) { break }
     } else {
@@ -279,8 +295,8 @@ function Wait-ForDrain {
   $lockWaitRows | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 (Join-Path $RunPath "mysql-lock-waits.json")
   [pscustomobject]@{
     elapsed_seconds = if ($drainSamples.Count -gt 0) { $drainSamples[-1].elapsed_seconds } else { 0 }
-    primary_drained = ($drainSamples.Count -gt 0 -and $drainSamples[-1].rabbitmq.work_queue_total -eq 0 -and $drainSamples[-1].db.pending_outbox -eq 0 -and (-not $InventoryBatchEnabled -or $drainSamples[-1].db.inventory_pending -eq 0))
-    completed = ($drainSamples.Count -gt 0 -and $drainSamples[-1].rabbitmq.work_queue_total -eq 0 -and $drainSamples[-1].db.pending_outbox -eq 0 -and (-not $InventoryBatchEnabled -or $drainSamples[-1].db.inventory_pending -eq 0) -and $drainSamples[-1].rabbitmq.dead_letters -eq 0)
+    primary_drained = ($drainSamples.Count -gt 0 -and $drainSamples[-1].rabbitmq.work_queue_total -eq 0 -and $drainSamples[-1].db.pending_outbox -eq 0)
+    completed = ($drainSamples.Count -gt 0 -and $drainSamples[-1].rabbitmq.work_queue_total -eq 0 -and $drainSamples[-1].db.pending_outbox -eq 0 -and $drainSamples[-1].rabbitmq.dead_letters -eq 0)
     max_rabbit_total = Get-Maximum @($drainSamples | ForEach-Object { $_.rabbitmq.total_messages })
     max_primary_total = Get-Maximum @($drainSamples | ForEach-Object { $_.rabbitmq.primary_total_messages })
     max_work_queue_total = Get-Maximum @($drainSamples | ForEach-Object { $_.rabbitmq.work_queue_total })
@@ -288,6 +304,26 @@ function Wait-ForDrain {
     max_rabbit_ready = Get-Maximum @($drainSamples | ForEach-Object { $_.rabbitmq.messages_ready })
     last_rabbit = if ($drainSamples.Count -gt 0) { $drainSamples[-1].rabbitmq } else { Get-RabbitSnapshot }
     last_db = if ($drainSamples.Count -gt 0) { $drainSamples[-1].db } else { Get-DbSnapshot $CampaignId }
+  }
+}
+
+function Save-LifecycleMetrics {
+  param([string]$RunPath)
+  $httpSamples = Get-Content (Join-Path $RunPath "samples.json") -Raw -Encoding utf8 | ConvertFrom-Json
+  $drainSamples = Get-Content (Join-Path $RunPath "drain-samples.json") -Raw -Encoding utf8 | ConvertFrom-Json
+  $lifecycle = [System.Collections.Generic.List[object]]::new()
+  foreach ($sample in $httpSamples) { $lifecycle.Add($sample) }
+  foreach ($sample in $drainSamples) { $lifecycle.Add($sample) }
+  $lifecycle | ConvertTo-Json -Depth 20 | Set-Content -Encoding utf8 (Join-Path $RunPath "lifecycle-samples.json")
+  $first = if ($lifecycle.Count -gt 0) { $lifecycle[0] } else { $null }
+  $last = if ($lifecycle.Count -gt 0) { $lifecycle[$lifecycle.Count - 1] } else { $null }
+  [pscustomobject]@{
+    sample_count = $lifecycle.Count
+    http_sample_count = @($httpSamples).Count
+    drain_sample_count = @($drainSamples).Count
+    first_timestamp = if ($null -ne $first) { $first.timestamp } else { $null }
+    last_timestamp = if ($null -ne $last) { $last.timestamp } else { $null }
+    prometheus_captured_through_drain = ($drainSamples.Count -gt 0 -and $null -ne $drainSamples[0].prometheus)
   }
 }
 
@@ -307,7 +343,6 @@ $env:CAPACITY_CONTAINER_PREFIX = $Project
 $env:GOFUN_BACKEND_PORT = $BackendPort
 $env:GOFUN_ELASTICSEARCH_PORT = $ElasticsearchPort
 $env:GOFUN_MYSQL_PORT = $MysqlPort
-$env:GOFUN_INVENTORY_MYSQL_PORT = $InventoryMysqlPort
 $env:GOFUN_REDIS_PORT = $RedisPort
 $env:GOFUN_RABBITMQ_PORT = $RabbitPort
 $env:GOFUN_RABBITMQ_MANAGEMENT_PORT = $RabbitManagementPort
@@ -315,11 +350,6 @@ $env:INVENTORY_BUCKETS_ENABLED = "true"
 $env:INVENTORY_BUCKET_COUNT = [string]$InventoryBucketCount
 $env:INVENTORY_MIN_QUOTA_TO_BUCKET = "64"
 $env:INVENTORY_BUCKET_RETRY = "4"
-$env:INVENTORY_BATCH_ENABLED = if ($InventoryBatchEnabled) { "true" } else { "false" }
-$env:INVENTORY_BATCH_SIZE = "200"
-$env:INVENTORY_BATCH_INTERVAL_MS = "50"
-$env:INVENTORY_SHARD_ENABLED = if ($InventoryShardEnabled) { "true" } else { "false" }
-$env:ORDER_OUTBOX_WRITE_MODE = "batch"
 $env:ORDER_CONSUMER_WORKER_COUNT = [string]$OrderConsumerWorkers
 $env:ORDER_CONSUMER_PREFETCH_COUNT = "5"
 $env:ORDER_CONSUMER_MAX_RETRIES = "3"
@@ -336,12 +366,9 @@ $env:K6_JWT_SECRET = "fuchang-integration-test-secret-only"
 
 $rows = @()
 try {
-  if ($InventoryShardEnabled -and -not $InventoryBatchEnabled) {
-    throw "InventoryShardEnabled requires InventoryBatchEnabled"
-  }
   Invoke-Compose @("down", "-v", "--remove-orphans")
   Invoke-Compose @("up", "-d", "--build", "--wait")
-  Start-Sleep -Seconds 5
+  Wait-ForBackend
   Enable-MySqlStatementHistory
 
   foreach ($currentVus in $vusList) {
@@ -381,10 +408,13 @@ try {
 
     Write-Host "=== drain VUS=$currentVus ===" -ForegroundColor Cyan
     $drain = Wait-ForDrain $campaignId $runDir
+    $lifecycle = Save-LifecycleMetrics $runDir
     $afterDb = Get-DbSnapshot $campaignId
     Save-FailureDiagnostics $campaignId $runDir
     $row = [pscustomobject]@{
       vus = $currentVus
+      consumer_workers = $OrderConsumerWorkers
+      bucket_count = $InventoryBucketCount
       campaign_id = $campaignId
       http_reqs = $k6.http_reqs
       http_req_rate = $k6.http_req_rate
@@ -403,18 +433,23 @@ try {
       primary_drained = $drain.primary_drained
       drain_completed = $drain.completed
       dead_letters_after = $drain.last_rabbit.dead_letters
+      mq_work_queue_after = $drain.last_rabbit.work_queue_total
+      mq_primary_total_after = $drain.last_rabbit.primary_total_messages
+      mq_delay_queue_after = $drain.last_rabbit.delay_queue
+      mq_timeout_queue_after = $drain.last_rabbit.timeout_queue
       outbox_before = $beforeDb.outbox
       outbox_after = $afterDb.outbox
       outbox_pending_after = $afterDb.pending_outbox
-      inventory_pending_after = $afterDb.inventory_pending
-      inventory_operations_after = $afterDb.inventory_operations
       inventory_buckets_after = $afterDb.inventory_buckets
-      inventory_state_after = $afterDb.inventory_state
       orders_after = $afterDb.orders
       order_status_after = $afterDb.order_status
       outbox_status_after = $afterDb.outbox_status
       lock_current_wait_peak = $diagnostic.peaks.innodb_row_lock_current_waits
       lock_waits_delta = $diagnostic.peaks.innodb_row_lock_waits_delta
+      prometheus_samples = $lifecycle.sample_count
+      prometheus_http_samples = $lifecycle.http_sample_count
+      prometheus_drain_samples = $lifecycle.drain_sample_count
+      prometheus_captured_through_drain = $lifecycle.prometheus_captured_through_drain
     }
     $row | ConvertTo-Json -Depth 12 | Set-Content -Encoding utf8 (Join-Path $runDir "run-summary.json")
     $rows += $row
@@ -426,14 +461,14 @@ try {
     "",
     "- generated_at: $(Get-Date -Format o)",
     "- topology: one backend + one Redis + one MySQL + one RabbitMQ + Elasticsearch",
-    "- configuration: inventory buckets enabled, inventory batch=$InventoryBatchEnabled, inventory shard=$InventoryShardEnabled, outbox batch, $OrderConsumerWorkers order workers, prefetch 5, $PaymentTimeoutWorkers payment-timeout workers, $OutboxPublishWorkers outbox publisher workers",
+    "- configuration: same-db inventory buckets enabled, transactional outbox, $OrderConsumerWorkers order workers, prefetch 5, $PaymentTimeoutWorkers payment-timeout workers, $OutboxPublishWorkers outbox publisher workers",
     "- duration per VUS: $Duration; drain timeout: ${DrainSeconds}s",
     "",
-    "| VUS | HTTP req/s | HTTP 200 est. | transport errors | p99 | HTTP-window MQ peak | post-test MQ peak | drain | orders | pending outbox | pending inventory | inventory ops | lock waits |",
+    "| VUS | Consumer | buckets | HTTP req/s | HTTP 200 est. | transport errors | p99 | HTTP-window MQ peak | post-test MQ peak | drain(work queue) | orders | pending outbox | lock waits |",
     "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
   )
   foreach ($item in $rows) {
-    $md += "| $($item.vus) | $([Math]::Round([double]$item.http_req_rate, 1)) | $($item.http_200_estimate) | $($item.transport_errors) | $([Math]::Round([double]$item.p99_ms, 1))ms | $($item.http_window_mq_peak) | $($item.post_test_mq_peak) | $([Math]::Round([double]$item.drain_seconds, 1))s / primary=$($item.primary_drained) / dead=$($item.dead_letters_after) | $($item.orders_after) | $($item.outbox_pending_after) | $($item.inventory_pending_after) | $($item.inventory_operations_after) | $($item.lock_waits_delta) |"
+    $md += "| $($item.vus) | $($item.consumer_workers) | $($item.bucket_count) | $([Math]::Round([double]$item.http_req_rate, 1)) | $($item.http_200_estimate) | $($item.transport_errors) | $([Math]::Round([double]$item.p99_ms, 1))ms | $($item.http_window_mq_peak) | $($item.post_test_mq_peak) | $([Math]::Round([double]$item.drain_seconds, 1))s / primary=$($item.primary_drained) / dead=$($item.dead_letters_after) | $($item.orders_after) | $($item.outbox_pending_after) | $($item.lock_waits_delta) |"
   }
   $md += ""
   $md += "Raw per-VUS artifacts: $OutputDir/"

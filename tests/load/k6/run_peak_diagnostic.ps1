@@ -152,37 +152,12 @@ function Get-PrometheusSnapshot {
   try {
     $text = (Invoke-WebRequest -UseBasicParsing -Uri $MetricsUrl -TimeoutSec 3).Content
     $result = [ordered]@{}
-    foreach ($name in @(
-      "mq_messages_published_total",
-      "mq_messages_consumed_total",
-      "ticket_order_consumer_transaction_duration_seconds_count",
-      "ticket_order_consumer_transaction_duration_seconds_sum",
-      "ticket_order_consumer_transaction_duration_seconds_bucket",
-      "ticket_order_consumer_transactions_total",
-      "ticket_order_consumer_stage_duration_seconds_count",
-      "ticket_order_consumer_stage_duration_seconds_sum",
-      "ticket_order_consumer_stage_duration_seconds_bucket",
-      "ticket_order_consumer_inventory_bucket_duration_seconds_count",
-      "ticket_order_consumer_inventory_bucket_duration_seconds_sum",
-      "ticket_order_consumer_inventory_bucket_duration_seconds_bucket",
-      "ticket_order_consumer_inventory_bucket_operations_total",
-      "inventory_reservation_batch_duration_seconds_count",
-      "inventory_reservation_batch_duration_seconds_sum",
-      "inventory_reservation_batch_duration_seconds_bucket",
-      "inventory_reservation_batches_total",
-      "inventory_reservation_rows_total",
-      "inventory_reservation_pending",
-      "ticket_payment_timeout_transaction_duration_seconds_count",
-      "ticket_payment_timeout_transaction_duration_seconds_sum",
-      "ticket_payment_timeout_transaction_duration_seconds_bucket",
-      "ticket_payment_timeout_transactions_total"
-    )) {
-      $matches = [regex]::Matches($text, "(?m)^$name(?:\{([^}]*)\})?\s+([0-9.eE+-]+)$")
-      foreach ($match in $matches) {
-        $labels = $match.Groups[1].Value
-        $key = if ([string]::IsNullOrWhiteSpace($labels)) { $name } else { "$name{$labels}" }
-        $result[$key] = [double]$match.Groups[2].Value
-      }
+    $matches = [regex]::Matches($text, '(?m)^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+([0-9.eE+-]+)$')
+    foreach ($match in $matches) {
+      $name = $match.Groups[1].Value
+      $labels = $match.Groups[2].Value
+      $key = if ([string]::IsNullOrWhiteSpace($labels)) { $name } else { "$name{$labels}" }
+      $result[$key] = [double]$match.Groups[3].Value
     }
     return [pscustomobject]$result
   } catch {
@@ -192,6 +167,16 @@ function Get-PrometheusSnapshot {
 
 $effectiveBaseUrl = $BaseUrl
 Enable-MySqlStatementHistory
+$samplingStarted = Get-Date
+$samples.Add([pscustomobject]@{
+  timestamp = $samplingStarted.ToString("o")
+  phase = "pre_http"
+  elapsed_seconds = 0
+  rabbitmq = Get-RabbitSnapshot
+  mysql = Get-MySqlSnapshot
+  mysql_lock_waits = @(Get-MySqlLockWaitSnapshot)
+  prometheus = Get-PrometheusSnapshot
+})
 if ($K6InDocker) {
   if ([string]::IsNullOrWhiteSpace($K6Network)) {
     throw "K6Network is required when K6InDocker is enabled"
@@ -230,6 +215,8 @@ if ($K6InDocker) {
 while (-not $process.HasExited) {
   $samples.Add([pscustomobject]@{
     timestamp = (Get-Date).ToString("o")
+    phase = "http"
+    elapsed_seconds = [Math]::Round(((Get-Date) - $samplingStarted).TotalSeconds, 3)
     rabbitmq = Get-RabbitSnapshot
     mysql = Get-MySqlSnapshot
     mysql_lock_waits = @(Get-MySqlLockWaitSnapshot)

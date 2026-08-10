@@ -12,7 +12,7 @@ docker-compose -f monitoring/docker-compose.monitoring.yml up -d
 
 核心面板包括：
 
-- `outbox_buffer_len`：进程内尚未批量刷入 MySQL 的 outbox 草稿数。
+- `ticket_order_consumer_transactions_total`：订单消费者事务成功/失败计数；库存提交后才会推进 `pending_payment`。
 - Rush Execute P99：`POST /api/v1/rush-sales/:id/execute` 的 5 分钟窗口 p99。
 - `mysql_innodb_row_lock_waits_total`：MySQL 全局 `Innodb_row_lock_waits`，面板展示 5 分钟增量。
 - `mq_queue_ready_messages`：RabbitMQ 等待投递的 ready 消息数，作为本项目的实时 MQ backlog 指标。

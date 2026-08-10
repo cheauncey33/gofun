@@ -21,11 +21,16 @@ services:
       MYSQL_DSN: "gofun:${MYSQL_PASSWORD}@tcp(mysql:3306)/gofun?charset=utf8mb4&parseTime=True&loc=Local"
       REDIS_ADDR: redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
-      RABBITMQ_URL: amqp://snack:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      RABBITMQ_URL: amqp://fuchang:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       JWT_SECRET: ${JWT_SECRET}
       TICKET_QR_SECRET: ${TICKET_QR_SECRET}
       PAYMENT_SANDBOX_SECRET: ${PAYMENT_SANDBOX_SECRET}
       CORS_ALLOW_ORIGINS: ${APP_ORIGIN}
+      ORDER_CONSUMER_WORKER_COUNT: "6"
+      ORDER_CONSUMER_PREFETCH_COUNT: "5"
+      ORDER_OUTBOX_PUBLISH_WORKERS: "4"
+      INVENTORY_BUCKETS_ENABLED: "true"
+      INVENTORY_BUCKET_COUNT: "32"
     depends_on:
       mysql:
         condition: service_healthy
@@ -37,6 +42,7 @@ services:
   mysql:
     image: mysql:8.0
     restart: unless-stopped
+    command: ["mysqld", "--max-connections=${MYSQL_MAX_CONNECTIONS:-300}"]
     ports:
       - "3307:3306"
     environment:
@@ -76,7 +82,7 @@ services:
       - "5672:5672"
       - "15672:15672"
     environment:
-      RABBITMQ_DEFAULT_USER: snack
+      RABBITMQ_DEFAULT_USER: fuchang
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq

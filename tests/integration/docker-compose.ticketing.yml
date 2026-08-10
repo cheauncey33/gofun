@@ -8,8 +8,6 @@ services:
       SERVER_PORT: 8080
       SERVER_MODE: test
       MYSQL_DSN: "fuchang:fuchang-it-mysql@tcp(mysql:3306)/fuchang_ticketing_it?charset=utf8mb4&parseTime=True&loc=Local"
-      INVENTORY_SHARD_ENABLED: "false"
-      INVENTORY_SHARD_DSN: "fuchang:fuchang-it-mysql@tcp(mysql_inventory:3306)/fuchang_inventory_it?charset=utf8mb4&parseTime=True&loc=Local"
       REDIS_ADDR: redis:6379
       REDIS_PASSWORD: fuchang-it-redis
       RABBITMQ_URL: amqp://fuchang:fuchang-it-rabbit@rabbitmq:5672/
@@ -43,8 +41,6 @@ services:
       - "${GOFUN_BACKEND_PORT:-18080}:8080"
     depends_on:
       mysql:
-        condition: service_healthy
-      mysql_inventory:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -89,25 +85,6 @@ services:
       timeout: 3s
       retries: 30
 
-  mysql_inventory:
-    image: mysql:8.0
-    command: ["mysqld", "--max-connections=${MYSQL_INVENTORY_MAX_CONNECTIONS:-300}"]
-    environment:
-      MYSQL_ROOT_PASSWORD: fuchang-it-root
-      MYSQL_DATABASE: fuchang_inventory_it
-      MYSQL_USER: fuchang
-      MYSQL_PASSWORD: fuchang-it-mysql
-      TZ: Asia/Shanghai
-    ports:
-      - "${GOFUN_INVENTORY_MYSQL_PORT:-13307}:3306"
-    volumes:
-      - mysql_inventory_it_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -ufuchang -pfuchang-it-mysql --silent"]
-      interval: 3s
-      timeout: 3s
-      retries: 30
-
   redis:
     image: redis:7.4-alpine
     command: ["redis-server", "--requirepass", "fuchang-it-redis", "--appendonly", "yes"]
@@ -139,7 +116,6 @@ services:
 
 volumes:
   mysql_it_data:
-  mysql_inventory_it_data:
   redis_it_data:
   rabbitmq_it_data:
   elasticsearch_it_data:

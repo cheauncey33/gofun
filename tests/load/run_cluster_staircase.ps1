@@ -33,7 +33,6 @@ $env:MONITOR_CONTAINERS = @(
 $env:MYSQL_CONTAINER = "gofun-cluster-mysql-primary-1"
 $env:REDIS_CONTAINER = "gofun-cluster-redis-primary-1"
 $env:RABBITMQ_CONTAINER = "gofun-cluster-rabbitmq-1-1"
-$env:ORDER_OUTBOX_WRITE_MODE = "batch"
 $env:ORDER_CONSUMER_WORKER_COUNT = "2x3"
 $env:ORDER_CONSUMER_PREFETCH_COUNT = "5"
 $env:ORDER_OUTBOX_PUBLISH_WORKERS = "2x3"

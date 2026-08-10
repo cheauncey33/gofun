@@ -1,8 +1,8 @@
 package service
 
 import (
-	"gofun/models"
 	"encoding/json"
+	"gofun/models"
 	"strings"
 	"testing"
 
@@ -31,21 +31,6 @@ func TestNotifyOutboxPublisherNilSafe(t *testing.T) {
 	s := &TicketOrderService{}
 	s.notifyOutboxPublisher() // must not panic
 }
-
-func TestOutboxWriteBufferTakeRespectsLimit(t *testing.T) {
-	b := &outboxWriteBuffer{
-		items: []outboxDraft{
-			{OrderID: 1}, {OrderID: 2}, {OrderID: 3},
-		},
-		batchSize: 2,
-		maxBuffer: 10,
-	}
-	got := b.takeLocked(2)
-	if len(got) != 2 || got[0].OrderID != 1 || len(b.items) != 1 || b.items[0].OrderID != 3 {
-		t.Fatalf("unexpected take result: got=%v remain=%v", got, b.items)
-	}
-}
-
 
 func TestTicketOrderReceiptKeepsQueuedState(t *testing.T) {
 	order := &models.TicketOrder{

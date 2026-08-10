@@ -4,7 +4,9 @@
 
 ## 当前可收敛的主组合
 
-先比较真正影响票务热路径的两个开关：库存是否分桶、Outbox 是否 batch 写入。消费者和连接池固定为容量栈的基线，避免一次改变太多变量。
+> 本文矩阵记录的是重构前历史样本。当前代码已删除 Outbox batch 写入和库存 Batch Saga；后续压测只比较库存是否分桶，消费者和连接池按固定基线执行。
+
+先比较真正影响票务热路径的变量：库存是否分桶。消费者和连接池固定为容量栈的基线，避免一次改变太多变量。
 
 | 组合 | 库存 | Outbox | 当前证据 | 结论 |
 |---|---|---|---|---|
@@ -76,7 +78,7 @@
 | batch | 500 | 485.00 | 10.59s | 500/500 `pending_payment` |
 | batch | 1000 | 649.00 | 22.25s | 1000/1000 `pending_payment` |
 
-batch 的代价是订单和 Outbox 不在同一个本地事务中；代码用有界内存缓冲、失败回退和 `RecoverQueuedOrders` 扫描补写来收敛风险，所以它适合作为容量/开售档，`sync` 仍保留作故障回退和更直观的一致性档。
+历史 batch 的代价是订单和 Outbox 不在同一个本地事务中；历史版本曾用有界内存缓冲、失败回退和 `RecoverQueuedOrders` 扫描补写来收敛风险。当前实现已删除这套路径，订单与 Outbox 固定同事务提交。
 
 证据：`docs/PERFORMANCE_REPORT.md`、`tests/load/results/outbox-sync-500/`、`tests/load/results/outbox-batch-500/`、`tests/load/results/outbox-batch-1000/`。
 
@@ -97,7 +99,7 @@ batch 的代价是订单和 Outbox 不在同一个本地事务中；代码用有
 
 | 范围 | 收敛决定 |
 |---|---|
-| 推荐单机容量/开售档 | `inventory.buckets_enabled=true`、`bucket_count=8`；存量数据启动时幂等补桶并预热 Redis；现有 `config.example.yaml` 仍保持关闭，避免未迁移存量数据直接切换 |
+| 正式单机基线/开售档 | `inventory.buckets_enabled=true`、`bucket_count=32`、Consumer=6、Prefetch=5、Publisher=4；存量数据启动时幂等补桶并预热 Redis |
 | Outbox | `write_mode=batch`、buffer=50、flush=8ms、publisher=4、publish_batch=200 |
 | 消费者 | 单机容量基线先用 worker=6、prefetch=5；不再以盲目加 worker 作为优化方向 |
 | 数据库/Redis | 单机容量测试使用 MySQL max open=100、Redis pool=100；生产值需按实例规格重新压测 |

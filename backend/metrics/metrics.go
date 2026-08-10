@@ -168,38 +168,6 @@ var (
 		[]string{"kind", "bucket_no", "result"}, // result: success | error
 	)
 
-	InventoryReservationBatchDuration = promauto.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Name:    "inventory_reservation_batch_duration_seconds",
-			Help:    "Inventory reservation batch transaction duration",
-			Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
-		},
-		[]string{"result"}, // success | error
-	)
-
-	InventoryReservationBatches = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "inventory_reservation_batches_total",
-			Help: "Inventory reservation batches by result",
-		},
-		[]string{"result"}, // success | error | empty
-	)
-
-	InventoryReservationRows = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "inventory_reservation_rows_total",
-			Help: "Inventory reservation rows transitioned by state",
-		},
-		[]string{"transition"}, // reserved | released | released_without_bucket_update
-	)
-
-	InventoryReservationPending = promauto.NewGauge(
-		prometheus.GaugeOpts{
-			Name: "inventory_reservation_pending",
-			Help: "Current inventory reservations whose desired and applied states differ",
-		},
-	)
-
 	TicketPaymentTimeoutTransactionDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "ticket_payment_timeout_transaction_duration_seconds",
@@ -215,28 +183,6 @@ var (
 			Help: "Payment timeout cancellation MySQL transactions by result",
 		},
 		[]string{"result"}, // success | error
-	)
-
-	OutboxBufferLength = promauto.NewGauge(
-		prometheus.GaugeOpts{
-			Name: "outbox_buffer_len",
-			Help: "Current number of outbox drafts waiting in the process-local batch buffer",
-		},
-	)
-
-	OutboxFlushBatchSize = promauto.NewHistogram(
-		prometheus.HistogramOpts{
-			Name:    "outbox_flush_batch_size",
-			Help:    "Number of outbox rows written per batch flush",
-			Buckets: []float64{1, 5, 10, 25, 50, 100, 200, 500, 1000},
-		},
-	)
-
-	OutboxRecoverBackfill = promauto.NewCounter(
-		prometheus.CounterOpts{
-			Name: "outbox_recover_backfill_total",
-			Help: "Total queued orders that received a backfilled outbox row",
-		},
 	)
 
 	InventoryBucketFallback = promauto.NewCounter(

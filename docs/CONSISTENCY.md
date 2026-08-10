@@ -1,7 +1,7 @@
 # 一致性设计：从抢票入口到落单
 
 > 目标：在高并发抢票下，保证 **不超卖、不重复下单、消息不丢、最终一致**。
-> 本文描述 Gofun 票务「Redis 预扣 → Outbox → MQ → MySQL → 补偿」全链路的可靠性假设与每步失败的处理。
+> 本文描述 Gofun 票务「Redis 预扣 → 事务 Outbox → MQ → 库存事务 → pending_payment」全链路的可靠性假设与每步失败的处理。
 > 所有结论均可在 `backend/service/` 下找到对应实现。
 
 ## 设计前提
@@ -22,15 +22,14 @@
    │  一次性校验并扣减：活动票额 + 票档库存 + 个人限购（分桶选桶）
    │  失败 → 返回售罄/限购，不写库、不发消息
    ▼ ③ MySQL 事务：写订单(queued) + Outbox 行
-   │  （batch 模式下订单先落库，Outbox 由 recover 扫描兜底补写）
+   │  两者同一主库事务提交，HTTP 不等待 Publisher/MQ
    ▼ ④ 返回「排队中」给用户
    │
    ▼ ⑤ Outbox publisher（多 worker）
    │  SKIP LOCKED 抢占 pending 行 → 发 MQ → 等 broker confirm → 标记 published
    ▼ ⑥ RabbitMQ（durable queue + persistent message）
    ▼ ⑦ Consumer（手动 ack）
-   │  事务内：订单行 FOR UPDATE → 校验状态/消息一致性 → 分桶条件 UPDATE 扣 MySQL 库存
-   │        → 订单 queued → pending_payment
+   │  主库同一事务：订单 FOR UPDATE → 分桶扣减 → queued → pending_payment
    ▼ ⑧ 投递支付超时延时消息（失败由扫描器兜底）
    ▼ ⑨ 支付 / 超时关单 → 出票 / 释放库存
    ▼ ⑩ 补偿对账：周期对齐 Redis 与 MySQL 票额（只下调 / 补缺）
@@ -43,12 +42,11 @@
 | ① 幂等校验 | 重复提交 / 网络重试 | Redis 缓存 + DB `user_id+idempotency_key` 唯一约束，命中直接返回原凭据 | 同一幂等键只建一单 |
 | ② Redis 预扣 | 库存不足 / 超限 | Lua 原子返回失败码，不落库 | 入口层面挡住超卖 |
 | ③ 写订单+Outbox | 事务失败 | 回滚 Redis 预扣；若是并发同键，改查已有订单返回 | 预扣与凭据一致 |
-| ③b batch 模式 | Outbox 行未写 | 订单已落库，由 **recover 扫描**周期补写 Outbox | 不丢消息（最终补发） |
 | ⑤ Outbox 投递 | broker confirm 失败/超时 | 行状态回 `pending` 等下轮；超过最大次数标 `failed` 并触发 `FinalizeFailedMessage` | 不丢、可观测 |
 | ⑥ MQ 存储 | broker 重启 | durable queue + persistent message | 消息不丢 |
 | ⑦ 消费处理 | 可重试错误（如行锁超时） | 重发 retry 队列，`x-retry-count` 递增，超上限进 **DLQ** | 至少一次，最终人工/自动介入 |
 | ⑦ 消费处理 | 不可重试错误（凭据不存在/消息不一致） | `FinalizeFailedMessage` + ack，不再重试 | 快速失败，不阻塞队列 |
-| ⑦ 重复消费 | MQ 重投 / retry 重投 | 订单行 `FOR UPDATE` + 状态非 `queued` 直接返回 + 分桶条件 UPDATE | 重复消费不重复扣库存 |
+| ⑦ 重复消费 | MQ 重投 / retry 重投 | 依赖订单行 `FOR UPDATE` 和非 queued 状态判断 | 重复消费不重复扣库存 |
 | ⑧ 超时消息 | 投递失败 | DB 扫描器周期兜底关单 | 超时不泄漏库存 |
 | ⑩ 补偿对账 | Redis 与 MySQL 漂移 | 周期对账：Redis > MySQL 时下调、缺失时补建 | 收敛到 MySQL 事实 |
 
@@ -56,7 +54,7 @@
 
 1. **客户端幂等键**：前端生成 `X-Idempotency-Key`（uuidv4），同一笔请求重试携带同键。
 2. **入口去重**：Redis 缓存命中直接返回；DB `(user_id, idempotency_key)` 唯一约束兜底并发。
-3. **消费幂等**：消息携带 `order_id`；consumer 用 `SELECT ... FOR UPDATE` 锁订单行，状态非 `queued` 说明已处理过，直接 ack。
+3. **消费幂等**：Consumer 在主库事务内锁订单行 `FOR UPDATE`；订单已不是 `queued` 时直接幂等返回。
 
 ## 不超卖的两个层级
 
@@ -72,4 +70,5 @@
 - 支付当前使用内置 `SandboxPaymentGateway`，不读取或修改 `user.balance_cents`：平台落库支付单，沙箱异步回调后才把订单改为 `paid` 并签发电子票。回调会校验签名、金额、provider 和支付单状态，但调度状态仍在进程内。
 - 支付当前不是生产级真实渠道：重启恢复、渠道查询、对账、退款重试以及支付回调与超时的更强并发保护仍需补齐。外部退款成功与本地事务也不是一个分布式事务，必须通过补偿任务收敛。
 - 多副本部署下 Outbox publisher / timeout scanner 通过 `SKIP LOCKED` 抢占，天然支持多实例，但需注意单消息只被一个 worker 处理。
+- `pending_payment` 只表示主库事务已提交分桶库存 reserve、等待支付；订单进入该状态前不能只写预约意图。
 - 一致性是**最终一致**，毫秒级窗口内 Redis 与 MySQL 可能短暂不一致，由补偿对账收敛。

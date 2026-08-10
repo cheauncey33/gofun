@@ -14,9 +14,7 @@ import (
 )
 
 type Container struct {
-	DB *gorm.DB
-	// InventoryDB 在第三阶段可指向独立库存库；未开启分库时与 DB 相同。
-	InventoryDB      *gorm.DB
+	DB               *gorm.DB
 	RDB              *redis.Client
 	MQConn           *amqp.Connection
 	MQChannel        *amqp.Channel

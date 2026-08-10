@@ -8,7 +8,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func TestTicketingSchemaModelsExcludeLegacyCommerceTables(t *testing.T) {
+func TestTicketingSchemaModelsOnlyIncludeCurrentCommerceTables(t *testing.T) {
 	modelsToMigrate := ticketingSchemaModels()
 	actual := make(map[reflect.Type]bool, len(modelsToMigrate))
 	for _, model := range modelsToMigrate {

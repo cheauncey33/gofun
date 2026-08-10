@@ -3,7 +3,6 @@ package service
 import (
 	"fmt"
 	"gofun/config"
-	"time"
 )
 
 // InventoryBucketSettings 票档/抢票分桶运行时参数（来自 inventory.* 配置）。
@@ -12,10 +11,6 @@ type InventoryBucketSettings struct {
 	BucketCount      int
 	MinQuotaToBucket int
 	BucketRetry      int
-	BatchEnabled     bool
-	BatchSize        int
-	BatchInterval    time.Duration
-	ShardEnabled     bool
 }
 
 func NewInventoryBucketSettings(cfg config.InventoryConfig) InventoryBucketSettings {
@@ -24,25 +19,15 @@ func NewInventoryBucketSettings(cfg config.InventoryConfig) InventoryBucketSetti
 		BucketCount:      cfg.BucketCount,
 		MinQuotaToBucket: cfg.MinQuotaToBucket,
 		BucketRetry:      cfg.BucketRetry,
-		BatchEnabled:     cfg.BatchEnabled,
-		BatchSize:        cfg.BatchSize,
-		BatchInterval:    time.Duration(cfg.BatchIntervalMS) * time.Millisecond,
-		ShardEnabled:     cfg.ShardEnabled,
 	}
 	if s.BucketCount <= 0 {
-		s.BucketCount = 8
+		s.BucketCount = 32
 	}
 	if s.MinQuotaToBucket <= 0 {
 		s.MinQuotaToBucket = 64
 	}
 	if s.BucketRetry < 0 {
 		s.BucketRetry = 0
-	}
-	if s.BatchSize <= 0 {
-		s.BatchSize = 200
-	}
-	if s.BatchInterval <= 0 {
-		s.BatchInterval = 50 * time.Millisecond
 	}
 	return s
 }

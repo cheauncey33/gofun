@@ -138,9 +138,7 @@ func (s *TicketVerificationService) Verify(
 	var result *TicketVerificationResultView
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var ticket models.AdmissionTicket
-		queryErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Preload("OrderItem").
-			First(&ticket, ticketID).Error
+		queryErr := tx.First(&ticket, ticketID).Error
 		now := time.Now()
 		if errors.Is(queryErr, gorm.ErrRecordNotFound) {
 			if err := s.createRecord(tx, nil, nil, organizerID, operatorUserID, fingerprint,
@@ -154,6 +152,28 @@ func (s *TicketVerificationService) Verify(
 		}
 		if queryErr != nil {
 			return queryErr
+		}
+		var order models.TicketOrder
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&order, ticket.OrderID).Error; err != nil {
+			return err
+		}
+		if order.Status != models.TicketOrderStatusPaid || order.PaymentStatus != models.PaymentStatusPaid {
+			if err := s.createRecord(tx, &ticket.ID, nil, organizerID, operatorUserID, fingerprint,
+				models.TicketVerificationRevoked, "ticket order is not available for verification", now); err != nil {
+				return err
+			}
+			result = &TicketVerificationResultView{
+				Result:     models.TicketVerificationRevoked,
+				Message:    "ticket is not available for verification",
+				VerifiedAt: now,
+				Ticket:     &ticket,
+			}
+			return nil
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Preload("OrderItem").First(&ticket, ticketID).Error; err != nil {
+			return err
 		}
 		if ticket.OrganizerID != organizerID {
 			if err := s.createRecord(tx, &ticket.ID, nil, organizerID, operatorUserID, fingerprint,

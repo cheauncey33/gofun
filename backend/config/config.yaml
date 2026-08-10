@@ -16,7 +16,7 @@ redis:
   pool_size: 100
 
 rabbitmq:
-  url: "amqp://snack:rabbit123456@localhost:5672/"
+  url: "amqp://fuchang:rabbit123456@localhost:5672/"
   queue_name: "fuchang.order.queue"
   retry_queue_name: "fuchang.order.retry"
   dlx_name: "fuchang.order.dlx"
@@ -48,9 +48,20 @@ ratelimit:
   ip_burst: 100000
 
 order_consumer:
-  worker_count: 4
+  worker_count: 6
   prefetch_count: 5
   max_retries: 3
+
+order_outbox:
+  publish_workers: 4
+  publish_batch: 200
+  tick_interval_ms: 200
+
+inventory:
+  buckets_enabled: true
+  bucket_count: 32
+  min_quota_to_bucket: 64
+  bucket_retry: 4
 
 cors:
   allow_origins:

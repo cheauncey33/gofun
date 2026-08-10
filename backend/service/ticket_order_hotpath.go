@@ -155,17 +155,6 @@ func (s *TicketOrderService) createOrderAndOutbox(
 	order *models.TicketOrder,
 	message TicketOrderMessage,
 ) error {
-	if s.outboxWriteMode == "batch" {
-		if err := s.db.WithContext(ctx).Create(order).Error; err != nil {
-			return err
-		}
-		// 订单已落库：outbox 失败交由 recover 扫描补写，避免误回滚 Redis 预扣。
-		if err := s.enqueueOutboxDraft(ctx, order.ID, message); err != nil {
-			log.Printf("outbox batch enqueue after order %d: %v (recover will backfill)", order.ID, err)
-		}
-		return nil
-	}
-
 	for attempt := 1; attempt <= ticketOrderTxMaxAttempts; attempt++ {
 		err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			if err := tx.Create(order).Error; err != nil {

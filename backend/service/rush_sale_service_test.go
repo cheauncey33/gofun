@@ -9,7 +9,7 @@ import (
 	gocache "github.com/patrickmn/go-cache"
 )
 
-func TestRushStockKeyUsesLegacyNamespace(t *testing.T) {
+func TestRushStockKeyUsesTicketNamespace(t *testing.T) {
 	if got, want := TicketStockBucketKey(7, 3), "fuchang:ticket:stock:7:3"; got != want {
 		t.Fatalf("ticket bucket key = %q, want %q", got, want)
 	}

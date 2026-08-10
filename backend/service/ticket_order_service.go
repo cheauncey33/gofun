@@ -33,7 +33,7 @@ import (
 
 const ticketOutboxMaxAttempts = 20
 
-// 兼容旧常量；实际 batch/tick 以 order_outbox 配置为准。
+// Publisher 批量读取与兜底 tick 的默认值；它不是订单/库存 Batch Saga。
 const ticketOutboxPublishBatch = 200
 const ticketOutboxTickInterval = 200 * time.Millisecond
 
@@ -104,7 +104,6 @@ type TicketOrderMessage struct {
 
 type TicketOrderService struct {
 	db                *gorm.DB
-	inventoryDB       *gorm.DB
 	rdb               *redis.Client
 	node              *snowflake.Node
 	newMQChannel      func() (*amqp.Channel, error)
@@ -121,23 +120,13 @@ type TicketOrderService struct {
 	timeoutRoutingKey string
 	scannerInterval   time.Duration
 	// outboxNotify 在写入 pending outbox 后唤醒发布循环；容量 1，合并突发通知。
-	outboxNotify       chan struct{}
-	outboxWriteMode    string
-	outboxBuffer       *outboxWriteBuffer
-	outboxRecoverEvery time.Duration
-	inventory          InventoryBucketSettings
-	orderEvents        *ws.Hub
+	outboxNotify chan struct{}
+	inventory    InventoryBucketSettings
+	orderEvents  *ws.Hub
 }
 
 func (s *TicketOrderService) ConfigureInventory(cfg config.InventoryConfig) {
 	s.inventory = NewInventoryBucketSettings(cfg)
-}
-
-func (s *TicketOrderService) inventoryDatabase() *gorm.DB {
-	if s.inventory.ShardEnabled && s.inventoryDB != nil {
-		return s.inventoryDB
-	}
-	return s.db
 }
 
 func (s *TicketOrderService) ConfigureOrderEvents(hub *ws.Hub) {
@@ -170,7 +159,7 @@ func (s *TicketOrderService) EnsureInventoryBuckets(ctx context.Context) error {
 	if err := s.db.WithContext(ctx).Find(&tiers).Error; err != nil {
 		return err
 	}
-	bucketDB := s.inventoryDatabase().WithContext(ctx)
+	bucketDB := s.db.WithContext(ctx)
 	for i := range tiers {
 		if err := EnsureTierBuckets(bucketDB, &tiers[i], s.inventory); err != nil {
 			return err
@@ -199,7 +188,6 @@ func NewTicketOrderService(c *container.Container, timeoutMinutes int, paymentCf
 	}
 	s := &TicketOrderService{
 		db:               c.DB,
-		inventoryDB:      c.InventoryDB,
 		rdb:              c.RDB,
 		node:             c.SnowflakeNode,
 		newMQChannel:     c.NewMQChannel,
@@ -285,8 +273,6 @@ func (s *TicketOrderService) WarmTicketQuota(ctx context.Context) error {
 	queuedByCampaign := make(map[int64]int)
 	queuedByTierBucket := make(map[string]int)
 	queuedByCampaignBucket := make(map[string]int)
-	reservationDeltaTierBucket := make(map[string]int)
-	reservationDeltaCampaignBucket := make(map[string]int)
 	for _, order := range queuedOrders {
 		for _, item := range order.Items {
 			queuedByTier[item.TicketTierID] += item.Quantity
@@ -303,49 +289,15 @@ func (s *TicketOrderService) WarmTicketQuota(ctx context.Context) error {
 			}
 		}
 	}
-	if s.inventory.Enabled && s.inventory.BatchEnabled {
-		var pendingOrders []models.TicketOrder
-		if err := s.db.WithContext(ctx).Preload("Items").
-			Where("inventory_desired_state <> inventory_applied_state").
-			Find(&pendingOrders).Error; err != nil {
-			return err
-		}
-		for _, order := range pendingOrders {
-			if len(order.Items) != 1 {
-				continue
-			}
-			item := order.Items[0]
-			tierKey := fmt.Sprintf("%d:%d", item.TicketTierID, queuedOrderStockBucket(&order, s.inventory))
-			switch {
-			case order.InventoryDesiredState == models.InventoryReservationReserved &&
-				order.InventoryAppliedState == models.InventoryReservationNone:
-				reservationDeltaTierBucket[tierKey] -= item.Quantity
-			case order.InventoryDesiredState == models.InventoryReservationReleased &&
-				order.InventoryAppliedState == models.InventoryReservationReserved:
-				reservationDeltaTierBucket[tierKey] += item.Quantity
-			}
-			if order.RushSaleCampaignID != nil {
-				campaignKey := fmt.Sprintf("%d:%d", *order.RushSaleCampaignID, queuedOrderRushBucket(&order, s.inventory))
-				switch {
-				case order.InventoryDesiredState == models.InventoryReservationReserved &&
-					order.InventoryAppliedState == models.InventoryReservationNone:
-					reservationDeltaCampaignBucket[campaignKey] -= item.Quantity
-				case order.InventoryDesiredState == models.InventoryReservationReleased &&
-					order.InventoryAppliedState == models.InventoryReservationReserved:
-					reservationDeltaCampaignBucket[campaignKey] += item.Quantity
-				}
-			}
-		}
-	}
 	values := make(map[string]interface{})
 	if s.inventory.Enabled {
 		var tierBuckets []models.TicketTierBucket
-		if err := s.inventoryDatabase().WithContext(ctx).Find(&tierBuckets).Error; err != nil {
+		if err := s.db.WithContext(ctx).Find(&tierBuckets).Error; err != nil {
 			return err
 		}
 		for _, bucket := range tierBuckets {
 			bucketKey := fmt.Sprintf("%d:%d", bucket.TierID, bucket.BucketNo)
-			available := bucket.RemainingQuota - queuedByTierBucket[bucketKey] + reservationDeltaTierBucket[bucketKey]
+			available := bucket.RemainingQuota - queuedByTierBucket[bucketKey]
 			if available < 0 {
 				available = 0
 			}
@@ -370,12 +322,12 @@ func (s *TicketOrderService) WarmTicketQuota(ctx context.Context) error {
 	}
 	if s.inventory.Enabled {
 		var rushBuckets []models.RushCampaignBucket
-		if err := s.inventoryDatabase().WithContext(ctx).Find(&rushBuckets).Error; err != nil {
+		if err := s.db.WithContext(ctx).Find(&rushBuckets).Error; err != nil {
 			return err
 		}
 		for _, bucket := range rushBuckets {
 			bucketKey := fmt.Sprintf("%d:%d", bucket.CampaignID, bucket.BucketNo)
-			available := bucket.RemainingQuota - queuedByCampaignBucket[bucketKey] + reservationDeltaCampaignBucket[bucketKey]
+			available := bucket.RemainingQuota - queuedByCampaignBucket[bucketKey]
 			if available < 0 {
 				available = 0
 			}
@@ -422,97 +374,6 @@ func (s *TicketOrderService) WarmTicketQuota(ctx context.Context) error {
 		return nil
 	}
 	return s.rdb.MSet(ctx, values).Err()
-}
-
-// RecoverQueuedOrders 为尚未投递的 queued 订单补写 outbox。
-// 跳过：缓冲中已有草稿，或库中已有 pending/publishing/published 记录。
-func (s *TicketOrderService) RecoverQueuedOrders(ctx context.Context) error {
-	var orders []models.TicketOrder
-	if err := s.db.WithContext(ctx).Preload("Items").
-		Where("status = ?", models.TicketOrderStatusQueued).
-		Limit(500).Find(&orders).Error; err != nil {
-		return err
-	}
-	backfilled := 0
-	for _, order := range orders {
-		if len(order.Items) != 1 {
-			result := s.db.WithContext(ctx).Model(&models.TicketOrder{}).
-				Where("id = ? AND status = ?", order.ID, models.TicketOrderStatusQueued).
-				Updates(map[string]interface{}{
-					"status":        models.TicketOrderStatusFailed,
-					"cancel_reason": "queued 订单明细异常",
-				})
-			if result.Error == nil && result.RowsAffected > 0 {
-				totalQty := 0
-				for _, item := range order.Items {
-					totalQty += item.Quantity
-					s.rollbackRedisQuota(ctx, item.TicketTierID, item.Quantity, order.StockBucketNo)
-				}
-				if order.RushSaleCampaignID != nil && totalQty > 0 {
-					pipe := s.rdb.TxPipeline()
-					if s.inventory.Enabled {
-						rb := queuedOrderRushBucket(&order, s.inventory)
-						pipe.IncrBy(ctx, RushStockBucketKey(*order.RushSaleCampaignID, rb), int64(totalQty))
-					} else {
-						pipe.IncrBy(ctx, rushStockKey(*order.RushSaleCampaignID), int64(totalQty))
-					}
-					pipe.DecrBy(
-						ctx,
-						rushUserCountKey(*order.RushSaleCampaignID, order.UserID),
-						int64(totalQty),
-					)
-					_, _ = pipe.Exec(ctx)
-				}
-			}
-			continue
-		}
-		if s.outboxBuffer != nil && s.outboxBuffer.containsOrder(order.ID) {
-			continue
-		}
-		var activeCount int64
-		if err := s.db.WithContext(ctx).Model(&models.TicketOrderOutbox{}).
-			Where("order_id = ? AND status IN ?", order.ID, []models.TicketOrderOutboxStatus{
-				models.TicketOrderOutboxPending,
-				models.TicketOrderOutboxPublishing,
-				models.TicketOrderOutboxPublished,
-			}).
-			Count(&activeCount).Error; err != nil {
-			return err
-		}
-		if activeCount > 0 {
-			continue
-		}
-		message := TicketOrderMessage{
-			OrderID:            order.ID,
-			UserID:             order.UserID,
-			TicketTierID:       order.Items[0].TicketTierID,
-			Quantity:           order.Items[0].Quantity,
-			RushSaleCampaignID: order.RushSaleCampaignID,
-			StockBucketNo:      order.StockBucketNo,
-			RushBucketNo:       order.RushBucketNo,
-		}
-		if err := s.enqueueOutbox(ctx, order.ID, message); err != nil {
-			return err
-		}
-		backfilled++
-		metrics.OutboxRecoverBackfill.Inc()
-	}
-	if backfilled > 0 {
-		s.notifyOutboxPublisher()
-	}
-	return nil
-}
-
-func (s *TicketOrderService) enqueueOutbox(
-	ctx context.Context,
-	orderID int64,
-	message TicketOrderMessage,
-) error {
-	if err := s.enqueueOutboxInTx(ctx, s.db, orderID, message); err != nil {
-		return err
-	}
-	s.notifyOutboxPublisher()
-	return nil
 }
 
 func (s *TicketOrderService) notifyOutboxPublisher() {
@@ -568,25 +429,24 @@ func (s *TicketOrderService) CreateOrder(
 	orderID := s.node.Generate().Int64()
 	acceptedAt := time.Now()
 	order := &models.TicketOrder{
-		Base:                   models.Base{ID: orderID},
-		OrderNo:                "FC" + strconv.FormatInt(orderID, 10),
-		UserID:                 userID,
-		OrganizerID:            event.OrganizerID,
-		EventID:                event.ID,
-		SessionID:              session.ID,
-		OrderSource:            models.TicketOrderSourceNormal,
-		Status:                 models.TicketOrderStatusQueued,
-		PaymentStatus:          models.PaymentStatusUnpaid,
-		TotalAmountCents:       tier.PriceCents * int64(input.Quantity),
-		ContactName:            strings.TrimSpace(input.ContactName),
-		ContactPhone:           strings.TrimSpace(input.ContactPhone),
-		RealNameRequired:       event.RealNameRequired,
-		PurchaseNoticeVersion:  purchaseNoticeVersion,
-		TermsAcceptedAt:        &acceptedAt,
-		IdempotencyKey:         idempotencyKey,
-		RequestID:              strings.TrimSpace(requestID),
-		ExpiresAt:              time.Now().Add(s.paymentTimeout),
-		InventoryNextAttemptAt: acceptedAt,
+		Base:                  models.Base{ID: orderID},
+		OrderNo:               "FC" + strconv.FormatInt(orderID, 10),
+		UserID:                userID,
+		OrganizerID:           event.OrganizerID,
+		EventID:               event.ID,
+		SessionID:             session.ID,
+		OrderSource:           models.TicketOrderSourceNormal,
+		Status:                models.TicketOrderStatusQueued,
+		PaymentStatus:         models.PaymentStatusUnpaid,
+		TotalAmountCents:      tier.PriceCents * int64(input.Quantity),
+		ContactName:           strings.TrimSpace(input.ContactName),
+		ContactPhone:          strings.TrimSpace(input.ContactPhone),
+		RealNameRequired:      event.RealNameRequired,
+		PurchaseNoticeVersion: purchaseNoticeVersion,
+		TermsAcceptedAt:       &acceptedAt,
+		IdempotencyKey:        idempotencyKey,
+		RequestID:             strings.TrimSpace(requestID),
+		ExpiresAt:             time.Now().Add(s.paymentTimeout),
 		Items: []models.TicketOrderItem{{
 			TicketTierID:            tier.ID,
 			Quantity:                input.Quantity,
@@ -660,9 +520,7 @@ func (s *TicketOrderService) ProcessOrderTask(
 			var order models.TicketOrder
 			stageStarted := time.Now()
 			orderQuery := tx.Select("id, user_id, status, rush_sale_campaign_id, stock_bucket_no, rush_bucket_no")
-			if !s.inventory.BatchEnabled {
-				orderQuery = orderQuery.Clauses(clause.Locking{Strength: "UPDATE"})
-			}
+			orderQuery = orderQuery.Clauses(clause.Locking{Strength: "UPDATE"})
 			if err := orderQuery.First(&order, message.OrderID).Error; err != nil {
 				metrics.TicketOrderConsumerStageDuration.WithLabelValues("order_lock").Observe(time.Since(stageStarted).Seconds())
 				if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -700,40 +558,38 @@ func (s *TicketOrderService) ProcessOrderTask(
 			// 分桶开启时扣 bucket 行；关闭时仍扣父表 remaining_quota。
 			// 订单行 FOR UPDATE 防同单并发消费。
 			if s.inventory.Enabled {
-				if !s.inventory.BatchEnabled {
-					stockBucket, _ := resolveStockBucketForOrder(&order, message.StockBucketNo, s.inventory, 0)
-					rushBucket := 0
-					if order.RushSaleCampaignID != nil {
-						rushBucket, _ = resolveRushBucketForOrder(&order, message.RushBucketNo, s.inventory, 0)
-					}
-					if order.RushSaleCampaignID != nil {
-						bucketLabel := strconv.Itoa(rushBucket)
-						stageStarted = time.Now()
-						err := deductRushBucket(tx, *order.RushSaleCampaignID, message.TicketTierID, rushBucket, message.Quantity)
-						metrics.TicketOrderConsumerStageDuration.WithLabelValues("rush_bucket_update").Observe(time.Since(stageStarted).Seconds())
-						metrics.TicketOrderConsumerInventoryBucketDuration.WithLabelValues("rush", bucketLabel).Observe(time.Since(stageStarted).Seconds())
-						bucketResult := "success"
-						if err != nil {
-							bucketResult = "error"
-						}
-						metrics.TicketOrderConsumerInventoryBucketOperations.WithLabelValues("rush", bucketLabel, bucketResult).Inc()
-						if err != nil {
-							return err
-						}
-					}
-					bucketLabel := strconv.Itoa(stockBucket)
+				stockBucket, _ := resolveStockBucketForOrder(&order, message.StockBucketNo, s.inventory, 0)
+				rushBucket := 0
+				if order.RushSaleCampaignID != nil {
+					rushBucket, _ = resolveRushBucketForOrder(&order, message.RushBucketNo, s.inventory, 0)
+				}
+				if order.RushSaleCampaignID != nil {
+					bucketLabel := strconv.Itoa(rushBucket)
 					stageStarted = time.Now()
-					err := deductTierBucket(tx, message.TicketTierID, stockBucket, message.Quantity)
-					metrics.TicketOrderConsumerStageDuration.WithLabelValues("tier_bucket_update").Observe(time.Since(stageStarted).Seconds())
-					metrics.TicketOrderConsumerInventoryBucketDuration.WithLabelValues("tier", bucketLabel).Observe(time.Since(stageStarted).Seconds())
+					err := deductRushBucket(tx, *order.RushSaleCampaignID, message.TicketTierID, rushBucket, message.Quantity)
+					metrics.TicketOrderConsumerStageDuration.WithLabelValues("rush_bucket_update").Observe(time.Since(stageStarted).Seconds())
+					metrics.TicketOrderConsumerInventoryBucketDuration.WithLabelValues("rush", bucketLabel).Observe(time.Since(stageStarted).Seconds())
 					bucketResult := "success"
 					if err != nil {
 						bucketResult = "error"
 					}
-					metrics.TicketOrderConsumerInventoryBucketOperations.WithLabelValues("tier", bucketLabel, bucketResult).Inc()
+					metrics.TicketOrderConsumerInventoryBucketOperations.WithLabelValues("rush", bucketLabel, bucketResult).Inc()
 					if err != nil {
 						return err
 					}
+				}
+				bucketLabel := strconv.Itoa(stockBucket)
+				stageStarted = time.Now()
+				err := deductTierBucket(tx, message.TicketTierID, stockBucket, message.Quantity)
+				metrics.TicketOrderConsumerStageDuration.WithLabelValues("tier_bucket_update").Observe(time.Since(stageStarted).Seconds())
+				metrics.TicketOrderConsumerInventoryBucketDuration.WithLabelValues("tier", bucketLabel).Observe(time.Since(stageStarted).Seconds())
+				bucketResult := "success"
+				if err != nil {
+					bucketResult = "error"
+				}
+				metrics.TicketOrderConsumerInventoryBucketOperations.WithLabelValues("tier", bucketLabel, bucketResult).Inc()
+				if err != nil {
+					return err
 				}
 			} else {
 				if order.RushSaleCampaignID != nil {
@@ -774,14 +630,6 @@ func (s *TicketOrderService) ProcessOrderTask(
 			orderUpdates := map[string]interface{}{
 				"status":     models.TicketOrderStatusPendingPayment,
 				"expires_at": expiresAt,
-			}
-			if s.inventory.Enabled && s.inventory.BatchEnabled {
-				orderUpdates["inventory_desired_state"] = models.InventoryReservationReserved
-				orderUpdates["inventory_applied_state"] = models.InventoryReservationNone
-				orderUpdates["inventory_applied_at"] = nil
-				orderUpdates["inventory_last_error"] = ""
-				orderUpdates["inventory_retry_count"] = 0
-				orderUpdates["inventory_next_attempt_at"] = time.Now()
 			}
 			stageStarted = time.Now()
 			result := tx.Model(&models.TicketOrder{}).
@@ -846,136 +694,6 @@ func (s *TicketOrderService) ProcessOrderTask(
 		)
 	}
 	return nil
-}
-
-/*
-func (s *TicketOrderService) createInventoryReservation(
-	tx *gorm.DB,
-	order *models.TicketOrder,
-	tierID int64,
-	quantity, stockBucket, rushBucket int,
-) error {
-	reservationKey, reservationID := inventoryReservationIdentity(order.ID)
-	now := time.Now()
-	reservation := &models.InventoryReservation{
-		Base:               models.Base{ID: reservationID},
-		ReservationKey:     reservationKey,
-		OrderID:            order.ID,
-		TicketTierID:       tierID,
-		RushSaleCampaignID: order.RushSaleCampaignID,
-		StockBucketNo:      stockBucket,
-		Quantity:           quantity,
-		DesiredState:       models.InventoryReservationReserved,
-		AppliedState:       models.InventoryReservationNone,
-		NextAttemptAt:      now,
-	}
-	if order.RushSaleCampaignID != nil {
-		reservation.RushBucketNo = &rushBucket
-	}
-	result := tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "reservation_key"}},
-		DoNothing: true,
-	}).Create(reservation)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 1 {
-		return nil
-	}
-
-	var existing models.InventoryReservation
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("reservation_key = ?", reservationKey).First(&existing).Error; err != nil {
-		return err
-	}
-	if existing.TicketTierID != tierID || existing.Quantity != quantity ||
-		existing.StockBucketNo != stockBucket ||
-		(existing.RushSaleCampaignID == nil) != (order.RushSaleCampaignID == nil) {
-		return fmt.Errorf("%w: 订单库存预约不一致", ErrTicketOrderNonRetryable)
-	}
-	return nil
-}
-
-func inventoryReservationIdentity(orderID int64) (string, int64) {
-	digest := sha256.Sum256([]byte(strconv.FormatInt(orderID, 10)))
-	reservationID := int64(binary.BigEndian.Uint64(digest[:8]) & 0x7fffffffffffffff)
-	if reservationID == 0 {
-		reservationID = 1
-	}
-	return hex.EncodeToString(digest[:]), reservationID
-}
-
-*/
-
-// requestInventoryRelease 将已预约库存标记为待释放。批处理器会根据 applied_state
-// 决定是否真的回补桶；这样超时发生在预约尚未批量扣减前，也不会先回补再被迟到的扣减覆盖。
-/*
-func (s *TicketOrderService) legacyRequestInventoryRelease(
-	tx *gorm.DB,
-	orderID, tierID int64,
-	quantity int,
-) (bool, error) {
-	if !s.inventory.BatchEnabled {
-		return false, nil
-	}
-	var reservation models.InventoryReservation
-	reservationKey, _ := inventoryReservationIdentity(orderID)
-	if err := tx.Where("reservation_key = ?", reservationKey).First(&reservation).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// 兼容批处理开关开启前已经存在的订单，继续走旧的直接回补路径。
-			return false, nil
-		}
-		return false, err
-	}
-	if reservation.TicketTierID != tierID || reservation.Quantity != quantity {
-		return false, fmt.Errorf("%w: 库存预约与订单数量不一致", ErrTicketOrderNonRetryable)
-	}
-	if reservation.DesiredState == models.InventoryReservationReleased {
-		return true, nil
-	}
-	if reservation.DesiredState != models.InventoryReservationReserved {
-		return false, fmt.Errorf("%w: 库存预约状态非法", ErrTicketOrderNonRetryable)
-	}
-	result := tx.Model(&models.InventoryReservation{}).
-		Where("id = ? AND desired_state = ?", reservation.ID, models.InventoryReservationReserved).
-		Updates(map[string]interface{}{
-			"desired_state":   models.InventoryReservationReleased,
-			"next_attempt_at": time.Now(),
-		})
-	if result.Error != nil {
-		return false, result.Error
-	}
-	return true, nil
-}
-
-*/
-
-// requestInventoryRelease 将订单上的库存目标状态改成 released。
-// 批处理器会根据 desired/applied 的差异做一次幂等回补；如果预约状态为空，
-// 说明订单来自批处理开关之前，调用方继续走旧的同步回补路径。
-func (s *TicketOrderService) requestInventoryRelease(tx *gorm.DB, order *models.TicketOrder) (bool, error) {
-	if !s.inventory.BatchEnabled {
-		return false, nil
-	}
-	switch order.InventoryDesiredState {
-	case models.InventoryReservationReleased:
-		return true, nil
-	case models.InventoryReservationNone:
-		return false, nil
-	case models.InventoryReservationReserved:
-		result := tx.Model(&models.TicketOrder{}).
-			Where("id = ? AND inventory_desired_state = ?", order.ID, models.InventoryReservationReserved).
-			Updates(map[string]interface{}{
-				"inventory_desired_state":   models.InventoryReservationReleased,
-				"inventory_next_attempt_at": time.Now(),
-			})
-		if result.Error != nil {
-			return false, result.Error
-		}
-		return true, nil
-	default:
-		return false, fmt.Errorf("%w: invalid inventory reservation state", ErrTicketOrderNonRetryable)
-	}
 }
 
 func classifyTierQuotaUpdateMiss(tx *gorm.DB, tierID int64, quantity int) error {
@@ -1450,33 +1168,10 @@ func (s *TicketOrderService) CancelOrder(
 			return nil
 		}
 		if s.inventory.Enabled {
-			releaseHandled := false
-			if s.inventory.BatchEnabled {
-				if rushCampaignID != nil {
-					rb, _ := resolveRushBucketForOrder(&order, nil, s.inventory, 0)
-					rushBucketNo = intPtr(rb)
-				}
-				sb, _ := resolveStockBucketForOrder(&order, nil, s.inventory, 0)
-				stockBucketNo = intPtr(sb)
-				handled, err := s.requestInventoryRelease(tx, &order)
-				if err != nil {
-					return err
-				}
-				releaseHandled = handled
-			}
-			if !releaseHandled && rushCampaignID != nil {
-				rb, _ := resolveRushBucketForOrder(&order, nil, s.inventory, 0)
-				rushBucketNo = intPtr(rb)
-				if err := restoreRushBucket(tx, *rushCampaignID, rb, quantity); err != nil {
-					return err
-				}
-			}
-			if !releaseHandled {
-				sb, _ := resolveStockBucketForOrder(&order, nil, s.inventory, 0)
-				stockBucketNo = intPtr(sb)
-				if err := restoreTierBucket(tx, tierID, sb, quantity); err != nil {
-					return err
-				}
+			var releaseErr error
+			stockBucketNo, rushBucketNo, releaseErr = s.releaseInventoryForOrder(tx, &order)
+			if releaseErr != nil {
+				return releaseErr
 			}
 		} else {
 			if err := restoreTierQuota(tx, tierID, quantity); err != nil {
@@ -1535,33 +1230,10 @@ func (s *TicketOrderService) CancelOrder(
 				return ErrTicketOrderState
 			}
 			if s.inventory.Enabled {
-				releaseHandled := false
-				if s.inventory.BatchEnabled {
-					if rushCampaignID != nil {
-						rb, _ := resolveRushBucketForOrder(&order, nil, s.inventory, 0)
-						rushBucketNo = intPtr(rb)
-					}
-					sb, _ := resolveStockBucketForOrder(&order, nil, s.inventory, 0)
-					stockBucketNo = intPtr(sb)
-					handled, err := s.requestInventoryRelease(tx, &order)
-					if err != nil {
-						return err
-					}
-					releaseHandled = handled
-				}
-				if !releaseHandled && rushCampaignID != nil {
-					rb, _ := resolveRushBucketForOrder(&order, nil, s.inventory, 0)
-					rushBucketNo = intPtr(rb)
-					if err := restoreRushBucket(tx, *rushCampaignID, rb, quantity); err != nil {
-						return err
-					}
-				}
-				if !releaseHandled {
-					sb, _ := resolveStockBucketForOrder(&order, nil, s.inventory, 0)
-					stockBucketNo = intPtr(sb)
-					if err := restoreTierBucket(tx, tierID, sb, quantity); err != nil {
-						return err
-					}
+				var releaseErr error
+				stockBucketNo, rushBucketNo, releaseErr = s.releaseInventoryForOrder(tx, &order)
+				if releaseErr != nil {
+					return releaseErr
 				}
 			} else {
 				if err := restoreTierQuota(tx, tierID, quantity); err != nil {
@@ -1803,33 +1475,10 @@ func (s *TicketOrderService) cancelPendingPaymentOnly(
 		tierID, quantity = order.Items[0].TicketTierID, order.Items[0].Quantity
 		rushCampaignID = order.RushSaleCampaignID
 		if s.inventory.Enabled {
-			releaseHandled := false
-			if s.inventory.BatchEnabled {
-				if rushCampaignID != nil {
-					rb, _ := resolveRushBucketForOrder(&order, nil, s.inventory, 0)
-					rushBucketNo = intPtr(rb)
-				}
-				sb, _ := resolveStockBucketForOrder(&order, nil, s.inventory, 0)
-				stockBucketNo = intPtr(sb)
-				handled, err := s.requestInventoryRelease(tx, &order)
-				if err != nil {
-					return err
-				}
-				releaseHandled = handled
-			}
-			if !releaseHandled && rushCampaignID != nil {
-				rb, _ := resolveRushBucketForOrder(&order, nil, s.inventory, 0)
-				rushBucketNo = intPtr(rb)
-				if err := restoreRushBucket(tx, *rushCampaignID, rb, quantity); err != nil {
-					return err
-				}
-			}
-			if !releaseHandled {
-				sb, _ := resolveStockBucketForOrder(&order, nil, s.inventory, 0)
-				stockBucketNo = intPtr(sb)
-				if err := restoreTierBucket(tx, tierID, sb, quantity); err != nil {
-					return err
-				}
+			var releaseErr error
+			stockBucketNo, rushBucketNo, releaseErr = s.releaseInventoryForOrder(tx, &order)
+			if releaseErr != nil {
+				return releaseErr
 			}
 		} else {
 			if err := restoreTierQuota(tx, tierID, quantity); err != nil {

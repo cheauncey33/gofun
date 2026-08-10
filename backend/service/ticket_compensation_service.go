@@ -18,21 +18,13 @@ import (
 
 // TicketCompensationService 对齐 Gofun 票档 Redis 库存与 MySQL 可用量，只下调或补缺。
 type TicketCompensationService struct {
-	db          *gorm.DB
-	inventoryDB *gorm.DB
-	rdb         *redis.Client
-	inventory   InventoryBucketSettings
+	db        *gorm.DB
+	rdb       *redis.Client
+	inventory InventoryBucketSettings
 }
 
 func NewTicketCompensationService(c *container.Container) *TicketCompensationService {
-	return &TicketCompensationService{db: c.DB, inventoryDB: c.InventoryDB, rdb: c.RDB}
-}
-
-func (s *TicketCompensationService) inventoryDatabase() *gorm.DB {
-	if s.inventory.ShardEnabled && s.inventoryDB != nil {
-		return s.inventoryDB
-	}
-	return s.db
+	return &TicketCompensationService{db: c.DB, rdb: c.RDB}
 }
 
 func (s *TicketCompensationService) ConfigureInventory(cfg config.InventoryConfig) {
@@ -121,7 +113,7 @@ func (s *TicketCompensationService) runStandardCompensation(ctx context.Context)
 
 func (s *TicketCompensationService) runBucketCompensation(ctx context.Context) (int, error) {
 	var buckets []models.TicketTierBucket
-	if err := s.inventoryDatabase().WithContext(ctx).Find(&buckets).Error; err != nil {
+	if err := s.db.WithContext(ctx).Find(&buckets).Error; err != nil {
 		return 0, err
 	}
 	var queuedOrders []models.TicketOrder
@@ -178,7 +170,7 @@ func (s *TicketCompensationService) runBucketCompensation(ctx context.Context) (
 	// 刷新父表 remaining/sold 展示字段（非热路径）
 	for tierID, remaining := range parentTierSum {
 		var sold int64
-		if err := s.inventoryDatabase().WithContext(ctx).Model(&models.TicketTierBucket{}).
+		if err := s.db.WithContext(ctx).Model(&models.TicketTierBucket{}).
 			Select("COALESCE(SUM(sold_count),0)").
 			Where("tier_id = ?", tierID).Scan(&sold).Error; err != nil {
 			return anomalies, err
@@ -208,7 +200,7 @@ func (s *TicketCompensationService) runBucketCompensation(ctx context.Context) (
 	}
 
 	var rushBuckets []models.RushCampaignBucket
-	if err := s.inventoryDatabase().WithContext(ctx).Find(&rushBuckets).Error; err != nil {
+	if err := s.db.WithContext(ctx).Find(&rushBuckets).Error; err != nil {
 		return anomalies, err
 	}
 	queuedByRushBucket := make(map[string]int)

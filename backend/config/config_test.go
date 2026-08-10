@@ -89,9 +89,15 @@ cors:
 	if !cfg.RateLimit.DistributedWriteEnabled || cfg.RateLimit.WriteMaxPerWindow != 10 {
 		t.Errorf("unexpected distributed rate limit defaults: %#v", cfg.RateLimit)
 	}
-	if cfg.Inventory.BucketsEnabled || cfg.Inventory.BucketCount != 8 ||
+	if !cfg.Inventory.BucketsEnabled || cfg.Inventory.BucketCount != 32 ||
 		cfg.Inventory.MinQuotaToBucket != 64 || cfg.Inventory.BucketRetry != 4 {
 		t.Errorf("unexpected inventory defaults: %#v", cfg.Inventory)
+	}
+	if cfg.OrderConsumer.WorkerCount != 6 || cfg.OrderConsumer.PrefetchCount != 5 {
+		t.Errorf("unexpected order consumer defaults: %#v", cfg.OrderConsumer)
+	}
+	if cfg.OrderOutbox.PublishWorkers != 4 {
+		t.Errorf("unexpected outbox defaults: %#v", cfg.OrderOutbox)
 	}
 }
 

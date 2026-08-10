@@ -29,16 +29,6 @@ const (
 	PaymentStatusRefunded  PaymentStatus = "refunded"
 )
 
-// InventoryReservationState is the desired/applied state pair used by the
-// second-stage asynchronous inventory reconciler.
-type InventoryReservationState string
-
-const (
-	InventoryReservationNone     InventoryReservationState = "none"
-	InventoryReservationReserved InventoryReservationState = "reserved"
-	InventoryReservationReleased InventoryReservationState = "released"
-)
-
 var ticketOrderTransitions = map[TicketOrderStatus][]TicketOrderStatus{
 	TicketOrderStatusQueued:         {TicketOrderStatusPendingPayment, TicketOrderStatusFailed},
 	TicketOrderStatusPendingPayment: {TicketOrderStatusPaid, TicketOrderStatusCancelled},
@@ -60,39 +50,33 @@ func (s TicketOrderStatus) HasBeenPaid() bool {
 
 type TicketOrder struct {
 	Base
-	OrderNo                string                    `gorm:"size:32;uniqueIndex;not null" json:"order_no"`
-	UserID                 int64                     `gorm:"not null;index;uniqueIndex:uk_ticket_order_idempotency,priority:1" json:"user_id,string"`
-	OrganizerID            int64                     `gorm:"not null;index" json:"organizer_id,string"`
-	EventID                int64                     `gorm:"not null;index" json:"event_id,string"`
-	SessionID              int64                     `gorm:"not null;index" json:"session_id,string"`
-	RushSaleCampaignID     *int64                    `gorm:"index" json:"rush_sale_campaign_id,omitempty,string"`
-	OrderSource            TicketOrderSource         `gorm:"size:16;not null;index" json:"order_source"`
-	Status                 TicketOrderStatus         `gorm:"size:24;not null;index" json:"status"`
-	PaymentStatus          PaymentStatus             `gorm:"size:16;not null;index" json:"payment_status"`
-	TotalAmountCents       int64                     `gorm:"not null" json:"total_amount_cents"`
-	ContactName            string                    `gorm:"size:64;not null" json:"contact_name"`
-	ContactPhone           string                    `gorm:"size:20;not null" json:"contact_phone"`
-	RealNameRequired       bool                      `gorm:"not null;default:false" json:"real_name_required"`
-	PurchaseNoticeVersion  string                    `gorm:"size:32;not null" json:"purchase_notice_version"`
-	TermsAcceptedAt        *time.Time                `json:"terms_accepted_at,omitempty"`
-	IdempotencyKey         string                    `gorm:"size:64;uniqueIndex:uk_ticket_order_idempotency,priority:2" json:"-"`
-	RequestID              string                    `gorm:"size:64;index" json:"request_id"`
-	StockBucketNo          *int                      `json:"stock_bucket_no,omitempty"`
-	RushBucketNo           *int                      `json:"rush_bucket_no,omitempty"`
-	ExpiresAt              time.Time                 `gorm:"not null;index" json:"expires_at"`
-	PaidAt                 *time.Time                `json:"paid_at,omitempty"`
-	CancelledAt            *time.Time                `json:"cancelled_at,omitempty"`
-	CancelReason           string                    `gorm:"size:256" json:"cancel_reason"`
-	InventoryDesiredState  InventoryReservationState `gorm:"size:16;not null;default:'none';index:idx_ticket_order_inventory_work" json:"-"`
-	InventoryAppliedState  InventoryReservationState `gorm:"size:16;not null;default:'none';index:idx_ticket_order_inventory_work" json:"-"`
-	InventoryAppliedAt     *time.Time                `json:"-"`
-	InventoryLastError     string                    `gorm:"size:512;not null;default:''" json:"-"`
-	InventoryRetryCount    int                       `gorm:"not null;default:0" json:"-"`
-	InventoryNextAttemptAt time.Time                 `gorm:"not null;default:CURRENT_TIMESTAMP(3);index:idx_ticket_order_inventory_work" json:"-"`
-	Items                  []TicketOrderItem         `gorm:"foreignKey:OrderID" json:"items,omitempty"`
-	Attendees              []TicketOrderAttendee     `gorm:"foreignKey:OrderID" json:"attendees,omitempty"`
-	Tickets                []AdmissionTicket         `gorm:"foreignKey:OrderID" json:"tickets,omitempty"`
-	Payments               []PaymentTransaction      `gorm:"foreignKey:OrderID" json:"payments,omitempty"`
+	OrderNo               string                `gorm:"size:32;uniqueIndex;not null" json:"order_no"`
+	UserID                int64                 `gorm:"not null;index;uniqueIndex:uk_ticket_order_idempotency,priority:1" json:"user_id,string"`
+	OrganizerID           int64                 `gorm:"not null;index" json:"organizer_id,string"`
+	EventID               int64                 `gorm:"not null;index" json:"event_id,string"`
+	SessionID             int64                 `gorm:"not null;index" json:"session_id,string"`
+	RushSaleCampaignID    *int64                `gorm:"index" json:"rush_sale_campaign_id,omitempty,string"`
+	OrderSource           TicketOrderSource     `gorm:"size:16;not null;index" json:"order_source"`
+	Status                TicketOrderStatus     `gorm:"size:24;not null;index" json:"status"`
+	PaymentStatus         PaymentStatus         `gorm:"size:16;not null;index" json:"payment_status"`
+	TotalAmountCents      int64                 `gorm:"not null" json:"total_amount_cents"`
+	ContactName           string                `gorm:"size:64;not null" json:"contact_name"`
+	ContactPhone          string                `gorm:"size:20;not null" json:"contact_phone"`
+	RealNameRequired      bool                  `gorm:"not null;default:false" json:"real_name_required"`
+	PurchaseNoticeVersion string                `gorm:"size:32;not null" json:"purchase_notice_version"`
+	TermsAcceptedAt       *time.Time            `json:"terms_accepted_at,omitempty"`
+	IdempotencyKey        string                `gorm:"size:64;uniqueIndex:uk_ticket_order_idempotency,priority:2" json:"-"`
+	RequestID             string                `gorm:"size:64;index" json:"request_id"`
+	StockBucketNo         *int                  `json:"stock_bucket_no,omitempty"`
+	RushBucketNo          *int                  `json:"rush_bucket_no,omitempty"`
+	ExpiresAt             time.Time             `gorm:"not null;index" json:"expires_at"`
+	PaidAt                *time.Time            `json:"paid_at,omitempty"`
+	CancelledAt           *time.Time            `json:"cancelled_at,omitempty"`
+	CancelReason          string                `gorm:"size:256" json:"cancel_reason"`
+	Items                 []TicketOrderItem     `gorm:"foreignKey:OrderID" json:"items,omitempty"`
+	Attendees             []TicketOrderAttendee `gorm:"foreignKey:OrderID" json:"attendees,omitempty"`
+	Tickets               []AdmissionTicket     `gorm:"foreignKey:OrderID" json:"tickets,omitempty"`
+	Payments              []PaymentTransaction  `gorm:"foreignKey:OrderID" json:"payments,omitempty"`
 }
 
 // IdempotencyKey 只在同一用户内唯一，允许不同用户使用相同的客户端请求键。

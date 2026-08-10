@@ -25,6 +25,8 @@
 - `005_event_comment.sql`：增加活动评论。
 - `006_inventory_buckets.sql`：增加票档库存分桶。
 - `007_payment_sandbox.sql`：增加支付单、支付回调和沙箱审计字段。
+- `008_inventory_reservations.sql`、`009_inventory_batch_leases.sql`：历史 Batch 状态字段（仅为兼容旧库升级保留）。
+- `010_remove_inventory_batch_state.sql`：删除历史 Batch 状态/lease 字段；后续库存统一使用主库分桶事务。
 - `schema_migration`：记录已经执行的版本。
 
 已有数据库首次启动时，迁移器会确认 V1 的 11 张表全部存在后登记基线；如果只存在部分表，
@@ -62,7 +64,7 @@ MySQL 的 DDL 不具备完整事务回滚能力。迁移使用 `CREATE TABLE IF 
 -> 提交
 ```
 
-回调失败不会出票，订单保持待支付并记录 `payment_status=failed`，允许重新创建支付单；支付超时由订单超时消费者关单并释放票额。当前沙箱回调调度保存在进程内，重启恢复和真实渠道查询不在本阶段。
+回调失败不会出票，订单保持待支付并记录 `payment_status=failed`，允许重新创建支付单；支付超时由订单超时消费者关单并释放票额。沙箱计时器保存在进程内，但启动时会从 `payment_transaction` 恢复支付状态并重新调度仍有效的待回调交易；真实渠道查询不在本阶段。
 
 退款会先检查订单中是否有 `used` 电子票：
 
@@ -126,6 +128,5 @@ npm.cmd run build
 4. 未核销订单退款后所有电子票为 `revoked`。
 5. 作废票核销返回 `revoked`，并留下失败记录。
 
-当前 `tests/integration/payment_verification_e2e.mjs` 已覆盖单票成功出票、失败回调、
-超时/重试、非法回调和重复核验等基础路径；上面的多票、并发核验和退款组合仍是完整
-验收清单，不应写成已经由该脚本全部覆盖。
+当前 `tests/integration/payment_verification_e2e.mjs` 已覆盖单票成功出票、失败回调、非法回调、
+重复核验、支付超时、支付重试、退款、多票订单、同一票码并发核验，以及退款与核验竞态。

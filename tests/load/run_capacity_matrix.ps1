@@ -1,5 +1,5 @@
 param(
-    [string]$Cases = "baseline-sync,baseline-batch,buckets-sync,buckets-batch",
+    [string]$Cases = "baseline,buckets",
     [string]$Steps = "500,1000",
     [int]$Runs = 2,
     [string]$Project = "gofun-matrix",
@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 $matrixCases = $Cases.Split(",", [System.StringSplitOptions]::RemoveEmptyEntries) |
     ForEach-Object { $_.Trim().ToLowerInvariant() }
-$allowedCases = @("baseline-sync", "baseline-batch", "buckets-sync", "buckets-batch")
+$allowedCases = @("baseline", "buckets")
 foreach ($case in $matrixCases) {
     if ($allowedCases -notcontains $case) {
         throw "Unsupported case '$case'. Allowed: $($allowedCases -join ', ')"
@@ -34,13 +34,11 @@ function Invoke-Compose {
 
 function Set-CaseEnvironment {
     param([string]$Case)
-    $bucketed = $Case.StartsWith("buckets-")
-    $mode = if ($Case.EndsWith("-sync")) { "sync" } else { "batch" }
+    $bucketed = $Case -eq "buckets"
     $env:INVENTORY_BUCKETS_ENABLED = if ($bucketed) { "true" } else { "false" }
-    $env:INVENTORY_BUCKET_COUNT = "8"
+    $env:INVENTORY_BUCKET_COUNT = "32"
     $env:INVENTORY_MIN_QUOTA_TO_BUCKET = "64"
     $env:INVENTORY_BUCKET_RETRY = "4"
-    $env:ORDER_OUTBOX_WRITE_MODE = $mode
     $env:ORDER_CONSUMER_WORKER_COUNT = "6"
     $env:ORDER_CONSUMER_PREFETCH_COUNT = "5"
     $env:ORDER_CONSUMER_MAX_RETRIES = "3"
@@ -51,12 +49,6 @@ function Set-CaseEnvironment {
     $env:REDIS_POOL_SIZE = "100"
     $env:RATELIMIT_DISTRIBUTED_WRITE_ENABLED = "true"
     $env:RABBITMQ_QUEUE_TYPE = "classic"
-}
-
-function Get-CaseMode {
-    param([string]$Case)
-    if ($Case.EndsWith("-sync")) { return "sync" }
-    return "batch"
 }
 
 function Get-Median {
@@ -119,7 +111,7 @@ try {
         $env:RESULTS_DIR = (Join-Path $repo "tests\load\results\$runLabel")
         $env:MATRIX_CASE = $case
 
-        Write-Host "=== $case ($(Get-CaseMode $case)) ===" -ForegroundColor Cyan
+        Write-Host "=== $case (transactional outbox) ===" -ForegroundColor Cyan
         Invoke-Compose @("down", "-v", "--remove-orphans")
         Invoke-Compose @("up", "-d", "--build", "--wait")
         Start-Sleep -Seconds 5

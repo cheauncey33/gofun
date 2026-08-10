@@ -33,7 +33,7 @@
 | P2b | 超时仅靠 DB 扫描，关单滞后 | 已修 | 延时队列主路径 + 扫描兜底 |
 | P2 | 归还票额强制 `on_sale`，复活已下架票档 | 已修 | `restoreTierQuota` 仅 sold_out→on_sale |
 | P2 | disabled 主办方仍可写操作/核销 | 已修 | catalog + verification 门禁查 organizer.status |
-| P2 | 异常 queued 明细恢复时 Redis 不归还 | 已修 | `RecoverQueuedOrders` 按明细回滚 |
+| P2 | 异常 queued 明细恢复时 Redis 不归还 | 已修 | 入口事务失败立即回滚 Redis；Outbox 与订单同事务提交，不再依赖 queued 回填 |
 
 ### Sprint A/B/C 执行进度（见 `docs/FUCHANG_SPRINTS.md`）
 

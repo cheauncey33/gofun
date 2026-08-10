@@ -74,7 +74,7 @@ const aggregate = {
     inventory_bucket_count: process.env.INVENTORY_BUCKET_COUNT || "",
     inventory_min_quota_to_bucket: process.env.INVENTORY_MIN_QUOTA_TO_BUCKET || "",
     inventory_bucket_retry: process.env.INVENTORY_BUCKET_RETRY || "",
-    order_outbox_write_mode: process.env.ORDER_OUTBOX_WRITE_MODE || "",
+    order_outbox: "transactional",
     order_consumer_worker_count: process.env.ORDER_CONSUMER_WORKER_COUNT || "",
     order_consumer_prefetch_count: process.env.ORDER_CONSUMER_PREFETCH_COUNT || "",
     order_outbox_publish_workers: process.env.ORDER_OUTBOX_PUBLISH_WORKERS || "",

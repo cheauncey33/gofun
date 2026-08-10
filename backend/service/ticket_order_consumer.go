@@ -45,7 +45,7 @@ func NewTicketOrderConsumer(
 
 func (c *TicketOrderConsumer) Start(ctx context.Context, cfg config.OrderConsumerConfig) {
 	if cfg.WorkerCount <= 0 {
-		cfg.WorkerCount = 4
+		cfg.WorkerCount = 6
 	}
 	if cfg.PrefetchCount <= 0 {
 		cfg.PrefetchCount = 5

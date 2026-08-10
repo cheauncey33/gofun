@@ -23,7 +23,7 @@ import (
 )
 
 // 票务支付超时：延时队列（消息级 TTL）→ DLX → 超时队列。
-// 与旧零食 order_delay_queue 隔离，避免混用。
+// 与其他订单流的延时队列隔离，避免混用。
 const (
 	defaultTicketTimeoutExchange = "fuchang.order.timeout.ex"
 	defaultTicketDelayQueue      = "fuchang.order.delay"

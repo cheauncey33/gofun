@@ -137,16 +137,11 @@ type OrderConsumerConfig struct {
 	MaxRetries    int `mapstructure:"max_retries"`
 }
 
-// OrderOutboxConfig 控制 outbox 写入模式与后台投递。
+// OrderOutboxConfig 控制 outbox 后台投递。
 type OrderOutboxConfig struct {
-	WriteMode          string `mapstructure:"write_mode"` // sync | batch
-	PublishWorkers     int    `mapstructure:"publish_workers"`
-	PublishBatch       int    `mapstructure:"publish_batch"`
-	TickIntervalMS     int    `mapstructure:"tick_interval_ms"`
-	BufferBatchSize    int    `mapstructure:"buffer_batch_size"`
-	FlushIntervalMS    int    `mapstructure:"flush_interval_ms"`
-	MaxBuffer          int    `mapstructure:"max_buffer"`
-	RecoverIntervalSec int    `mapstructure:"recover_interval_sec"`
+	PublishWorkers int `mapstructure:"publish_workers"`
+	PublishBatch   int `mapstructure:"publish_batch"`
+	TickIntervalMS int `mapstructure:"tick_interval_ms"`
 }
 
 type OrderDelayConfig struct {
@@ -166,17 +161,12 @@ type PaymentConfig struct {
 }
 
 // InventoryConfig 票档/抢票 Redis+MySQL 同构分桶。
-// buckets_enabled=false 时保持单 key / 父表 remaining_quota 热路径。
+// 生产基线固定使用分桶；关闭仅用于兼容性测试或迁移场景。
 type InventoryConfig struct {
-	BucketsEnabled   bool   `mapstructure:"buckets_enabled"`
-	BucketCount      int    `mapstructure:"bucket_count"`
-	MinQuotaToBucket int    `mapstructure:"min_quota_to_bucket"`
-	BucketRetry      int    `mapstructure:"bucket_retry"`
-	BatchEnabled     bool   `mapstructure:"batch_enabled"`
-	BatchSize        int    `mapstructure:"batch_size"`
-	BatchIntervalMS  int    `mapstructure:"batch_interval_ms"`
-	ShardEnabled     bool   `mapstructure:"shard_enabled"`
-	ShardDSN         string `mapstructure:"shard_dsn"`
+	BucketsEnabled   bool `mapstructure:"buckets_enabled"`
+	BucketCount      int  `mapstructure:"bucket_count"`
+	MinQuotaToBucket int  `mapstructure:"min_quota_to_bucket"`
+	BucketRetry      int  `mapstructure:"bucket_retry"`
 }
 
 func Load(configPath string) (*Config, error) {
@@ -250,14 +240,9 @@ func Load(configPath string) (*Config, error) {
 		"order_consumer.worker_count",
 		"order_consumer.prefetch_count",
 		"order_consumer.max_retries",
-		"order_outbox.write_mode",
 		"order_outbox.publish_workers",
 		"order_outbox.publish_batch",
 		"order_outbox.tick_interval_ms",
-		"order_outbox.buffer_batch_size",
-		"order_outbox.flush_interval_ms",
-		"order_outbox.max_buffer",
-		"order_outbox.recover_interval_sec",
 		"delayed_order.timeout_minutes",
 		"delayed_order.lock_timeout_sec",
 		"delayed_order.worker_count",
@@ -266,11 +251,6 @@ func Load(configPath string) (*Config, error) {
 		"inventory.bucket_count",
 		"inventory.min_quota_to_bucket",
 		"inventory.bucket_retry",
-		"inventory.batch_enabled",
-		"inventory.batch_size",
-		"inventory.batch_interval_ms",
-		"inventory.shard_enabled",
-		"inventory.shard_dsn",
 		"payment.provider",
 		"payment.sandbox_secret",
 		"payment.sandbox_callback_delay_ms",
@@ -375,32 +355,22 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("ratelimit.write_max_per_window", 10)
 	v.SetDefault("ratelimit.write_fail_open", false)
 
-	v.SetDefault("order_consumer.worker_count", 4)
+	v.SetDefault("order_consumer.worker_count", 6)
 	v.SetDefault("order_consumer.prefetch_count", 5)
 	v.SetDefault("order_consumer.max_retries", 3)
-	v.SetDefault("order_outbox.write_mode", "batch")
 	v.SetDefault("order_outbox.publish_workers", 4)
 	v.SetDefault("order_outbox.publish_batch", 200)
 	v.SetDefault("order_outbox.tick_interval_ms", 200)
-	v.SetDefault("order_outbox.buffer_batch_size", 50)
-	v.SetDefault("order_outbox.flush_interval_ms", 8)
-	v.SetDefault("order_outbox.max_buffer", 4000)
-	v.SetDefault("order_outbox.recover_interval_sec", 2)
 
 	v.SetDefault("delayed_order.timeout_minutes", 15)
 	v.SetDefault("delayed_order.lock_timeout_sec", 10)
 	v.SetDefault("delayed_order.worker_count", 2)
 	v.SetDefault("rush_sale.campaign_cache_ttl_ms", 3000)
 
-	v.SetDefault("inventory.buckets_enabled", false)
-	v.SetDefault("inventory.bucket_count", 8)
+	v.SetDefault("inventory.buckets_enabled", true)
+	v.SetDefault("inventory.bucket_count", 32)
 	v.SetDefault("inventory.min_quota_to_bucket", 64)
 	v.SetDefault("inventory.bucket_retry", 4)
-	v.SetDefault("inventory.batch_enabled", false)
-	v.SetDefault("inventory.batch_size", 200)
-	v.SetDefault("inventory.batch_interval_ms", 50)
-	v.SetDefault("inventory.shard_enabled", false)
-	v.SetDefault("inventory.shard_dsn", "")
 
 	v.SetDefault("payment.provider", "sandbox")
 	v.SetDefault("payment.sandbox_callback_delay_ms", 500)
@@ -484,7 +454,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("rush_sale.campaign_cache_ttl_ms 必须大于等于0")
 	}
 	if c.Inventory.BucketCount == 0 {
-		c.Inventory.BucketCount = 8
+		c.Inventory.BucketCount = 32
 	}
 	if c.Inventory.MinQuotaToBucket == 0 {
 		c.Inventory.MinQuotaToBucket = 64
@@ -497,26 +467,6 @@ func (c *Config) Validate() error {
 	}
 	if c.Inventory.BucketRetry < 0 {
 		return fmt.Errorf("inventory.bucket_retry 必须大于等于0")
-	}
-	if c.Inventory.BatchSize == 0 {
-		c.Inventory.BatchSize = 200
-	}
-	if c.Inventory.BatchIntervalMS == 0 {
-		c.Inventory.BatchIntervalMS = 50
-	}
-	if c.Inventory.BatchSize < 1 {
-		return fmt.Errorf("inventory.batch_size 必须大于等于1")
-	}
-	if c.Inventory.BatchIntervalMS < 1 {
-		return fmt.Errorf("inventory.batch_interval_ms 必须大于等于1")
-	}
-	if c.Inventory.ShardEnabled {
-		if strings.TrimSpace(c.Inventory.ShardDSN) == "" {
-			return fmt.Errorf("inventory.shard_dsn 在分库开启时不能为空")
-		}
-		if !c.Inventory.BucketsEnabled || !c.Inventory.BatchEnabled {
-			return fmt.Errorf("inventory 分库当前要求 buckets_enabled=true 且 batch_enabled=true")
-		}
 	}
 	c.Payment.Provider = strings.ToLower(strings.TrimSpace(c.Payment.Provider))
 	if c.Payment.Provider == "" {
@@ -535,7 +485,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("payment.sandbox_callback_delay_ms 不能超过 60000")
 	}
 	if c.OrderConsumer.WorkerCount == 0 {
-		c.OrderConsumer.WorkerCount = 4
+		c.OrderConsumer.WorkerCount = 6
 	}
 	if c.OrderConsumer.PrefetchCount == 0 {
 		c.OrderConsumer.PrefetchCount = 5
@@ -567,26 +517,6 @@ func (c *Config) Validate() error {
 	if c.OrderOutbox.TickIntervalMS == 0 {
 		c.OrderOutbox.TickIntervalMS = 200
 	}
-	if strings.TrimSpace(c.OrderOutbox.WriteMode) == "" {
-		c.OrderOutbox.WriteMode = "batch"
-	}
-	mode := strings.ToLower(strings.TrimSpace(c.OrderOutbox.WriteMode))
-	c.OrderOutbox.WriteMode = mode
-	if mode != "sync" && mode != "batch" {
-		return fmt.Errorf("order_outbox.write_mode 必须是 sync|batch")
-	}
-	if c.OrderOutbox.BufferBatchSize == 0 {
-		c.OrderOutbox.BufferBatchSize = 50
-	}
-	if c.OrderOutbox.FlushIntervalMS == 0 {
-		c.OrderOutbox.FlushIntervalMS = 8
-	}
-	if c.OrderOutbox.MaxBuffer == 0 {
-		c.OrderOutbox.MaxBuffer = 4000
-	}
-	if c.OrderOutbox.RecoverIntervalSec == 0 {
-		c.OrderOutbox.RecoverIntervalSec = 2
-	}
 	if c.OrderOutbox.PublishWorkers < 0 {
 		return fmt.Errorf("order_outbox.publish_workers 必须大于0")
 	}
@@ -595,21 +525,6 @@ func (c *Config) Validate() error {
 	}
 	if c.OrderOutbox.TickIntervalMS < 0 {
 		return fmt.Errorf("order_outbox.tick_interval_ms 必须大于0")
-	}
-	if c.OrderOutbox.BufferBatchSize < 0 {
-		return fmt.Errorf("order_outbox.buffer_batch_size 必须大于0")
-	}
-	if c.OrderOutbox.FlushIntervalMS < 0 {
-		return fmt.Errorf("order_outbox.flush_interval_ms 必须大于0")
-	}
-	if c.OrderOutbox.MaxBuffer < 0 {
-		return fmt.Errorf("order_outbox.max_buffer 必须大于0")
-	}
-	if c.OrderOutbox.MaxBuffer > 0 && c.OrderOutbox.BufferBatchSize > c.OrderOutbox.MaxBuffer {
-		return fmt.Errorf("order_outbox.buffer_batch_size 不能大于 max_buffer")
-	}
-	if c.OrderOutbox.RecoverIntervalSec < 0 {
-		return fmt.Errorf("order_outbox.recover_interval_sec 必须大于等于0")
 	}
 	engine := strings.ToLower(strings.TrimSpace(c.Elasticsearch.SearchEngine))
 	if engine == "" {

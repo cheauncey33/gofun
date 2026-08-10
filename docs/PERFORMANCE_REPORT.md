@@ -4,6 +4,8 @@
 
 本报告只记录 2026-07-23 在本机隔离集成栈实际采集的数据。压测创建了专用活动和用户，没有清空现有数据库。以下数据主要衡量“限时开售入口在大量限购拒绝下的吞吐”，不能解释为持续成功建单能力。
 
+> 说明：报告中的 `write_mode=batch`、Outbox 缓冲和 Batch Saga 指标属于本次重构前历史样本。当前实现已删除这些开关和状态机，订单与 Outbox 固定同事务提交，Consumer 逐单完成库存事务。
+
 ## 环境与固定参数
 
 - Windows 10，Go 1.26.5，Node.js 24.18.0，Docker 29.6.1。
@@ -208,7 +210,7 @@ W3C `traceparent`/`tracestate` 同时保存在 outbox payload 和 AMQP headers�
 - 热路径只同步写订单；outbox 进有界内存缓冲
 - Flusher：满 `buffer_batch_size`（50）或每 `flush_interval_ms`（8ms）批量 `CreateInBatches`
 - 缓冲满则调用方同步刷盘腾位；刷失败回填缓冲并 sync 兜底
-- `RecoverQueuedOrders` 周期扫描（默认 2s）补「queued 且无 active outbox」
+- 历史版本曾用 `RecoverQueuedOrders` 周期扫描（默认 2s）补「queued 且无 active outbox」；当前已删除该回填路径。
 - 指标：`outbox_buffer_len`、`outbox_flush_batch_size`、`outbox_recover_backfill_total`
 
 压测（consumer=12，publish_workers=4）：
@@ -225,15 +227,15 @@ W3C `traceparent`/`tracestate` 同时保存在 outbox payload 和 AMQP headers�
 
 ## 最终收敛版本（锁定）
 
-本轮性能改造收敛为下面这一套，不再继续加新优化点：
+历史压测当时的收敛参数如下；它们不代表当前运行配置：
 
 | 能力 | 收敛取值 |
 | --- | --- |
 | 活动元数据缓存 | `rush_sale.campaign_cache_ttl_ms=3000` |
-| Outbox 写入 | **`write_mode=batch`**（可用 `sync` 回退） |
+| Outbox 写入（历史） | **`write_mode=batch`**（当前已删除） |
 | Outbox 缓冲 | batch 50 / flush 8ms / max 4000 |
 | Outbox 发布 | publish_workers=4，publish_batch=200，批量 confirm |
-| 周期补单 | recover_interval_sec=2 |
+| 周期补单（历史） | recover_interval_sec=2 |
 | 成功热路径 | Redis 幂等短路 + 票档上下文短缓存 + 订单/outbox 路径如上 |
 | 连接池（集成） | max_open_conns=80 |
 
@@ -243,4 +245,4 @@ W3C `traceparent`/`tracestate` 同时保存在 outbox payload 和 AMQP headers�
 - **batch 500：~485 QPS**  
 - **batch 1000：~649 QPS**（全部 `pending_payment`）
 
-`sync` 仍保留为开关，不删代码；仓库示例与集成配置默认走 **batch**。
+当前实现不再提供 `sync/batch` 写入开关：订单和 Outbox 行固定在一个主库事务中提交；历史 batch 数据仅用于回顾，不能作为当前容量结论。

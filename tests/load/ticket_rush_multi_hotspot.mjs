@@ -84,7 +84,7 @@ const aggregate = {
     inventory_buckets_enabled: process.env.INVENTORY_BUCKETS_ENABLED || "",
     inventory_bucket_count: process.env.INVENTORY_BUCKET_COUNT || "",
     order_consumer_worker_count: process.env.ORDER_CONSUMER_WORKER_COUNT || "",
-    order_outbox_write_mode: process.env.ORDER_OUTBOX_WRITE_MODE || "",
+    order_outbox: "transactional",
   },
   setup: setupMetrics.summary(),
   results: [],
