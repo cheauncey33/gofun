@@ -23,18 +23,18 @@ func StartRuntimeCollector(
 	ctx context.Context,
 	db *gorm.DB,
 	newMQChannel func() (*amqp.Channel, error),
-	queueName string,
+	queueNames ...string,
 ) {
 	ticker := time.NewTicker(runtimeMetricsInterval)
 	defer ticker.Stop()
 
-	collectRuntimeMetrics(ctx, db, newMQChannel, queueName)
+	collectRuntimeMetrics(ctx, db, newMQChannel, queueNames...)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			collectRuntimeMetrics(ctx, db, newMQChannel, queueName)
+			collectRuntimeMetrics(ctx, db, newMQChannel, queueNames...)
 		}
 	}
 }
@@ -43,7 +43,7 @@ func collectRuntimeMetrics(
 	ctx context.Context,
 	db *gorm.DB,
 	newMQChannel func() (*amqp.Channel, error),
-	queueName string,
+	queueNames ...string,
 ) {
 	var status mysqlStatusRow
 	if err := db.WithContext(ctx).
@@ -54,7 +54,7 @@ func collectRuntimeMetrics(
 		MySQLInnoDBRowLockWaits.Set(value)
 	}
 
-	if newMQChannel == nil || queueName == "" {
+	if newMQChannel == nil || len(queueNames) == 0 {
 		return
 	}
 	channel, err := newMQChannel()
@@ -63,11 +63,16 @@ func collectRuntimeMetrics(
 		return
 	}
 	defer channel.Close()
-	queue, err := channel.QueueInspect(queueName)
-	if err != nil {
-		log.Printf("inspect RabbitMQ queue %s: %v", queueName, err)
-		return
+	for _, queueName := range queueNames {
+		if queueName == "" {
+			continue
+		}
+		queue, err := channel.QueueInspect(queueName)
+		if err != nil {
+			log.Printf("inspect RabbitMQ queue %s: %v", queueName, err)
+			continue
+		}
+		MQQueueReadyMessages.WithLabelValues(queueName).Set(float64(queue.Messages))
+		MQQueueConsumers.WithLabelValues(queueName).Set(float64(queue.Consumers))
 	}
-	MQQueueReadyMessages.WithLabelValues(queueName).Set(float64(queue.Messages))
-	MQQueueConsumers.WithLabelValues(queueName).Set(float64(queue.Consumers))
 }

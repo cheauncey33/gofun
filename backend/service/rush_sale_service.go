@@ -1,12 +1,12 @@
 package service
 
 import (
-	"gofun/container"
-	"gofun/metrics"
-	"gofun/models"
 	"context"
 	"errors"
 	"fmt"
+	"gofun/container"
+	"gofun/metrics"
+	"gofun/models"
 	"strconv"
 	"strings"
 	"time"
@@ -126,18 +126,26 @@ func (s *RushSaleService) CreateCampaign(
 		Status:         models.RushSaleStatusScheduled,
 	}
 	ttl := time.Until(campaign.EndsAt) + time.Hour
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(campaign).Error; err != nil {
-			return err
+	if s.order.inventory.ShardEnabled {
+		// 活动元数据先落主库，库存桶随后落独立库存库；批处理账本负责跨库重试幂等。
+		err = s.db.WithContext(ctx).Create(campaign).Error
+		if err == nil {
+			err = EnsureRushBuckets(s.order.inventoryDatabase().WithContext(ctx), campaign, s.order.inventory)
 		}
-		return EnsureRushBuckets(tx, campaign, s.order.inventory)
-	})
+	} else {
+		err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(campaign).Error; err != nil {
+				return err
+			}
+			return EnsureRushBuckets(tx, campaign, s.order.inventory)
+		})
+	}
 	if err != nil {
 		return nil, err
 	}
 	if s.order.inventory.Enabled {
 		var buckets []models.RushCampaignBucket
-		if err := s.db.WithContext(ctx).
+		if err := s.order.inventoryDatabase().WithContext(ctx).
 			Where("campaign_id = ?", campaign.ID).Find(&buckets).Error; err != nil {
 			return nil, err
 		}
@@ -187,7 +195,7 @@ func (s *RushSaleService) ListCampaigns(
 		if stock, ok, err := s.loadRushStock(ctx, campaign.ID, campaign.TotalQuota); err == nil && ok {
 			view.RemainingQuota = int(stock)
 		} else if s.order.inventory.Enabled {
-			if sum, sumErr := sumRushBucketRemaining(ctx, s.db, campaign.ID); sumErr == nil {
+			if sum, sumErr := sumRushBucketRemaining(ctx, s.order.inventoryDatabase(), campaign.ID); sumErr == nil {
 				view.RemainingQuota = sum
 			}
 		}
@@ -488,27 +496,28 @@ func (s *TicketOrderService) createRushOrderAfterReservation(
 	orderID := s.node.Generate().Int64()
 	acceptedAt := time.Now()
 	order := &models.TicketOrder{
-		Base:                  models.Base{ID: orderID},
-		OrderNo:               "FC" + strconv.FormatInt(orderID, 10),
-		UserID:                userID,
-		OrganizerID:           event.OrganizerID,
-		EventID:               event.ID,
-		SessionID:             session.ID,
-		RushSaleCampaignID:    &campaign.ID,
-		OrderSource:           models.TicketOrderSourceRushSale,
-		Status:                models.TicketOrderStatusQueued,
-		PaymentStatus:         models.PaymentStatusUnpaid,
-		TotalAmountCents:      campaign.RushPriceCents * int64(quantity),
-		ContactName:           strings.TrimSpace(purchase.ContactName),
-		ContactPhone:          strings.TrimSpace(purchase.ContactPhone),
-		RealNameRequired:      event.RealNameRequired,
-		PurchaseNoticeVersion: purchaseNoticeVersion,
-		TermsAcceptedAt:       &acceptedAt,
-		IdempotencyKey:        idempotencyKey,
-		RequestID:             requestID,
-		ExpiresAt:             time.Now().Add(s.paymentTimeout),
-		StockBucketNo:         bucketNo,
-		RushBucketNo:          bucketNo,
+		Base:                   models.Base{ID: orderID},
+		OrderNo:                "FC" + strconv.FormatInt(orderID, 10),
+		UserID:                 userID,
+		OrganizerID:            event.OrganizerID,
+		EventID:                event.ID,
+		SessionID:              session.ID,
+		RushSaleCampaignID:     &campaign.ID,
+		OrderSource:            models.TicketOrderSourceRushSale,
+		Status:                 models.TicketOrderStatusQueued,
+		PaymentStatus:          models.PaymentStatusUnpaid,
+		TotalAmountCents:       campaign.RushPriceCents * int64(quantity),
+		ContactName:            strings.TrimSpace(purchase.ContactName),
+		ContactPhone:           strings.TrimSpace(purchase.ContactPhone),
+		RealNameRequired:       event.RealNameRequired,
+		PurchaseNoticeVersion:  purchaseNoticeVersion,
+		TermsAcceptedAt:        &acceptedAt,
+		IdempotencyKey:         idempotencyKey,
+		RequestID:              requestID,
+		ExpiresAt:              time.Now().Add(s.paymentTimeout),
+		InventoryNextAttemptAt: acceptedAt,
+		StockBucketNo:          bucketNo,
+		RushBucketNo:           bucketNo,
 		Items: []models.TicketOrderItem{{
 			TicketTierID:            tier.ID,
 			Quantity:                quantity,

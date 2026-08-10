@@ -1,11 +1,11 @@
 package service
 
 import (
-	"gofun/metrics"
-	"gofun/models"
 	"context"
 	"errors"
 	"fmt"
+	"gofun/metrics"
+	"gofun/models"
 	"log"
 
 	"gorm.io/gorm"
@@ -123,6 +123,21 @@ func restoreTierBucket(tx *gorm.DB, tierID int64, bucketNo, quantity int) error 
 		}).Error; err != nil {
 			return err
 		}
+		// 缺失桶按 0 -> quantity 处理，需要尝试 sold_out -> on_sale。
+		return refreshTierOnSaleFromBuckets(tx, tierID, quantity)
+	}
+
+	// UPDATE 已经锁住了桶行；只有更新后的桶余量等于本次恢复量时，
+	// 才能确定它是从 0 恢复到正数。普通正数恢复不再访问父级热行。
+	var bucketRemaining int
+	if err := tx.Model(&models.TicketTierBucket{}).
+		Select("remaining_quota").
+		Where("tier_id = ? AND bucket_no = ?", tierID, bucketNo).
+		Scan(&bucketRemaining).Error; err != nil {
+		return err
+	}
+	if bucketRemaining != quantity {
+		return nil
 	}
 	return refreshTierOnSaleFromBuckets(tx, tierID, quantity)
 }
@@ -147,6 +162,63 @@ func restoreRushBucket(tx *gorm.DB, campaignID int64, bucketNo, quantity int) er
 	return nil
 }
 
+// 第三阶段库存库没有 ticket_tier / rush_sale_campaign 父表，因此这里只更新
+// 桶行。父级售罄状态由主库补偿任务按桶 SUM 修正。
+func deductTierBucketWithoutParent(tx *gorm.DB, tierID int64, bucketNo, quantity int) error {
+	result := tx.Model(&models.TicketTierBucket{}).
+		Where("tier_id = ? AND bucket_no = ? AND remaining_quota >= ?", tierID, bucketNo, quantity).
+		Updates(map[string]interface{}{
+			"remaining_quota": gorm.Expr("remaining_quota - ?", quantity),
+			"sold_count":      gorm.Expr("sold_count + ?", quantity),
+			"version":         gorm.Expr("version + 1"),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return classifyTierBucketUpdateMiss(tx, tierID, bucketNo, quantity)
+	}
+	return nil
+}
+
+func restoreTierBucketWithoutParent(tx *gorm.DB, tierID int64, bucketNo, quantity int) error {
+	result := tx.Model(&models.TicketTierBucket{}).
+		Where("tier_id = ? AND bucket_no = ?", tierID, bucketNo).
+		Updates(map[string]interface{}{
+			"remaining_quota": gorm.Expr("remaining_quota + ?", quantity),
+			"sold_count":      gorm.Expr("GREATEST(sold_count - ?, 0)", quantity),
+			"version":         gorm.Expr("version + 1"),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return tx.Create(&models.TicketTierBucket{
+			TierID: tierID, BucketNo: bucketNo, RemainingQuota: quantity,
+		}).Error
+	}
+	return nil
+}
+
+func deductRushBucketWithoutParent(tx *gorm.DB, campaignID int64, bucketNo, quantity int) error {
+	result := tx.Model(&models.RushCampaignBucket{}).
+		Where("campaign_id = ? AND bucket_no = ? AND remaining_quota >= ?", campaignID, bucketNo, quantity).
+		Update("remaining_quota", gorm.Expr("remaining_quota - ?", quantity))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+	var bucket models.RushCampaignBucket
+	if err := tx.Where("campaign_id = ? AND bucket_no = ?", campaignID, bucketNo).First(&bucket).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("%w: 库存库抢票分桶不存在", ErrTicketOrderNonRetryable)
+	} else if err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: 库存库抢票分桶票额不足", ErrTicketOrderNonRetryable)
+}
+
 // refreshTierSoldOutFromBuckets 父表退出热路径：仅当全部分桶余量归零时标记 sold_out。
 // sold_count / remaining_quota 由补偿任务按桶 SUM 回写，避免消费期打到同一父行。
 func refreshTierSoldOutFromBuckets(tx *gorm.DB, tierID int64, _ int) error {
@@ -159,21 +231,19 @@ func refreshTierSoldOutFromBuckets(tx *gorm.DB, tierID int64, _ int) error {
 	if sum > 0 {
 		return nil
 	}
-	return tx.Model(&models.TicketTier{}).Where("id = ?", tierID).
-		Update("status", gorm.Expr(
-			"CASE WHEN status = ? THEN ? ELSE status END",
-			models.TicketTierStatusOnSale,
-			models.TicketTierStatusSoldOut,
-		)).Error
+	// 只有真正发生 on_sale -> sold_out 边界转换时才更新父级行。
+	// 普通分桶扣减不会触碰 ticket_tier，状态漂移由补偿任务修正。
+	return tx.Model(&models.TicketTier{}).
+		Where("id = ? AND status = ?", tierID, models.TicketTierStatusOnSale).
+		Update("status", models.TicketTierStatusSoldOut).Error
 }
 
 func refreshTierOnSaleFromBuckets(tx *gorm.DB, tierID int64, _ int) error {
-	return tx.Model(&models.TicketTier{}).Where("id = ?", tierID).
-		Update("status", gorm.Expr(
-			"CASE WHEN status = ? THEN ? ELSE status END",
-			models.TicketTierStatusSoldOut,
-			models.TicketTierStatusOnSale,
-		)).Error
+	// 恢复库存时只有 sold_out -> on_sale 才需要更新父级行；
+	// 已经 on_sale 的普通恢复不再执行无效 UPDATE。
+	return tx.Model(&models.TicketTier{}).
+		Where("id = ? AND status = ?", tierID, models.TicketTierStatusSoldOut).
+		Update("status", models.TicketTierStatusOnSale).Error
 }
 
 func classifyTierBucketUpdateMiss(tx *gorm.DB, tierID int64, bucketNo, quantity int) error {

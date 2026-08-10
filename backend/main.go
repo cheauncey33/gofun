@@ -80,6 +80,10 @@ func main() {
 	ticketOrderSvc.ConfigureOrderEvents(orderHub)
 	ticketOrderSvc.ConfigureOutboxWriter(cfg.OrderOutbox)
 	ticketOrderSvc.ConfigureInventory(cfg.Inventory)
+	inventoryReservationBatchSvc := service.NewInventoryReservationBatchService(
+		cont,
+		service.NewInventoryBucketSettings(cfg.Inventory),
+	)
 	ticketVerificationSvc := service.NewTicketVerificationService(cont)
 	rushSaleSvc := service.NewRushSaleService(
 		cont,
@@ -140,6 +144,9 @@ func main() {
 	}
 	if err := ticketOrderSvc.BackfillPaidAdmissionTickets(context.Background()); err != nil {
 		logger.Log.Fatal("历史已支付订单补签电子票失败", zap.Error(err))
+	}
+	if err := ticketOrderSvc.RecoverPaymentState(context.Background()); err != nil {
+		logger.Log.Fatal("支付状态恢复失败", zap.Error(err))
 	}
 	if err := ticketOrderSvc.SetupPaymentTimeoutInfrastructure(); err != nil {
 		logger.Log.Fatal("票务支付超时延时队列初始化失败", zap.Error(err))
@@ -246,7 +253,8 @@ func main() {
 	mainCtx, cancel := context.WithCancel(context.Background())
 	go orderHub.Run(mainCtx)
 	go ticketOrderConsumer.Start(mainCtx, cfg.OrderConsumer)
-	go ticketOrderSvc.StartPaymentTimeoutConsumer(mainCtx, 2)
+	go inventoryReservationBatchSvc.Start(mainCtx)
+	go ticketOrderSvc.StartPaymentTimeoutConsumer(mainCtx, cfg.DelayedOrder.WorkerCount)
 	go ticketOrderSvc.StartTimeoutScanner(mainCtx)
 	go ticketOrderSvc.StartOutboxPublisher(mainCtx, cfg.OrderOutbox)
 	ticketOrderSvc.StartOutboxWriter(mainCtx)
@@ -254,7 +262,16 @@ func main() {
 	go ticketCompensationSvc.Start(mainCtx)
 	go eventSearchCompensationSvc.Start(mainCtx)
 	go eventCommentSvc.StartLikeCountFlusher(mainCtx)
-	go metrics.StartRuntimeCollector(mainCtx, cont.DB, cont.NewMQChannel, cont.MQQueueName)
+	go metrics.StartRuntimeCollector(
+		mainCtx,
+		cont.DB,
+		cont.NewMQChannel,
+		cont.MQQueueName,
+		cont.MQRetryQueueName,
+		"fuchang.order.delay",
+		"fuchang.order.timeout",
+		cont.MQDLQName,
+	)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),

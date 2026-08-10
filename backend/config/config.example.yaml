@@ -106,12 +106,20 @@ inventory:
   bucket_count: 8
   min_quota_to_bucket: 64
   bucket_retry: 4
+  # 实验性第二阶段：订单消费者只写库存预约记录，由批处理器合并扣减库存桶。
+  batch_enabled: false
+  batch_size: 200
+  batch_interval_ms: 50
+  # 第三阶段实验：库存桶和幂等账本使用独立 MySQL；订单主库仍保存 ticket_order。
+  shard_enabled: false
+  shard_dsn: ""
 
 # 支付窗口（分钟）。进入 pending_payment 后投递 RabbitMQ 延时关单（消息级 TTL + DLX）；
 # DB 扫描器作兜底（默认约 2 分钟一次）。
 delayed_order:
   timeout_minutes: 15
   lock_timeout_sec: 10
+  worker_count: 2
 
 cors:
   allow_origins:

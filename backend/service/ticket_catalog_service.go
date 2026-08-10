@@ -1,14 +1,14 @@
 package service
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"gofun/config"
 	"gofun/container"
 	"gofun/models"
 	"gofun/repository"
 	"gofun/search"
-	"context"
-	"errors"
-	"fmt"
 	"log"
 	"regexp"
 	"strings"
@@ -131,12 +131,13 @@ type OrganizerOverview struct {
 }
 
 type TicketCatalogService struct {
-	repo      repository.TicketCatalogRepository
-	db        *gorm.DB
-	rdb       *redis.Client
-	searcher  search.EventSearcher
-	preferES  bool
-	inventory InventoryBucketSettings
+	repo        repository.TicketCatalogRepository
+	db          *gorm.DB
+	inventoryDB *gorm.DB
+	rdb         *redis.Client
+	searcher    search.EventSearcher
+	preferES    bool
+	inventory   InventoryBucketSettings
 }
 
 func NewTicketCatalogService(c *container.Container) *TicketCatalogService {
@@ -145,12 +146,20 @@ func NewTicketCatalogService(c *container.Container) *TicketCatalogService {
 		searcher = search.NoopEventSearcher{}
 	}
 	return &TicketCatalogService{
-		repo:     c.TicketCatalogRepo,
-		db:       c.DB,
-		rdb:      c.RDB,
-		searcher: searcher,
-		preferES: c.SearchPreferES && searcher.Enabled(),
+		repo:        c.TicketCatalogRepo,
+		db:          c.DB,
+		inventoryDB: c.InventoryDB,
+		rdb:         c.RDB,
+		searcher:    searcher,
+		preferES:    c.SearchPreferES && searcher.Enabled(),
 	}
+}
+
+func (s *TicketCatalogService) inventoryDatabase() *gorm.DB {
+	if s.inventory.ShardEnabled && s.inventoryDB != nil {
+		return s.inventoryDB
+	}
+	return s.db
 }
 
 func (s *TicketCatalogService) ConfigureInventory(cfg config.InventoryConfig) {
@@ -370,11 +379,11 @@ func (s *TicketCatalogService) PublishEvent(
 	for _, session := range event.Sessions {
 		for _, tier := range session.TicketTiers {
 			if s.inventory.Enabled {
-				if err := EnsureTierBuckets(s.db.WithContext(ctx), &tier, s.inventory); err != nil {
+				if err := EnsureTierBuckets(s.inventoryDatabase().WithContext(ctx), &tier, s.inventory); err != nil {
 					return nil, fmt.Errorf("发布前拆桶: %w", err)
 				}
 				var buckets []models.TicketTierBucket
-				if err := s.db.WithContext(ctx).
+				if err := s.inventoryDatabase().WithContext(ctx).
 					Where("tier_id = ?", tier.ID).Find(&buckets).Error; err != nil {
 					return nil, err
 				}
@@ -631,12 +640,19 @@ func (s *TicketCatalogService) CreateTicketTier(
 		PurchaseLimit:      input.PurchaseLimit,
 		Status:             models.TicketTierStatusOnSale,
 	}
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(tier).Error; err != nil {
-			return err
+	if s.inventory.ShardEnabled {
+		err = s.db.WithContext(ctx).Create(tier).Error
+		if err == nil {
+			err = EnsureTierBuckets(s.inventoryDatabase().WithContext(ctx), tier, s.inventory)
 		}
-		return EnsureTierBuckets(tx, tier, s.inventory)
-	})
+	} else {
+		err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(tier).Error; err != nil {
+				return err
+			}
+			return EnsureTierBuckets(tx, tier, s.inventory)
+		})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -857,7 +873,7 @@ func (s *TicketCatalogService) overlayTierRemainingFromBuckets(ctx context.Conte
 	for si := range event.Sessions {
 		for ti := range event.Sessions[si].TicketTiers {
 			tier := &event.Sessions[si].TicketTiers[ti]
-			if sum, err := sumTierBucketRemaining(ctx, s.db, tier.ID); err == nil {
+			if sum, err := sumTierBucketRemaining(ctx, s.inventoryDatabase(), tier.ID); err == nil {
 				tier.RemainingQuota = sum
 			}
 		}

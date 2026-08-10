@@ -152,6 +152,7 @@ type OrderOutboxConfig struct {
 type OrderDelayConfig struct {
 	TimeoutMinutes int `mapstructure:"timeout_minutes"`
 	LockTimeoutSec int `mapstructure:"lock_timeout_sec"`
+	WorkerCount    int `mapstructure:"worker_count"`
 }
 
 type RushSaleConfig struct {
@@ -167,10 +168,15 @@ type PaymentConfig struct {
 // InventoryConfig 票档/抢票 Redis+MySQL 同构分桶。
 // buckets_enabled=false 时保持单 key / 父表 remaining_quota 热路径。
 type InventoryConfig struct {
-	BucketsEnabled   bool `mapstructure:"buckets_enabled"`
-	BucketCount      int  `mapstructure:"bucket_count"`
-	MinQuotaToBucket int  `mapstructure:"min_quota_to_bucket"`
-	BucketRetry      int  `mapstructure:"bucket_retry"`
+	BucketsEnabled   bool   `mapstructure:"buckets_enabled"`
+	BucketCount      int    `mapstructure:"bucket_count"`
+	MinQuotaToBucket int    `mapstructure:"min_quota_to_bucket"`
+	BucketRetry      int    `mapstructure:"bucket_retry"`
+	BatchEnabled     bool   `mapstructure:"batch_enabled"`
+	BatchSize        int    `mapstructure:"batch_size"`
+	BatchIntervalMS  int    `mapstructure:"batch_interval_ms"`
+	ShardEnabled     bool   `mapstructure:"shard_enabled"`
+	ShardDSN         string `mapstructure:"shard_dsn"`
 }
 
 func Load(configPath string) (*Config, error) {
@@ -254,11 +260,17 @@ func Load(configPath string) (*Config, error) {
 		"order_outbox.recover_interval_sec",
 		"delayed_order.timeout_minutes",
 		"delayed_order.lock_timeout_sec",
+		"delayed_order.worker_count",
 		"rush_sale.campaign_cache_ttl_ms",
 		"inventory.buckets_enabled",
 		"inventory.bucket_count",
 		"inventory.min_quota_to_bucket",
 		"inventory.bucket_retry",
+		"inventory.batch_enabled",
+		"inventory.batch_size",
+		"inventory.batch_interval_ms",
+		"inventory.shard_enabled",
+		"inventory.shard_dsn",
 		"payment.provider",
 		"payment.sandbox_secret",
 		"payment.sandbox_callback_delay_ms",
@@ -377,12 +389,18 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("delayed_order.timeout_minutes", 15)
 	v.SetDefault("delayed_order.lock_timeout_sec", 10)
+	v.SetDefault("delayed_order.worker_count", 2)
 	v.SetDefault("rush_sale.campaign_cache_ttl_ms", 3000)
 
 	v.SetDefault("inventory.buckets_enabled", false)
 	v.SetDefault("inventory.bucket_count", 8)
 	v.SetDefault("inventory.min_quota_to_bucket", 64)
 	v.SetDefault("inventory.bucket_retry", 4)
+	v.SetDefault("inventory.batch_enabled", false)
+	v.SetDefault("inventory.batch_size", 200)
+	v.SetDefault("inventory.batch_interval_ms", 50)
+	v.SetDefault("inventory.shard_enabled", false)
+	v.SetDefault("inventory.shard_dsn", "")
 
 	v.SetDefault("payment.provider", "sandbox")
 	v.SetDefault("payment.sandbox_callback_delay_ms", 500)
@@ -480,6 +498,26 @@ func (c *Config) Validate() error {
 	if c.Inventory.BucketRetry < 0 {
 		return fmt.Errorf("inventory.bucket_retry 必须大于等于0")
 	}
+	if c.Inventory.BatchSize == 0 {
+		c.Inventory.BatchSize = 200
+	}
+	if c.Inventory.BatchIntervalMS == 0 {
+		c.Inventory.BatchIntervalMS = 50
+	}
+	if c.Inventory.BatchSize < 1 {
+		return fmt.Errorf("inventory.batch_size 必须大于等于1")
+	}
+	if c.Inventory.BatchIntervalMS < 1 {
+		return fmt.Errorf("inventory.batch_interval_ms 必须大于等于1")
+	}
+	if c.Inventory.ShardEnabled {
+		if strings.TrimSpace(c.Inventory.ShardDSN) == "" {
+			return fmt.Errorf("inventory.shard_dsn 在分库开启时不能为空")
+		}
+		if !c.Inventory.BucketsEnabled || !c.Inventory.BatchEnabled {
+			return fmt.Errorf("inventory 分库当前要求 buckets_enabled=true 且 batch_enabled=true")
+		}
+	}
 	c.Payment.Provider = strings.ToLower(strings.TrimSpace(c.Payment.Provider))
 	if c.Payment.Provider == "" {
 		c.Payment.Provider = "sandbox"
@@ -513,6 +551,12 @@ func (c *Config) Validate() error {
 	}
 	if c.OrderConsumer.MaxRetries < 0 {
 		return fmt.Errorf("order_consumer.max_retries 必须大于等于0")
+	}
+	if c.DelayedOrder.WorkerCount == 0 {
+		c.DelayedOrder.WorkerCount = 2
+	}
+	if c.DelayedOrder.WorkerCount < 0 {
+		return fmt.Errorf("delayed_order.worker_count 必须大于0")
 	}
 	if c.OrderOutbox.PublishWorkers == 0 {
 		c.OrderOutbox.PublishWorkers = 4

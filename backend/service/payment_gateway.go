@@ -59,6 +59,20 @@ type PaymentGateway interface {
 	VerifyNotification(PaymentNotification) bool
 }
 
+// PaymentStateRestorer lets the application rebuild a sandbox provider's
+// in-memory view from the durable platform transaction after a restart.
+type PaymentStateRestorer interface {
+	RestorePayment(PaymentStateRestoreRequest) error
+}
+
+type PaymentStateRestoreRequest struct {
+	PaymentNo   string
+	OrderID     int64
+	UserID      int64
+	AmountCents int64
+	Status      string
+}
+
 type sandboxPaymentState struct {
 	OrderID     int64
 	UserID      int64
@@ -130,6 +144,33 @@ func (g *SandboxPaymentGateway) CreatePayment(
 		PaymentNo: paymentNo, Provider: g.provider, Status: "pending",
 		AmountCents: req.AmountCents, ExpiresAt: req.ExpiresAt,
 	}, nil
+}
+
+func (g *SandboxPaymentGateway) RestorePayment(req PaymentStateRestoreRequest) error {
+	if strings.TrimSpace(req.PaymentNo) == "" || req.OrderID <= 0 || req.UserID <= 0 || req.AmountCents <= 0 {
+		return fmt.Errorf("invalid payment restore request")
+	}
+	status := strings.ToLower(strings.TrimSpace(req.Status))
+	switch status {
+	case "pending", "success", "failed", "closed", "refunded":
+	default:
+		return fmt.Errorf("invalid payment restore status: %s", req.Status)
+	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if existing, ok := g.byNo[req.PaymentNo]; ok {
+		if existing.OrderID != req.OrderID || existing.AmountCents != req.AmountCents {
+			return fmt.Errorf("payment restore conflicts with existing provider state")
+		}
+		return nil
+	}
+	g.byNo[req.PaymentNo] = sandboxPaymentState{
+		OrderID: req.OrderID, UserID: req.UserID,
+		AmountCents: req.AmountCents, Status: status,
+	}
+	g.byOrder[req.OrderID] = req.PaymentNo
+	return nil
 }
 
 func normalizePaymentScenario(value string) string {

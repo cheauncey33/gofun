@@ -123,6 +123,100 @@ var (
 		[]string{"result"}, // success | error
 	)
 
+	TicketOrderConsumerTransactionDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "ticket_order_consumer_transaction_duration_seconds",
+			Help:    "Ticket order consumer MySQL transaction duration",
+			Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
+		},
+		[]string{"result"}, // success | retryable_error | error
+	)
+
+	TicketOrderConsumerTransactions = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "ticket_order_consumer_transactions_total",
+			Help: "Ticket order consumer MySQL transactions by result",
+		},
+		[]string{"result"}, // success | retryable_error | error
+	)
+
+	// These labels are intentionally bounded. Do not add order ID, campaign ID,
+	// or other high-cardinality identifiers to transaction-stage metrics.
+	TicketOrderConsumerStageDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "ticket_order_consumer_stage_duration_seconds",
+			Help:    "Duration of individual stages inside the ticket order consumer transaction",
+			Buckets: []float64{.0005, .001, .0025, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5},
+		},
+		[]string{"stage"}, // order_lock | order_items_read | rush_bucket_update | tier_bucket_update | order_state_update
+	)
+
+	TicketOrderConsumerInventoryBucketDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "ticket_order_consumer_inventory_bucket_duration_seconds",
+			Help:    "Duration of a ticket order consumer inventory bucket update",
+			Buckets: []float64{.0005, .001, .0025, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5},
+		},
+		[]string{"kind", "bucket_no"}, // kind: rush | tier; bucket_no is bounded by configured bucket count
+	)
+
+	TicketOrderConsumerInventoryBucketOperations = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "ticket_order_consumer_inventory_bucket_operations_total",
+			Help: "Ticket order consumer inventory bucket updates by result",
+		},
+		[]string{"kind", "bucket_no", "result"}, // result: success | error
+	)
+
+	InventoryReservationBatchDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "inventory_reservation_batch_duration_seconds",
+			Help:    "Inventory reservation batch transaction duration",
+			Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
+		},
+		[]string{"result"}, // success | error
+	)
+
+	InventoryReservationBatches = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "inventory_reservation_batches_total",
+			Help: "Inventory reservation batches by result",
+		},
+		[]string{"result"}, // success | error | empty
+	)
+
+	InventoryReservationRows = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "inventory_reservation_rows_total",
+			Help: "Inventory reservation rows transitioned by state",
+		},
+		[]string{"transition"}, // reserved | released | released_without_bucket_update
+	)
+
+	InventoryReservationPending = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "inventory_reservation_pending",
+			Help: "Current inventory reservations whose desired and applied states differ",
+		},
+	)
+
+	TicketPaymentTimeoutTransactionDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "ticket_payment_timeout_transaction_duration_seconds",
+			Help:    "Payment timeout cancellation MySQL transaction duration",
+			Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
+		},
+		[]string{"result"}, // success | error
+	)
+
+	TicketPaymentTimeoutTransactions = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "ticket_payment_timeout_transactions_total",
+			Help: "Payment timeout cancellation MySQL transactions by result",
+		},
+		[]string{"result"}, // success | error
+	)
+
 	OutboxBufferLength = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "outbox_buffer_len",

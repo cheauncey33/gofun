@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -37,5 +38,31 @@ func TestSandboxPaymentGatewayUsesEphemeralSecretWhenUnset(t *testing.T) {
 	notification.Signature = first.sign(notification)
 	if second.VerifyNotification(notification) {
 		t.Fatal("expected restart with an unset secret to reject old callbacks")
+	}
+}
+
+func TestSandboxPaymentGatewayRestoresStateAndSchedulesCallback(t *testing.T) {
+	gateway := NewSandboxPaymentGateway("restart-secret", time.Millisecond)
+	notifications := make(chan PaymentNotification, 1)
+	gateway.SetCallback(func(_ context.Context, notification PaymentNotification) error {
+		notifications <- notification
+		return nil
+	})
+
+	if err := gateway.RestorePayment(PaymentStateRestoreRequest{
+		PaymentNo: "sandbox_restart_1", OrderID: 101, UserID: 202,
+		AmountCents: 6800, Status: "pending",
+	}); err != nil {
+		t.Fatalf("RestorePayment() error = %v", err)
+	}
+	gateway.ScheduleCallback("sandbox_restart_1", "success")
+
+	select {
+	case notification := <-notifications:
+		if notification.PaymentNo != "sandbox_restart_1" || notification.Status != "success" {
+			t.Fatalf("unexpected restored callback: %+v", notification)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected callback after restoring pending payment")
 	}
 }

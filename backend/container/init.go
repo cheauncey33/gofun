@@ -31,6 +31,13 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init db: %w", err)
 	}
+	inventoryDB := db
+	if cfg.Inventory.ShardEnabled {
+		inventoryDB, err = initInventoryDB(cfg.Inventory.ShardDSN, cfg.MySQL, cfg.Telemetry.Enabled)
+		if err != nil {
+			return nil, fmt.Errorf("init inventory db: %w", err)
+		}
+	}
 
 	rdb, err := initRedis(cfg.Redis, cfg.Telemetry.Enabled)
 	if err != nil {
@@ -52,6 +59,7 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 
 	c := &Container{
 		DB:                db,
+		InventoryDB:       inventoryDB,
 		RDB:               rdb,
 		MQConn:            conn,
 		MQChannel:         ch,
@@ -92,6 +100,38 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	common.SetJWTSecret(cfg.JWT.Secret)
 
 	return c, nil
+}
+
+// initInventoryDB 只创建库存库自己的桶表和幂等账本，不运行主库迁移，
+// 也不建立跨库外键。主库 ticket_order 仍然是订单状态的最终来源。
+func initInventoryDB(dsn string, baseCfg config.MySQLConfig, tracingEnabled bool) (*gorm.DB, error) {
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
+		NamingStrategy: schema.NamingStrategy{SingularTable: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if tracingEnabled {
+		if err := db.Use(otelgorm.NewPlugin()); err != nil {
+			return nil, fmt.Errorf("enable inventory GORM tracing: %w", err)
+		}
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	sqlDB.SetMaxIdleConns(baseCfg.MaxIdleConns)
+	sqlDB.SetMaxOpenConns(baseCfg.MaxOpenConns)
+	sqlDB.SetConnMaxLifetime(time.Duration(baseCfg.ConnMaxLifetime) * time.Second)
+	if err := db.AutoMigrate(
+		&models.TicketTierBucket{},
+		&models.RushCampaignBucket{},
+		&models.InventoryOperation{},
+	); err != nil {
+		return nil, fmt.Errorf("migrate inventory tables: %w", err)
+	}
+	log.Println("Inventory MySQL 连接成功")
+	return db, nil
 }
 
 func initDB(cfg config.MySQLConfig, tracingEnabled bool) (*gorm.DB, error) {
