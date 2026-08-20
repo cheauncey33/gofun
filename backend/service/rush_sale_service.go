@@ -256,6 +256,9 @@ func (s *RushSaleService) Execute(
 	}
 
 	bucketNo := reservation.BucketNo
+	if err := s.order.injectTicketFault(ctx, FaultAfterRedisReserve, reservation.OrderID); err != nil {
+		return nil, err
+	}
 	var bucketPtr *int
 	if s.order.inventory.Enabled {
 		bucketPtr = intPtr(bucketNo)
@@ -265,6 +268,9 @@ func (s *RushSaleService) Execute(
 		campaign, quantity, purchase, bucketPtr,
 	)
 	if err == nil {
+		if faultErr := s.order.injectTicketFault(ctx, FaultAfterOrderCommit, reservation.OrderID); faultErr != nil {
+			return nil, faultErr
+		}
 		s.order.confirmStockReservation(ctx, reservation)
 		return receipt, nil
 	}

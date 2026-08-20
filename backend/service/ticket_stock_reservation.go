@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"gofun/metrics"
 	"gofun/models"
 
 	"github.com/redis/go-redis/v9"
@@ -515,6 +516,35 @@ func (s *TicketOrderService) pendingStockReservationKeys(ctx context.Context) (m
 	return stockKeys, nil
 }
 
+func (s *TicketOrderService) observePendingStockReservationMetrics(
+	ctx context.Context,
+	now time.Time,
+) error {
+	count, err := s.rdb.ZCard(ctx, stockReservationPendingKey).Result()
+	if err != nil {
+		return err
+	}
+	metrics.StockReservationPending.Set(float64(count))
+	if count == 0 {
+		metrics.StockReservationOldestAgeSeconds.Set(0)
+		return nil
+	}
+	oldest, err := s.rdb.ZRangeWithScores(ctx, stockReservationPendingKey, 0, 0).Result()
+	if err != nil {
+		return err
+	}
+	if len(oldest) == 0 {
+		metrics.StockReservationOldestAgeSeconds.Set(0)
+		return nil
+	}
+	age := now.Sub(time.UnixMilli(int64(oldest[0].Score))).Seconds()
+	if age < 0 {
+		age = 0
+	}
+	metrics.StockReservationOldestAgeSeconds.Set(age)
+	return nil
+}
+
 func (s *TicketOrderService) RecoverStaleStockReservations(ctx context.Context, now time.Time) (int, error) {
 	cutoff := now.Add(-stockReservationRecoveryGrace).UnixMilli()
 	keys, err := s.rdb.ZRangeByScore(ctx, stockReservationPendingKey, &redis.ZRangeBy{
@@ -529,6 +559,7 @@ func (s *TicketOrderService) RecoverStaleStockReservations(ctx context.Context, 
 		reservation, loadErr := s.loadStockReservation(ctx, key)
 		if loadErr != nil {
 			log.Printf("load stale stock reservation key=%s: %v", key, loadErr)
+			metrics.StockReservationRecoveryTotal.WithLabelValues("error").Inc()
 			recoveryErr = errors.Join(recoveryErr, loadErr)
 			continue
 		}
@@ -559,21 +590,26 @@ func (s *TicketOrderService) RecoverStaleStockReservations(ctx context.Context, 
 			))
 			cancel()
 			if confirmErr == nil {
+				metrics.StockReservationRecoveryTotal.WithLabelValues("confirmed").Inc()
 				recovered++
 			} else {
+				metrics.StockReservationRecoveryTotal.WithLabelValues("error").Inc()
 				recoveryErr = errors.Join(recoveryErr, confirmErr)
 			}
 		case errors.Is(dbErr, gorm.ErrRecordNotFound):
 			rollbackCtx, cancel := detachedReservationContext(ctx)
-			_, rollbackErr := s.claimStockReservationRecovery(rollbackCtx, *reservation)
+			outcome, rollbackErr := s.claimStockReservationRecovery(rollbackCtx, *reservation)
 			cancel()
 			if rollbackErr == nil {
+				metrics.StockReservationRecoveryTotal.WithLabelValues(string(outcome)).Inc()
 				recovered++
 			} else {
+				metrics.StockReservationRecoveryTotal.WithLabelValues("error").Inc()
 				recoveryErr = errors.Join(recoveryErr, rollbackErr)
 			}
 		default:
 			log.Printf("query stale stock reservation order=%d: %v", reservation.OrderID, dbErr)
+			metrics.StockReservationRecoveryTotal.WithLabelValues("error").Inc()
 			recoveryErr = errors.Join(recoveryErr, dbErr)
 		}
 	}

@@ -18,6 +18,11 @@ type mysqlStatusRow struct {
 	Value        string `gorm:"column:Value"`
 }
 
+type ticketOutboxRuntimeRow struct {
+	PendingRows      int64   `gorm:"column:pending_rows"`
+	OldestAgeSeconds float64 `gorm:"column:oldest_age_seconds"`
+}
+
 // StartRuntimeCollector periodically samples infrastructure state which is not
 // observable from HTTP middleware: InnoDB row lock waits, DB pools, threads and
 // RabbitMQ backlog.
@@ -85,6 +90,7 @@ func collectRuntimeMetrics(
 		setMySQLStatusGauge(ctx, statusDB, "Innodb_row_lock_waits", MySQLInnoDBRowLockWaits)
 		setMySQLStatusGauge(ctx, statusDB, "Threads_running", MySQLThreadsRunning)
 		setMySQLStatusGauge(ctx, statusDB, "Threads_connected", MySQLThreadsConnected)
+		setTicketOutboxGauges(ctx, statusDB)
 	}
 
 	if newMQChannel == nil || len(queueNames) == 0 {
@@ -108,6 +114,26 @@ func collectRuntimeMetrics(
 		MQQueueReadyMessages.WithLabelValues(queueName).Set(float64(queue.Messages))
 		MQQueueConsumers.WithLabelValues(queueName).Set(float64(queue.Consumers))
 	}
+}
+
+func setTicketOutboxGauges(ctx context.Context, db *gorm.DB) {
+	var row ticketOutboxRuntimeRow
+	err := db.WithContext(ctx).Raw(`
+		SELECT
+			COUNT(*) AS pending_rows,
+			COALESCE(
+				TIMESTAMPDIFF(MICROSECOND, MIN(create_time), CURRENT_TIMESTAMP(3)) / 1000000.0,
+				0
+			) AS oldest_age_seconds
+		FROM ticket_order_outbox
+		WHERE status IN ('pending', 'publishing')
+	`).Scan(&row).Error
+	if err != nil {
+		log.Printf("collect ticket Outbox metrics: %v", err)
+		return
+	}
+	TicketOutboxPendingRows.Set(float64(row.PendingRows))
+	TicketOutboxOldestAgeSeconds.Set(row.OldestAgeSeconds)
 }
 
 func setSQLPoolGauges(pool string, sqlDB *sql.DB, mirrorUnlabeled bool) {

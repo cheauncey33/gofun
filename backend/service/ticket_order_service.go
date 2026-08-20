@@ -114,6 +114,8 @@ type TicketOrderService struct {
 	inventory    InventoryBucketSettings
 	orderEvents  *ws.Hub
 	queryCacheSF singleflight.Group
+	// faultInjector 仅由同包集成测试设置，运行时默认 nil。
+	faultInjector TicketFaultInjector
 }
 
 func (s *TicketOrderService) ConfigureInventory(cfg config.InventoryConfig) {
@@ -499,6 +501,9 @@ func (s *TicketOrderService) CreateOrder(
 
 	orderID := reservation.OrderID
 	bucketNo := reservation.BucketNo
+	if err := s.injectTicketFault(ctx, FaultAfterRedisReserve, orderID); err != nil {
+		return nil, err
+	}
 	acceptedAt := time.Now()
 	order := &models.TicketOrder{
 		Base:                  models.Base{ID: orderID},
@@ -578,6 +583,9 @@ func (s *TicketOrderService) CreateOrder(
 		}
 		return nil, err
 	}
+	if err := s.injectTicketFault(ctx, FaultAfterOrderCommit, orderID); err != nil {
+		return nil, err
+	}
 	s.confirmStockReservation(ctx, reservation)
 	s.notifyOutboxPublisher()
 	s.invalidateUserOrderQueryCache(ctx, userID)
@@ -601,17 +609,21 @@ func (s *TicketOrderService) ProcessOrderTask(
 	)
 	defer span.End()
 	var (
-		enteredPending bool
-		pendingOrderID int64
-		pendingUserID  int64
+		enteredPending    bool
+		pendingOrderID    int64
+		pendingUserID     int64
+		pendingAcceptedAt time.Time
 	)
 	var err error
 	for attempt := 1; attempt <= ticketOrderTxMaxAttempts; attempt++ {
 		enteredPending = false
 		pendingOrderID = 0
 		pendingUserID = 0
+		pendingAcceptedAt = time.Time{}
 		txStarted := time.Now()
-		err = s.processOrderTaskTx(ctx, message, &enteredPending, &pendingOrderID, &pendingUserID)
+		err = s.processOrderTaskTx(
+			ctx, message, &enteredPending, &pendingOrderID, &pendingUserID, &pendingAcceptedAt,
+		)
 		transactionResult := "success"
 		if err != nil {
 			transactionResult = "error"
@@ -648,6 +660,12 @@ func (s *TicketOrderService) ProcessOrderTask(
 	}
 	// 进入待支付后投递延时关单；失败由扫描器兜底，不阻塞消费 ack。
 	if enteredPending {
+		if !pendingAcceptedAt.IsZero() {
+			latency := time.Since(pendingAcceptedAt).Seconds()
+			if latency >= 0 {
+				metrics.TicketOrderAcceptedToPendingPaymentDuration.Observe(latency)
+			}
+		}
 		if pubErr := s.PublishPaymentTimeout(ctx, pendingOrderID, pendingUserID); pubErr != nil {
 			log.Printf("ticket payment timeout publish order %d: %v", pendingOrderID, pubErr)
 		}
@@ -668,6 +686,7 @@ func (s *TicketOrderService) processOrderTaskTx(
 	message TicketOrderMessage,
 	enteredPending *bool,
 	pendingOrderID, pendingUserID *int64,
+	pendingAcceptedAt *time.Time,
 ) (err error) {
 	tx := s.asyncDB().WithContext(ctx).Begin()
 	if tx.Error != nil {
@@ -685,7 +704,7 @@ func (s *TicketOrderService) processOrderTaskTx(
 
 	var order models.TicketOrder
 	stageStarted := time.Now()
-	orderQuery := tx.Select("id, user_id, status, rush_sale_campaign_id, stock_bucket_no, rush_bucket_no")
+	orderQuery := tx.Select("id, user_id, status, rush_sale_campaign_id, stock_bucket_no, rush_bucket_no, create_time")
 	orderQuery = orderQuery.Clauses(clause.Locking{Strength: "UPDATE"})
 	if err = orderQuery.First(&order, message.OrderID).Error; err != nil {
 		metrics.TicketOrderConsumerStageDuration.WithLabelValues("order_lock").Observe(time.Since(stageStarted).Seconds())
@@ -813,6 +832,7 @@ func (s *TicketOrderService) processOrderTaskTx(
 		*enteredPending = true
 		*pendingOrderID = order.ID
 		*pendingUserID = order.UserID
+		*pendingAcceptedAt = order.CreateTime
 	}
 
 	commitStarted := time.Now()

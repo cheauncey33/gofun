@@ -82,6 +82,7 @@ func (s *TicketCompensationService) reconcileRedisStock(
 		}
 		if hasPendingReservation {
 			log.Printf("%s Redis 库存缺失但仍有在途预扣，暂不重建", description)
+			metrics.StockReconciliationMismatchTotal.WithLabelValues("pending_missing").Inc()
 			return true, nil
 		}
 		created, setErr := s.rdb.SetNX(ctx, key, expected, 0).Result()
@@ -90,6 +91,7 @@ func (s *TicketCompensationService) reconcileRedisStock(
 		}
 		if created {
 			log.Printf("%s Redis 库存缺失，已按安全可用量%d重建", description, expected)
+			metrics.StockReconciliationMismatchTotal.WithLabelValues("missing").Inc()
 			return true, nil
 		}
 		return false, nil
@@ -100,6 +102,7 @@ func (s *TicketCompensationService) reconcileRedisStock(
 	redisStock, err := strconv.ParseInt(redisStockStr, 10, 64)
 	if err != nil {
 		log.Printf("%s Redis 库存值非法: %q", description, redisStockStr)
+		metrics.StockReconciliationMismatchTotal.WithLabelValues("invalid").Inc()
 		return true, nil
 	}
 	if redisStock > int64(expected) {
@@ -114,11 +117,13 @@ func (s *TicketCompensationService) reconcileRedisStock(
 		} else {
 			log.Printf("%s 对账期间库存发生并发变化，本轮不覆盖", description)
 		}
+		metrics.StockReconciliationMismatchTotal.WithLabelValues("too_high").Inc()
 		return true, nil
 	}
 	if redisStock < int64(expected) && !hasPendingReservation {
 		// 偏少可能来自历史泄漏；没有单笔凭证能够解释时只告警，不猜测性加库存。
 		log.Printf("%s Redis 库存偏少:安全可用量=%d,Redis=%d，本轮不自动上调", description, expected, redisStock)
+		metrics.StockReconciliationMismatchTotal.WithLabelValues("too_low").Inc()
 		return true, nil
 	}
 	return false, nil
@@ -319,12 +324,23 @@ func (s *TicketCompensationService) Start(ctx context.Context) {
 			return
 		case now := <-ticker.C:
 			if s.order != nil {
+				recoveryOK := true
 				if _, err := s.order.RecoverStaleStockReservations(ctx, now); err != nil {
+					recoveryOK = false
 					log.Printf("库存单笔恢复失败: %v", err)
+				}
+				if err := s.order.observePendingStockReservationMetrics(ctx, now); err != nil {
+					recoveryOK = false
+					metrics.StockReservationRecoveryTotal.WithLabelValues("error").Inc()
+					log.Printf("采集库存预扣状态失败: %v", err)
+				}
+				if recoveryOK {
+					metrics.StockRecoveryLastSuccessTimestamp.SetToCurrentTime()
 				}
 			}
 			if !now.Before(nextFullReconciliation) {
 				if _, err := s.RunCompensation(ctx); err != nil {
+					metrics.CompensationRuns.WithLabelValues("error").Inc()
 					log.Printf("票额对账失败: %v", err)
 				}
 				nextFullReconciliation = now.Add(stockFullReconciliationInterval)

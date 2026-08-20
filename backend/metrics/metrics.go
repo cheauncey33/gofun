@@ -81,7 +81,44 @@ var (
 			Name: "stock_compensation_total",
 			Help: "Total stock compensation runs",
 		},
-		[]string{"result"}, // success | anomalies_found
+		[]string{"result"}, // success | anomalies_found | error
+	)
+
+	StockReservationPending = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "ticket_stock_reservation_pending",
+			Help: "Current number of pending Redis stock reservations",
+		},
+	)
+
+	StockReservationOldestAgeSeconds = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "ticket_stock_reservation_oldest_age_seconds",
+			Help: "Age in seconds of the oldest pending Redis stock reservation",
+		},
+	)
+
+	StockReservationRecoveryTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "ticket_stock_reservation_recovery_total",
+			Help: "Stock reservation recovery attempts by result",
+		},
+		[]string{"result"}, // confirmed | rolled_back | error
+	)
+
+	StockRecoveryLastSuccessTimestamp = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "ticket_stock_recovery_last_success_timestamp_seconds",
+			Help: "Unix timestamp of the last successful stock reservation recovery scan",
+		},
+	)
+
+	StockReconciliationMismatchTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "ticket_stock_reconciliation_mismatch_total",
+			Help: "Redis/MySQL stock reconciliation mismatches by bounded type",
+		},
+		[]string{"type"}, // missing | pending_missing | too_high | too_low | invalid
 	)
 
 	EventSearchSyncRuns = promauto.NewCounterVec(
@@ -130,6 +167,14 @@ var (
 			Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
 		},
 		[]string{"result"}, // success | retryable_error | error
+	)
+
+	TicketOrderAcceptedToPendingPaymentDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "ticket_order_accepted_to_pending_payment_duration_seconds",
+			Help:    "End-to-end duration from queued order acceptance to pending_payment commit",
+			Buckets: []float64{.01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600},
+		},
 	)
 
 	TicketOrderConsumerTransactions = promauto.NewCounterVec(
@@ -318,6 +363,20 @@ var (
 			Help: "Current RabbitMQ consumers attached to the queue",
 		},
 		[]string{"queue"},
+	)
+
+	TicketOutboxPendingRows = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "ticket_order_outbox_pending_rows",
+			Help: "Current ticket order Outbox rows waiting for publish completion",
+		},
+	)
+
+	TicketOutboxOldestAgeSeconds = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "ticket_order_outbox_oldest_age_seconds",
+			Help: "Age in seconds of the oldest pending or publishing ticket order Outbox row",
+		},
 	)
 )
 

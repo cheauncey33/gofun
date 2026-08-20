@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/bwmarrin/snowflake"
 	gocache "github.com/patrickmn/go-cache"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -352,6 +354,202 @@ func TestIntegrationRecoveryFenceWaitsForOrderCommit(t *testing.T) {
 	stock, err := env.rdb.Get(ctx, ticketStockKey(tier.ID)).Int()
 	if err != nil || stock != 1 {
 		t.Fatalf("Redis stock after race=%d err=%v, want 1", stock, err)
+	}
+}
+
+func TestIntegrationFaultAfterRedisReserveIsRolledBack(t *testing.T) {
+	env := newOrderIntegrationEnv(t)
+	ctx := context.Background()
+	tier := env.seedPurchasableTier(t, 2, 2)
+	user := env.newUser(t, fmt.Sprintf("fault-after-redis-%d", tier.ID))
+	idempotencyKey := fmt.Sprintf("fault-after-redis-%d", tier.ID)
+
+	env.svc.faultInjector = TicketFaultInjectorFunc(func(
+		_ context.Context, point TicketFaultPoint, _ int64,
+	) error {
+		if point == FaultAfterRedisReserve {
+			return errors.New("stop after Redis reserve")
+		}
+		return nil
+	})
+	if _, err := env.svc.CreateOrder(ctx, user.ID, idempotencyKey, "fault", CreateTicketOrderInput{
+		TicketTierID: tier.ID, Quantity: 1, PurchaseInfoInput: validPurchaseInfo(),
+	}); err == nil {
+		t.Fatal("expected injected fault after Redis reserve")
+	}
+	env.svc.faultInjector = nil
+
+	reservationKey := stockReservationKey(user.ID, idempotencyKey)
+	if !env.mr.Exists(reservationKey) {
+		t.Fatal("pending Redis reservation should remain after interruption")
+	}
+	if stock, _ := env.rdb.Get(ctx, ticketStockKey(tier.ID)).Int(); stock != 1 {
+		t.Fatalf("stock after interruption=%d, want 1", stock)
+	}
+	if recovered, err := env.svc.RecoverStaleStockReservations(
+		ctx, time.Now().Add(stockReservationRecoveryGrace),
+	); err != nil || recovered != 1 {
+		t.Fatalf("recover interrupted reserve=%d err=%v", recovered, err)
+	}
+	if stock, _ := env.rdb.Get(ctx, ticketStockKey(tier.ID)).Int(); stock != 2 {
+		t.Fatalf("stock after recovery=%d, want 2", stock)
+	}
+}
+
+func TestIntegrationFaultAfterOrderCommitIsConfirmed(t *testing.T) {
+	env := newOrderIntegrationEnv(t)
+	ctx := context.Background()
+	tier := env.seedPurchasableTier(t, 2, 2)
+	user := env.newUser(t, fmt.Sprintf("fault-after-commit-%d", tier.ID))
+	idempotencyKey := fmt.Sprintf("fault-after-commit-%d", tier.ID)
+
+	env.svc.faultInjector = TicketFaultInjectorFunc(func(
+		_ context.Context, point TicketFaultPoint, _ int64,
+	) error {
+		if point == FaultAfterOrderCommit {
+			return errors.New("stop after order commit")
+		}
+		return nil
+	})
+	if _, err := env.svc.CreateOrder(ctx, user.ID, idempotencyKey, "fault", CreateTicketOrderInput{
+		TicketTierID: tier.ID, Quantity: 1, PurchaseInfoInput: validPurchaseInfo(),
+	}); err == nil {
+		t.Fatal("expected injected fault after order commit")
+	}
+	env.svc.faultInjector = nil
+
+	var order models.TicketOrder
+	if err := env.db.Where("user_id = ? AND idempotency_key = ?", user.ID, idempotencyKey).
+		First(&order).Error; err != nil {
+		t.Fatalf("committed order not found: %v", err)
+	}
+	reservationKey := stockReservationKey(user.ID, idempotencyKey)
+	if state := env.mr.HGet(reservationKey, "state"); state != stockReservationStatePending {
+		t.Fatalf("reservation state=%q, want pending", state)
+	}
+	if recovered, err := env.svc.RecoverStaleStockReservations(
+		ctx, time.Now().Add(stockReservationRecoveryGrace),
+	); err != nil || recovered != 1 {
+		t.Fatalf("confirm committed reservation=%d err=%v", recovered, err)
+	}
+	if state := env.mr.HGet(reservationKey, "state"); state != stockReservationStateCommitted {
+		t.Fatalf("reservation state after recovery=%q, want committed", state)
+	}
+	if stock, _ := env.rdb.Get(ctx, ticketStockKey(tier.ID)).Int(); stock != 1 {
+		t.Fatalf("stock after committed recovery=%d, want 1", stock)
+	}
+}
+
+func TestIntegrationConsumerCommitBeforeAckRedeliversIdempotently(t *testing.T) {
+	rabbitURL := strings.TrimSpace(os.Getenv("GOFUN_TEST_RABBITMQ_URL"))
+	if rabbitURL == "" {
+		t.Skip("未设置 GOFUN_TEST_RABBITMQ_URL，跳过 RabbitMQ 故障测试")
+	}
+	env := newOrderIntegrationEnv(t)
+	ctx := context.Background()
+	tier := env.seedPurchasableTier(t, 2, 2)
+	user := env.newUser(t, fmt.Sprintf("ack-loss-%d", tier.ID))
+	receipt, err := env.svc.CreateOrder(ctx, user.ID, fmt.Sprintf("ack-loss-%d", tier.ID), "fault", CreateTicketOrderInput{
+		TicketTierID: tier.ID, Quantity: 1, PurchaseInfoInput: validPurchaseInfo(),
+	})
+	if err != nil {
+		t.Fatalf("create queued order: %v", err)
+	}
+
+	conn, err := amqp.Dial(rabbitURL)
+	if err != nil {
+		t.Fatalf("dial RabbitMQ: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	newChannel := func() (*amqp.Channel, error) { return conn.Channel() }
+	setupChannel, err := newChannel()
+	if err != nil {
+		t.Fatalf("open setup channel: %v", err)
+	}
+	queueName := fmt.Sprintf("gofun.it.ack-loss.%d", receipt.OrderID)
+	retryQueueName := queueName + ".retry"
+	for _, name := range []string{queueName, retryQueueName} {
+		if _, err := setupChannel.QueueDeclare(name, false, false, false, false, nil); err != nil {
+			t.Fatalf("declare queue %s: %v", name, err)
+		}
+	}
+	t.Cleanup(func() {
+		cleanupChannel, openErr := newChannel()
+		if openErr == nil {
+			_, _ = cleanupChannel.QueueDelete(queueName, false, false, false)
+			_, _ = cleanupChannel.QueueDelete(retryQueueName, false, false, false)
+			_ = cleanupChannel.Close()
+		}
+	})
+	message := TicketOrderMessage{
+		OrderID: receipt.OrderID, UserID: user.ID, TicketTierID: tier.ID, Quantity: 1,
+	}
+	body, _ := json.Marshal(message)
+	if err := setupChannel.PublishWithContext(ctx, "", queueName, false, false, amqp.Publishing{
+		ContentType: "application/json", DeliveryMode: amqp.Persistent, Body: body,
+	}); err != nil {
+		t.Fatalf("publish test order: %v", err)
+	}
+	_ = setupChannel.Close()
+
+	consumer := NewTicketOrderConsumer(newChannel, queueName, retryQueueName, "", "", env.svc)
+	attempts := 0
+	secondAttempt := make(chan struct{}, 1)
+	env.svc.faultInjector = TicketFaultInjectorFunc(func(
+		_ context.Context, point TicketFaultPoint, _ int64,
+	) error {
+		if point != FaultAfterConsumerCommit {
+			return nil
+		}
+		attempts++
+		if attempts == 1 {
+			return errors.New("drop before RabbitMQ ack")
+		}
+		select {
+		case secondAttempt <- struct{}{}:
+		default:
+		}
+		return nil
+	})
+	firstCtx, firstCancel := context.WithTimeout(ctx, 5*time.Second)
+	firstErr := consumer.consume(firstCtx, 1, 1, 1)
+	firstCancel()
+	if firstErr == nil || !strings.Contains(firstErr.Error(), "drop before RabbitMQ ack") {
+		t.Fatalf("first consume error=%v, want injected ack loss", firstErr)
+	}
+
+	secondCtx, secondCancel := context.WithCancel(ctx)
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- consumer.consume(secondCtx, 2, 1, 1) }()
+	select {
+	case <-secondAttempt:
+	case <-time.After(5 * time.Second):
+		secondCancel()
+		t.Fatal("RabbitMQ did not redeliver the unacked message")
+	}
+	time.Sleep(200 * time.Millisecond)
+	secondCancel()
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second consume: %v", err)
+	}
+	env.svc.faultInjector = nil
+
+	var order models.TicketOrder
+	if err := env.db.First(&order, receipt.OrderID).Error; err != nil {
+		t.Fatalf("load redelivered order: %v", err)
+	}
+	if order.Status != models.TicketOrderStatusPendingPayment {
+		t.Fatalf("order status=%s, want pending_payment", order.Status)
+	}
+	var tierAfter models.TicketTier
+	if err := env.db.First(&tierAfter, tier.ID).Error; err != nil {
+		t.Fatalf("load tier: %v", err)
+	}
+	if tierAfter.RemainingQuota != 1 {
+		t.Fatalf("MySQL stock after redelivery=%d, want 1", tierAfter.RemainingQuota)
+	}
+	if attempts != 2 {
+		t.Fatalf("consumer attempts=%d, want 2", attempts)
 	}
 }
 

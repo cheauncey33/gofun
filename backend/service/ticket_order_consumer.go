@@ -144,6 +144,12 @@ func (c *TicketOrderConsumer) handle(
 	defer span.End()
 	err := c.service.ProcessOrderTask(consumerCtx, message)
 	if err == nil {
+		if faultErr := c.service.injectTicketFault(
+			consumerCtx, FaultAfterConsumerCommit, message.OrderID,
+		); faultErr != nil {
+			// 不 Ack；consume 返回后 channel 关闭，RabbitMQ 会重新投递该消息。
+			return faultErr
+		}
 		metrics.MQMessagesConsumed.WithLabelValues("success").Inc()
 		return delivery.Ack(false)
 	}
