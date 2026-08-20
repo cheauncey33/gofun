@@ -64,7 +64,9 @@ POST /api/v1/rush-sales/:id/execute
 
 - Redis 是前置库存/并发闸门，MySQL 是订单、支付单、电子票和最终 quota 的事实来源。
 - publisher confirm、消费者查重和 Outbox 恢复用于降低重复投递风险。
-- 补偿任务只修复 Redis 与 MySQL 的 quota 漂移，不把 Redis 当最终事实。
+- Redis 扣库存时同步写 pending 预扣凭证；库存恢复 Worker 扫描遗留凭证，并低频执行 Redis/MySQL quota 对账。
+- 扫描未命中订单后还要竞争 MySQL `order_id` 唯一恢复栅栏，取得 recovery 权限才回滚，避免原事务随后提交造成多放库存。
+- 总量对账只安全地下调 Redis 或补建无在途凭证的缺失 key；偏少只告警，不把 Redis 当最终事实。
 - 支付回调、超时关单和退款跨组件，当前仍是最终一致链路。
 
 ## 压测口径

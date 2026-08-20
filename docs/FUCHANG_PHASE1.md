@@ -64,7 +64,8 @@ paid 取消 -> provider refund -> payment_status=refunded，并归还票额
 
 ### 崩溃恢复
 
-启动时使用“MySQL 剩余票额减去 queued 占用”重建 Redis，并重新投递 queued 订单。
+Redis 预扣会同步写 pending 凭证；统一库存恢复 Worker 扫描遗留凭证，并通过 MySQL `order_id` 唯一栅栏决定确认或回滚，避免与未提交订单事务竞态。
+启动时先恢复遗留凭证，再使用“MySQL 剩余票额减去 queued 占用”重建 Redis；运行期低频执行同口径总量对账。
 消费者只处理 queued 状态，所以重复投递不会重复扣减 MySQL。
 
 ## 5. API

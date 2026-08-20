@@ -21,8 +21,8 @@
    ▼ ② Redis Lua 原子预扣
    │  一次性校验并扣减：活动票额 + 票档库存 + 个人限购（分桶选桶）
    │  失败 → 返回售罄/限购，不写库、不发消息
-   ▼ ③ MySQL 事务：写订单(queued) + Outbox 行
-   │  两者同一主库事务提交，HTTP 不等待 Publisher/MQ
+   ▼ ③ MySQL 事务：写恢复栅栏 + 订单(queued) + Outbox 行
+   │  三者同一主库事务提交，HTTP 不等待 Publisher/MQ
    ▼ ④ 返回「排队中」给用户
    │
    ▼ ⑤ Outbox publisher（多 worker）
@@ -32,7 +32,7 @@
    │  主库同一事务：订单 FOR UPDATE → 分桶扣减 → queued → pending_payment
    ▼ ⑧ 投递支付超时延时消息（失败由扫描器兜底）
    ▼ ⑨ 支付 / 超时关单 → 出票 / 释放库存
-   ▼ ⑩ 补偿对账：周期对齐 Redis 与 MySQL 票额（只下调 / 补缺）
+   ▼ ⑩ 库存恢复 Worker：恢复 pending 预扣，并周期对齐 Redis 与 MySQL 票额
 ```
 
 ## 每一步的失败处理
@@ -41,14 +41,14 @@
 |------|----------|------|-----------|
 | ① 幂等校验 | 重复提交 / 网络重试 | Redis 缓存 + DB `user_id+idempotency_key` 唯一约束，命中直接返回原凭据 | 同一幂等键只建一单 |
 | ② Redis 预扣 | 库存不足 / 超限 | Lua 原子返回失败码，不落库 | 入口层面挡住超卖 |
-| ③ 写订单+Outbox | 事务失败 | 回滚 Redis 预扣；若是并发同键，改查已有订单返回 | 预扣与凭据一致 |
+| ③ 写栅栏+订单+Outbox | 事务失败或提交结果未知 | Redis pending 凭证进入恢复；恢复任务和订单事务竞争同一个 `order_id` 唯一栅栏，取得 `recovery` 后才允许回滚 | 不会因查不到未提交订单而提前归还库存 |
 | ⑤ Outbox 投递 | broker confirm 失败/超时 | 行状态回 `pending` 等下轮；超过最大次数标 `failed` 并触发 `FinalizeFailedMessage` | 不丢、可观测 |
 | ⑥ MQ 存储 | broker 重启 | durable queue + persistent message | 消息不丢 |
 | ⑦ 消费处理 | 可重试错误（如行锁超时） | 重发 retry 队列，`x-retry-count` 递增，超上限进 **DLQ** | 至少一次，最终人工/自动介入 |
 | ⑦ 消费处理 | 不可重试错误（凭据不存在/消息不一致） | `FinalizeFailedMessage` + ack，不再重试 | 快速失败，不阻塞队列 |
 | ⑦ 重复消费 | MQ 重投 / retry 重投 | 依赖订单行 `FOR UPDATE` 和非 queued 状态判断 | 重复消费不重复扣库存 |
 | ⑧ 超时消息 | 投递失败 | DB 扫描器周期兜底关单 | 超时不泄漏库存 |
-| ⑩ 补偿对账 | Redis 与 MySQL 漂移 | 周期对账：Redis > MySQL 时下调、缺失时补建 | 收敛到 MySQL 事实 |
+| ⑩ 库存恢复与对账 | Redis pending 遗留或 Redis/MySQL 漂移 | 同一 Worker 高频恢复单笔凭证、低频做总量对账；偏多用 Lua CAS 下调，偏少只告警，不猜测性加库存 | 以单笔凭证精确恢复，以总量对账兜底 |
 
 ## 幂等的三层防线
 
@@ -64,6 +64,15 @@
 ## 为什么用 Outbox 而不是「下单时直接发 MQ」
 
 直接发 MQ 存在经典的双写不一致：**DB 提交成功但 MQ 发送失败**（或反之），订单与消息就会漂移。Outbox 让「订单 + 待投递消息」落在**同一个本地事务**里，再由独立 publisher 异步、可重试地把消息送达 broker——把分布式一致性问题降级为「本地事务 + 至少一次投递 + 幂等消费」，这是工程上更可控的组合。
+
+## 库存恢复 Worker
+
+- Redis Lua 在扣减库存时同步写入 pending 预扣凭证；HTTP 成功后确认凭证，明确失败后回滚。
+- Worker 每 30 秒扫描超过宽限期的 pending 凭证，每 5 分钟在同一循环内执行一次总量对账。
+- 扫描器一次查不到订单并不等于可以回滚。它必须尝试写入 `ticket_stock_recovery_fence(owner=recovery)`；订单事务会写入同一个 `order_id` 的 `owner=order`。InnoDB 唯一键冲突会等待先到事务结束，因此两者只有一方能取得处理权。
+- 全量对账使用 `MySQL remaining_quota - queued 占用` 计算安全可用量。Redis 偏多时通过“值未变化才下调”的 Lua 修复；key 缺失且存在 pending 时不重建；Redis 偏少只记录异常，由单笔凭证恢复，不直接增加。
+
+面试表述可以收敛为：**用 Worker 定时扫描 Redis 预扣凭证并做库存对账，通过 MySQL 唯一栅栏解决事务提交与补偿回滚竞态，以更简单、可控的方式实现最终一致性。**
 
 ## 已知边界（诚实声明）
 
