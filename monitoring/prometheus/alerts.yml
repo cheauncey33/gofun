@@ -1,0 +1,74 @@
+groups:
+  - name: gofun-ticketing-consistency
+    rules:
+      - alert: GofunStockReservationStuck
+        expr: ticket_stock_reservation_oldest_age_seconds > 180
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "库存预扣长时间未恢复"
+          description: "最老 pending 预扣已超过 3 分钟，当前值 {{ $value | humanizeDuration }}。"
+
+      - alert: GofunStockRecoveryError
+        expr: increase(ticket_stock_reservation_recovery_total{result="error"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "库存恢复 Worker 出现错误"
+          description: "过去 5 分钟库存预扣恢复出现 {{ $value }} 次错误。"
+
+      - alert: GofunStockRecoveryWorkerStalled
+        expr: time() - ticket_stock_recovery_last_success_timestamp_seconds > 90
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "库存恢复 Worker 已停止成功扫描"
+          description: "库存恢复 Worker 超过 90 秒没有一次成功扫描。"
+
+      - alert: GofunStockOversellRisk
+        expr: increase(ticket_stock_reconciliation_mismatch_total{type=~"too_high|invalid"}[10m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis 与 MySQL 库存出现高风险偏差"
+          description: "过去 10 分钟发现 Redis 库存偏多或库存值非法。"
+
+      - alert: GofunStockReconciliationMismatch
+        expr: increase(ticket_stock_reconciliation_mismatch_total{type=~"missing|pending_missing|too_low"}[10m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis 与 MySQL 库存需要关注"
+          description: "过去 10 分钟发现 Redis key 缺失、库存偏少或缺失 key 仍有在途预扣。"
+
+      - alert: GofunTicketOutboxStuck
+        expr: ticket_order_outbox_oldest_age_seconds > 30
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "票务 Outbox 长时间未完成投递"
+          description: "最老 pending/publishing Outbox 已等待 {{ $value | humanizeDuration }}。"
+
+      - alert: GofunRabbitMQNoConsumer
+        expr: sum(mq_queue_ready_messages{queue=~"fuchang\\.it\\.order\\.(queue|retry)"}) > 0 and sum(mq_queue_consumers{queue=~"fuchang\\.it\\.order\\.(queue|retry)"}) == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "RabbitMQ 有积压但没有消费者"
+          description: "票务工作队列存在 ready 消息，但消费者数量为 0。"
+
+      - alert: GofunRabbitMQBacklogNotDraining
+        expr: sum(mq_queue_ready_messages{queue=~"fuchang\\.it\\.order\\.(queue|retry)"}) > 0 and deriv((sum(mq_queue_ready_messages{queue=~"fuchang\\.it\\.order\\.(queue|retry)"}))[5m:15s]) >= 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RabbitMQ 积压持续未下降"
+          description: "票务工作队列连续观察窗口内没有排空趋势。"
