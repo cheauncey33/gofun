@@ -18,6 +18,11 @@ MySQL、Redis 和 RabbitMQ；不要拿开发数据做写场景。
 容量承诺。压测报告必须同时记录成功率、p99、队列追平时间、MySQL 锁等待、
 Redis 和 RabbitMQ 资源。
 
+核心结果统一按 `docs/PERFORMANCE_CORE.md` 执行：固定同一场景跑 3 轮，使用
+Prometheus Histogram 的本轮增量计算入口、受理到可支付、Consumer 事务 p99，
+并用 `render_core_performance_report.mjs` 生成同一份报告。其他分析脚本只用于定位
+瓶颈，不进入简历或面试中的核心性能结论。
+
 ## 测试前准备
 
 修改 backend/config/config.yaml 后重启后端。容量测试可以暂时放宽限流：
