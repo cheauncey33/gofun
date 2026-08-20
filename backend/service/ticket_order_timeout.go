@@ -277,8 +277,9 @@ func classifyPaymentTimeoutError(err error) paymentTimeoutErrorClass {
 
 // ProcessPaymentTimeout 仅取消仍为 pending_payment 且已到期的订单（与支付竞态安全）。
 func (s *TicketOrderService) ProcessPaymentTimeout(ctx context.Context, orderID, userID int64) error {
+	db := s.asyncDB()
 	var order models.TicketOrder
-	err := s.db.WithContext(ctx).First(&order, orderID).Error
+	err := db.WithContext(ctx).First(&order, orderID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil
 	}
@@ -295,7 +296,7 @@ func (s *TicketOrderService) ProcessPaymentTimeout(ctx context.Context, orderID,
 		// 时钟回拨或 TTL 略早于 expires_at：交给扫描器兜底，本消息直接丢弃。
 		return nil
 	}
-	err = s.cancelPendingPaymentOnly(ctx, userID, orderID, "支付超时自动取消")
+	err = s.cancelPendingPaymentOnlyDB(ctx, db, userID, orderID, "支付超时自动取消")
 	if errors.Is(err, ErrTicketOrderState) || errors.Is(err, ErrTicketOrderNotFound) {
 		return nil
 	}

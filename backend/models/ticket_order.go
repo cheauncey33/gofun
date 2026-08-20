@@ -190,6 +190,25 @@ func (TicketOrderOutbox) TableName() string {
 	return "ticket_order_outbox"
 }
 
+type TicketStockRecoveryFenceOwner string
+
+const (
+	TicketStockRecoveryFenceOrder    TicketStockRecoveryFenceOwner = "order"
+	TicketStockRecoveryFenceRecovery TicketStockRecoveryFenceOwner = "recovery"
+)
+
+// TicketStockRecoveryFence 让订单事务与库存恢复任务竞争同一个 order_id。
+// order 表示订单和 Outbox 已在同一事务提交；recovery 表示恢复任务已取得 Redis 回滚权。
+type TicketStockRecoveryFence struct {
+	OrderID    int64                         `gorm:"primaryKey" json:"order_id,string"`
+	Owner      TicketStockRecoveryFenceOwner `gorm:"size:16;not null" json:"owner"`
+	CreateTime time.Time                     `gorm:"not null;autoCreateTime" json:"create_time"`
+}
+
+func (TicketStockRecoveryFence) TableName() string {
+	return "ticket_stock_recovery_fence"
+}
+
 type RushSaleStatus string
 
 const (

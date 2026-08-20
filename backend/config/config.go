@@ -43,7 +43,11 @@ type MySQLConfig struct {
 	DSN             string `mapstructure:"dsn"`
 	MaxIdleConns    int    `mapstructure:"max_idle_conns"`
 	MaxOpenConns    int    `mapstructure:"max_open_conns"`
-	ConnMaxLifetime int    `mapstructure:"conn_max_lifetime"`
+	// WorkerMaxOpenConns > 0 时为 Consumer/Outbox/Timeout 等后台路径单独开池（bulkhead）。
+	// 0 表示与 HTTP 共用 MaxOpenConns，保持历史行为。
+	WorkerMaxOpenConns int `mapstructure:"worker_max_open_conns"`
+	WorkerMaxIdleConns int `mapstructure:"worker_max_idle_conns"`
+	ConnMaxLifetime     int `mapstructure:"conn_max_lifetime"`
 }
 
 type RedisConfig struct {
@@ -190,6 +194,8 @@ func Load(configPath string) (*Config, error) {
 		"mysql.dsn",
 		"mysql.max_idle_conns",
 		"mysql.max_open_conns",
+		"mysql.worker_max_open_conns",
+		"mysql.worker_max_idle_conns",
 		"mysql.conn_max_lifetime",
 		"redis.addr",
 		"redis.password",
@@ -307,6 +313,8 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("mysql.max_idle_conns", 10)
 	v.SetDefault("mysql.max_open_conns", 100)
+	v.SetDefault("mysql.worker_max_open_conns", 0)
+	v.SetDefault("mysql.worker_max_idle_conns", 10)
 	v.SetDefault("mysql.conn_max_lifetime", 300)
 
 	v.SetDefault("redis.addr", "localhost:6379")

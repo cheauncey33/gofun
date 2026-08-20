@@ -53,6 +53,19 @@ func TestRushStockLocalCacheHitAndInvalidate(t *testing.T) {
 	}
 }
 
+func TestInvalidateRushCampaignLocal(t *testing.T) {
+	cache := gocache.New(time.Minute, time.Minute)
+	cache.Set(rushCampaignLocalKey(42), models.RushSaleCampaign{
+		Base: models.Base{ID: 42},
+	}, time.Minute)
+	svc := &RushSaleService{localCache: cache}
+	svc.invalidateRushCampaignLocal(42)
+	if _, found := cache.Get(rushCampaignLocalKey(42)); found {
+		t.Fatal("expected campaign local cache entry deleted")
+	}
+	svc.invalidateRushCampaignLocal(99) // must not panic on missing key
+}
+
 func TestRushStockLocalTTLIsShort(t *testing.T) {
 	if rushStockLocalTTL <= 0 || rushStockLocalTTL > time.Second {
 		t.Fatalf("rush local TTL should stay sub-second for hotkey reads, got %s", rushStockLocalTTL)

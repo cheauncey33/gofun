@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"strconv"
 	"time"
@@ -10,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const runtimeMetricsInterval = 5 * time.Second
+const runtimeMetricsInterval = 2 * time.Second
 
 type mysqlStatusRow struct {
 	VariableName string `gorm:"column:Variable_name"`
@@ -18,40 +19,72 @@ type mysqlStatusRow struct {
 }
 
 // StartRuntimeCollector periodically samples infrastructure state which is not
-// observable from HTTP middleware: InnoDB row lock waits and RabbitMQ backlog.
+// observable from HTTP middleware: InnoDB row lock waits, DB pools, threads and
+// RabbitMQ backlog.
+//
+// httpDB is the request-path pool. workerDB is the Consumer/Outbox/Timeout pool;
+// when isolation is disabled, pass the same pointer (or nil to skip worker labels).
 func StartRuntimeCollector(
 	ctx context.Context,
-	db *gorm.DB,
+	httpDB *gorm.DB,
+	workerDB *gorm.DB,
 	newMQChannel func() (*amqp.Channel, error),
 	queueNames ...string,
 ) {
 	ticker := time.NewTicker(runtimeMetricsInterval)
 	defer ticker.Stop()
 
-	collectRuntimeMetrics(ctx, db, newMQChannel, queueNames...)
+	httpSQL := sqlDBFromGorm(httpDB)
+	workerSQL := sqlDBFromGorm(workerDB)
+	statusDB := httpDB
+	if statusDB == nil {
+		statusDB = workerDB
+	}
+
+	collectRuntimeMetrics(ctx, statusDB, httpSQL, workerSQL, newMQChannel, queueNames...)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			collectRuntimeMetrics(ctx, db, newMQChannel, queueNames...)
+			collectRuntimeMetrics(ctx, statusDB, httpSQL, workerSQL, newMQChannel, queueNames...)
 		}
 	}
 }
 
+func sqlDBFromGorm(db *gorm.DB) *sql.DB {
+	if db == nil {
+		return nil
+	}
+	raw, err := db.DB()
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
 func collectRuntimeMetrics(
 	ctx context.Context,
-	db *gorm.DB,
+	statusDB *gorm.DB,
+	httpSQL *sql.DB,
+	workerSQL *sql.DB,
 	newMQChannel func() (*amqp.Channel, error),
 	queueNames ...string,
 ) {
-	var status mysqlStatusRow
-	if err := db.WithContext(ctx).
-		Raw("SHOW GLOBAL STATUS LIKE 'Innodb_row_lock_waits'").
-		Scan(&status).Error; err != nil {
-		log.Printf("collect Innodb_row_lock_waits: %v", err)
-	} else if value, err := strconv.ParseFloat(status.Value, 64); err == nil {
-		MySQLInnoDBRowLockWaits.Set(value)
+	if httpSQL != nil {
+		setSQLPoolGauges("http", httpSQL, true)
+	}
+	if workerSQL != nil && workerSQL != httpSQL {
+		setSQLPoolGauges("worker", workerSQL, false)
+	} else if httpSQL != nil {
+		// Shared pool: expose the same stats under worker for simpler dashboards.
+		setSQLPoolGauges("worker", httpSQL, false)
+	}
+
+	if statusDB != nil {
+		setMySQLStatusGauge(ctx, statusDB, "Innodb_row_lock_waits", MySQLInnoDBRowLockWaits)
+		setMySQLStatusGauge(ctx, statusDB, "Threads_running", MySQLThreadsRunning)
+		setMySQLStatusGauge(ctx, statusDB, "Threads_connected", MySQLThreadsConnected)
 	}
 
 	if newMQChannel == nil || len(queueNames) == 0 {
@@ -74,5 +107,37 @@ func collectRuntimeMetrics(
 		}
 		MQQueueReadyMessages.WithLabelValues(queueName).Set(float64(queue.Messages))
 		MQQueueConsumers.WithLabelValues(queueName).Set(float64(queue.Consumers))
+	}
+}
+
+func setSQLPoolGauges(pool string, sqlDB *sql.DB, mirrorUnlabeled bool) {
+	stats := sqlDB.Stats()
+	GoSQLDBOpenConnectionsByPool.WithLabelValues(pool).Set(float64(stats.OpenConnections))
+	GoSQLDBInUseByPool.WithLabelValues(pool).Set(float64(stats.InUse))
+	GoSQLDBIdleByPool.WithLabelValues(pool).Set(float64(stats.Idle))
+	GoSQLDBWaitCountByPool.WithLabelValues(pool).Set(float64(stats.WaitCount))
+	GoSQLDBWaitDurationSecondsByPool.WithLabelValues(pool).Set(stats.WaitDuration.Seconds())
+	GoSQLDBMaxOpenConnectionsByPool.WithLabelValues(pool).Set(float64(stats.MaxOpenConnections))
+	if mirrorUnlabeled {
+		GoSQLDBOpenConnections.Set(float64(stats.OpenConnections))
+		GoSQLDBInUse.Set(float64(stats.InUse))
+		GoSQLDBIdle.Set(float64(stats.Idle))
+		GoSQLDBWaitCount.Set(float64(stats.WaitCount))
+		GoSQLDBWaitDurationSeconds.Set(stats.WaitDuration.Seconds())
+		GoSQLDBMaxOpenConnections.Set(float64(stats.MaxOpenConnections))
+	}
+}
+
+func setMySQLStatusGauge(ctx context.Context, db *gorm.DB, name string, gauge interface{ Set(float64) }) {
+	var status mysqlStatusRow
+	// SHOW ... LIKE does not reliably bind placeholders across drivers; name is a fixed literal.
+	if err := db.WithContext(ctx).
+		Raw("SHOW GLOBAL STATUS LIKE '" + name + "'").
+		Scan(&status).Error; err != nil {
+		log.Printf("collect %s: %v", name, err)
+		return
+	}
+	if value, err := strconv.ParseFloat(status.Value, 64); err == nil {
+		gauge.Set(value)
 	}
 }

@@ -55,13 +55,31 @@ func (s *TicketOrderService) lookupIdempotentOrder(
 	redisKey := ticketIdempotencyRedisKey(userID, idempotencyKey)
 	if s.rdb != nil {
 		if raw, err := s.rdb.Get(ctx, redisKey).Result(); err == nil && raw != "" {
-			orderID, status, ok := parseIdempotencyCache(raw)
+			orderID, cachedStatus, ok := parseIdempotencyCache(raw)
 			if ok {
-				return &TicketOrderReceipt{
-					OrderID: orderID,
-					OrderNo: "FC" + strconv.FormatInt(orderID, 10),
-					Status:  status,
-				}, nil
+				// 缓存只存下单瞬间的快照状态，可能滞后于真实状态（如订单已进入待支付/已支付），
+				// 回源 MySQL 刷新后再返回，避免客户端重试拿到过期的 queued。
+				var existing models.TicketOrder
+				queryErr := s.db.WithContext(ctx).
+					Select("id", "order_no", "status").
+					Where("id = ? AND user_id = ?", orderID, userID).
+					First(&existing).Error
+				if queryErr == nil {
+					receipt := ticketOrderReceipt(&existing)
+					s.rememberIdempotentOrder(ctx, userID, idempotencyKey, receipt)
+					return receipt, nil
+				}
+				if errors.Is(queryErr, gorm.ErrRecordNotFound) {
+					// 缓存与库不一致（订单行不存在）：清除缓存，走正常下单流程。
+					_ = s.rdb.Del(ctx, redisKey).Err()
+				} else {
+					// MySQL 故障时降级缓存快照（状态可能滞后），不阻断幂等识别。
+					return &TicketOrderReceipt{
+						OrderID: orderID,
+						OrderNo: "FC" + strconv.FormatInt(orderID, 10),
+						Status:  cachedStatus,
+					}, nil
+				}
 			}
 		} else if err != nil && !errors.Is(err, redis.Nil) {
 			// Redis 故障时降级 MySQL，不阻断下单。
@@ -157,6 +175,14 @@ func (s *TicketOrderService) createOrderAndOutbox(
 ) error {
 	for attempt := 1; attempt <= ticketOrderTxMaxAttempts; attempt++ {
 		err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			// 恢复任务也会尝试插入同一个 order_id。唯一键冲突会等待对方事务结束，
+			// 从而保证“订单提交”和“Redis 回滚”只能有一方取得执行权。
+			if err := tx.Create(&models.TicketStockRecoveryFence{
+				OrderID: order.ID,
+				Owner:   models.TicketStockRecoveryFenceOrder,
+			}).Error; err != nil {
+				return err
+			}
 			if err := tx.Create(order).Error; err != nil {
 				return err
 			}
@@ -191,4 +217,12 @@ func isRetryableMySQLTransactionError(err error) bool {
 		return false
 	}
 	return mysqlErr.Number == 1213 || mysqlErr.Number == 1205
+}
+
+func isDuplicateStorageKeyError(err error) bool {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	var mysqlErr *mysqlDriver.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
 }

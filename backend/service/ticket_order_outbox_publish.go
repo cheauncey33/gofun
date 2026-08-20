@@ -125,7 +125,7 @@ func (s *TicketOrderService) newOutboxPublishChannel() (*amqp.Channel, error) {
 }
 
 func (s *TicketOrderService) resetStuckOutboxPublishing(ctx context.Context) error {
-	return s.db.WithContext(ctx).Model(&models.TicketOrderOutbox{}).
+	return s.asyncDB().WithContext(ctx).Model(&models.TicketOrderOutbox{}).
 		Where("status = ?", models.TicketOrderOutboxPublishing).
 		Update("status", models.TicketOrderOutboxPending).Error
 }
@@ -135,7 +135,7 @@ func (s *TicketOrderService) claimOutboxBatch(
 	batch int,
 ) ([]models.TicketOrderOutbox, error) {
 	var rows []models.TicketOrderOutbox
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.asyncDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 			Where("status = ?", models.TicketOrderOutboxPending).
 			Order("create_time ASC").
@@ -250,7 +250,7 @@ func (s *TicketOrderService) releaseClaimedOutboxRows(
 	if len(ids) == 0 {
 		return nil
 	}
-	return s.db.WithContext(ctx).Model(&models.TicketOrderOutbox{}).
+	return s.asyncDB().WithContext(ctx).Model(&models.TicketOrderOutbox{}).
 		Where("id IN ? AND status = ?", ids, models.TicketOrderOutboxPublishing).
 		Update("status", models.TicketOrderOutboxPending).Error
 }
@@ -263,7 +263,7 @@ func (s *TicketOrderService) markOutboxPublishResult(
 	attempts := row.Attempts + 1
 	if publishErr == nil {
 		now := time.Now()
-		return s.db.WithContext(ctx).Model(&models.TicketOrderOutbox{}).
+		return s.asyncDB().WithContext(ctx).Model(&models.TicketOrderOutbox{}).
 			Where("id = ? AND status = ?", row.ID, models.TicketOrderOutboxPublishing).
 			Updates(map[string]interface{}{
 				"status":       models.TicketOrderOutboxPublished,
@@ -284,7 +284,7 @@ func (s *TicketOrderService) markOutboxPublishResult(
 	if attempts >= ticketOutboxMaxAttempts {
 		updates["status"] = models.TicketOrderOutboxFailed
 	}
-	if err := s.db.WithContext(ctx).Model(&models.TicketOrderOutbox{}).
+	if err := s.asyncDB().WithContext(ctx).Model(&models.TicketOrderOutbox{}).
 		Where("id = ? AND status = ?", row.ID, models.TicketOrderOutboxPublishing).
 		Updates(updates).Error; err != nil {
 		return err

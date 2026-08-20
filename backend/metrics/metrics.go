@@ -148,7 +148,7 @@ var (
 			Help:    "Duration of individual stages inside the ticket order consumer transaction",
 			Buckets: []float64{.0005, .001, .0025, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5},
 		},
-		[]string{"stage"}, // order_lock | order_items_read | rush_bucket_update | tier_bucket_update | order_state_update
+		[]string{"stage"}, // order_lock | order_items_read | rush_bucket_update | tier_bucket_update | tier_bucket_remaining_read | tier_sold_out_refresh | order_state_update | commit
 	)
 
 	TicketOrderConsumerInventoryBucketDuration = promauto.NewHistogramVec(
@@ -197,6 +197,111 @@ var (
 			Name: "mysql_innodb_row_lock_waits_total",
 			Help: "Current MySQL Innodb_row_lock_waits global status value",
 		},
+	)
+
+	MySQLThreadsRunning = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "mysql_threads_running",
+			Help: "MySQL Threads_running global status",
+		},
+	)
+
+	MySQLThreadsConnected = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "mysql_threads_connected",
+			Help: "MySQL Threads_connected global status",
+		},
+	)
+
+	// Unlabeled gauges mirror the HTTP pool for backward-compatible dashboards.
+	GoSQLDBOpenConnections = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "go_sql_db_open_connections",
+			Help: "database/sql OpenConnections from DB.Stats() (HTTP pool)",
+		},
+	)
+
+	GoSQLDBInUse = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "go_sql_db_in_use",
+			Help: "database/sql InUse from DB.Stats() (HTTP pool)",
+		},
+	)
+
+	GoSQLDBIdle = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "go_sql_db_idle",
+			Help: "database/sql Idle from DB.Stats() (HTTP pool)",
+		},
+	)
+
+	GoSQLDBWaitCount = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "go_sql_db_wait_count",
+			Help: "database/sql cumulative WaitCount from DB.Stats() (HTTP pool)",
+		},
+	)
+
+	GoSQLDBWaitDurationSeconds = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "go_sql_db_wait_duration_seconds",
+			Help: "database/sql cumulative WaitDuration from DB.Stats() (HTTP pool)",
+		},
+	)
+
+	GoSQLDBMaxOpenConnections = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "go_sql_db_max_open_connections",
+			Help: "database/sql MaxOpenConnections from DB.Stats() (HTTP pool)",
+		},
+	)
+
+	GoSQLDBOpenConnectionsByPool = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "go_sql_db_pool_open_connections",
+			Help: "database/sql OpenConnections by pool (http|worker)",
+		},
+		[]string{"pool"},
+	)
+
+	GoSQLDBInUseByPool = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "go_sql_db_pool_in_use",
+			Help: "database/sql InUse by pool (http|worker)",
+		},
+		[]string{"pool"},
+	)
+
+	GoSQLDBIdleByPool = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "go_sql_db_pool_idle",
+			Help: "database/sql Idle by pool (http|worker)",
+		},
+		[]string{"pool"},
+	)
+
+	GoSQLDBWaitCountByPool = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "go_sql_db_pool_wait_count",
+			Help: "database/sql cumulative WaitCount by pool (http|worker)",
+		},
+		[]string{"pool"},
+	)
+
+	GoSQLDBWaitDurationSecondsByPool = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "go_sql_db_pool_wait_duration_seconds",
+			Help: "database/sql cumulative WaitDuration by pool (http|worker)",
+		},
+		[]string{"pool"},
+	)
+
+	GoSQLDBMaxOpenConnectionsByPool = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "go_sql_db_pool_max_open_connections",
+			Help: "database/sql MaxOpenConnections by pool (http|worker)",
+		},
+		[]string{"pool"},
 	)
 
 	MQQueueReadyMessages = promauto.NewGaugeVec(

@@ -7,6 +7,10 @@ mysql:
   dsn: "gofun:gofun123456@tcp(127.0.0.1:3306)/gofun?charset=utf8mb4&parseTime=True&loc=Local"
   max_idle_conns: 10
   max_open_conns: 100
+  # >0 时为 Consumer/Outbox/Timeout 单独连接池（bulkhead）；总连接 ≈ max_open + worker_max_open。
+  # 压测示例：max_open_conns=70, worker_max_open_conns=30。
+  worker_max_open_conns: 0
+  worker_max_idle_conns: 10
   conn_max_lifetime: 300
 
 redis:

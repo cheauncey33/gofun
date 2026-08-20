@@ -16,15 +16,34 @@ import (
 	"gorm.io/gorm"
 )
 
-// TicketCompensationService 对齐 Gofun 票档 Redis 库存与 MySQL 可用量，只下调或补缺。
+const stockFullReconciliationInterval = 5 * time.Minute
+
+var lowerRedisStockIfUnchangedScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[2])
+return 1
+`)
+
+// TicketCompensationService 是统一的库存恢复 Worker：高频处理单笔 Redis 预扣，
+// 低频按 MySQL 可用量做全量库存对账。
 type TicketCompensationService struct {
 	db        *gorm.DB
 	rdb       *redis.Client
+	order     *TicketOrderService
 	inventory InventoryBucketSettings
 }
 
-func NewTicketCompensationService(c *container.Container) *TicketCompensationService {
-	return &TicketCompensationService{db: c.DB, rdb: c.RDB}
+func NewTicketCompensationService(
+	c *container.Container,
+	order *TicketOrderService,
+) *TicketCompensationService {
+	db := c.WorkerDB
+	if db == nil {
+		db = c.DB
+	}
+	return &TicketCompensationService{db: db, rdb: c.RDB, order: order}
 }
 
 func (s *TicketCompensationService) ConfigureInventory(cfg config.InventoryConfig) {
@@ -33,13 +52,82 @@ func (s *TicketCompensationService) ConfigureInventory(cfg config.InventoryConfi
 
 // RunCompensation 对 on_sale / sold_out 票档做一次对账，返回修复的异常数。
 func (s *TicketCompensationService) RunCompensation(ctx context.Context) (int, error) {
-	if s.inventory.Enabled {
-		return s.runBucketCompensation(ctx)
+	pendingKeys := make(map[string]struct{})
+	if s.order != nil {
+		var err error
+		pendingKeys, err = s.order.pendingStockReservationKeys(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("读取在途库存预扣: %w", err)
+		}
 	}
-	return s.runStandardCompensation(ctx)
+	if s.inventory.Enabled {
+		return s.runBucketCompensation(ctx, pendingKeys)
+	}
+	return s.runStandardCompensation(ctx, pendingKeys)
 }
 
-func (s *TicketCompensationService) runStandardCompensation(ctx context.Context) (int, error) {
+func (s *TicketCompensationService) reconcileRedisStock(
+	ctx context.Context,
+	key string,
+	expected int,
+	description string,
+	rebuildMissing bool,
+	pendingKeys map[string]struct{},
+) (bool, error) {
+	_, hasPendingReservation := pendingKeys[key]
+	redisStockStr, err := s.rdb.Get(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		if !rebuildMissing {
+			return false, nil
+		}
+		if hasPendingReservation {
+			log.Printf("%s Redis 库存缺失但仍有在途预扣，暂不重建", description)
+			return true, nil
+		}
+		created, setErr := s.rdb.SetNX(ctx, key, expected, 0).Result()
+		if setErr != nil {
+			return false, setErr
+		}
+		if created {
+			log.Printf("%s Redis 库存缺失，已按安全可用量%d重建", description, expected)
+			return true, nil
+		}
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	redisStock, err := strconv.ParseInt(redisStockStr, 10, 64)
+	if err != nil {
+		log.Printf("%s Redis 库存值非法: %q", description, redisStockStr)
+		return true, nil
+	}
+	if redisStock > int64(expected) {
+		changed, err := lowerRedisStockIfUnchangedScript.Run(
+			ctx, s.rdb, []string{key}, redisStockStr, expected,
+		).Int64()
+		if err != nil {
+			return false, err
+		}
+		if changed == 1 {
+			log.Printf("%s Redis 库存偏多，已从%d下调为%d", description, redisStock, expected)
+		} else {
+			log.Printf("%s 对账期间库存发生并发变化，本轮不覆盖", description)
+		}
+		return true, nil
+	}
+	if redisStock < int64(expected) && !hasPendingReservation {
+		// 偏少可能来自历史泄漏；没有单笔凭证能够解释时只告警，不猜测性加库存。
+		log.Printf("%s Redis 库存偏少:安全可用量=%d,Redis=%d，本轮不自动上调", description, expected, redisStock)
+		return true, nil
+	}
+	return false, nil
+}
+
+func (s *TicketCompensationService) runStandardCompensation(
+	ctx context.Context,
+	pendingKeys map[string]struct{},
+) (int, error) {
 	var tiers []models.TicketTier
 	if err := s.db.WithContext(ctx).
 		Where("status IN ?", []models.TicketTierStatus{
@@ -73,32 +161,14 @@ func (s *TicketCompensationService) runStandardCompensation(ctx context.Context)
 			available = 0
 		}
 		key := ticketStockKey(tier.ID)
-		redisStockStr, err := s.rdb.Get(ctx, key).Result()
-		if errors.Is(err, redis.Nil) {
-			if tier.Status == models.TicketTierStatusOnSale {
-				if setErr := s.rdb.Set(ctx, key, available, 0).Err(); setErr != nil {
-					return anomalies, setErr
-				}
-				log.Printf("票额缓存缺失:票档[%d], 已按可用量%d重建", tier.ID, available)
-				anomalies++
-			}
-			continue
-		}
+		anomaly, err := s.reconcileRedisStock(
+			ctx, key, available, fmt.Sprintf("票档[%d]", tier.ID),
+			tier.Status == models.TicketTierStatusOnSale, pendingKeys,
+		)
 		if err != nil {
 			return anomalies, err
 		}
-		redisStock, err := strconv.ParseInt(redisStockStr, 10, 64)
-		if err != nil {
-			continue
-		}
-		if redisStock > int64(available) {
-			if setErr := s.rdb.Set(ctx, key, available, 0).Err(); setErr != nil {
-				return anomalies, setErr
-			}
-			log.Printf(
-				"票额超卖风险:票档[%d],可用:%d,Redis:%d",
-				tier.ID, available, redisStock,
-			)
+		if anomaly {
 			anomalies++
 		}
 	}
@@ -111,7 +181,10 @@ func (s *TicketCompensationService) runStandardCompensation(ctx context.Context)
 	return anomalies, nil
 }
 
-func (s *TicketCompensationService) runBucketCompensation(ctx context.Context) (int, error) {
+func (s *TicketCompensationService) runBucketCompensation(
+	ctx context.Context,
+	pendingKeys map[string]struct{},
+) (int, error) {
 	var buckets []models.TicketTierBucket
 	if err := s.db.WithContext(ctx).Find(&buckets).Error; err != nil {
 		return 0, err
@@ -139,30 +212,15 @@ func (s *TicketCompensationService) runBucketCompensation(ctx context.Context) (
 		}
 		parentTierSum[bucket.TierID] += bucket.RemainingQuota
 		key := TicketStockBucketKey(bucket.TierID, bucket.BucketNo)
-		redisStockStr, err := s.rdb.Get(ctx, key).Result()
-		if errors.Is(err, redis.Nil) {
-			if setErr := s.rdb.Set(ctx, key, available, 0).Err(); setErr != nil {
-				return anomalies, setErr
-			}
-			log.Printf("分桶票额缓存缺失:票档[%d]桶[%d], 已按可用量%d重建", bucket.TierID, bucket.BucketNo, available)
-			anomalies++
-			continue
-		}
+		anomaly, err := s.reconcileRedisStock(
+			ctx, key, available,
+			fmt.Sprintf("票档[%d]桶[%d]", bucket.TierID, bucket.BucketNo),
+			true, pendingKeys,
+		)
 		if err != nil {
 			return anomalies, err
 		}
-		redisStock, err := strconv.ParseInt(redisStockStr, 10, 64)
-		if err != nil {
-			continue
-		}
-		if redisStock > int64(available) {
-			if setErr := s.rdb.Set(ctx, key, available, 0).Err(); setErr != nil {
-				return anomalies, setErr
-			}
-			log.Printf(
-				"分桶票额超卖风险:票档[%d]桶[%d],可用:%d,Redis:%d",
-				bucket.TierID, bucket.BucketNo, available, redisStock,
-			)
+		if anomaly {
 			anomalies++
 		}
 	}
@@ -222,25 +280,15 @@ func (s *TicketCompensationService) runBucketCompensation(ctx context.Context) (
 		}
 		parentCampaignSum[bucket.CampaignID] += bucket.RemainingQuota
 		key := RushStockBucketKey(bucket.CampaignID, bucket.BucketNo)
-		redisStockStr, err := s.rdb.Get(ctx, key).Result()
-		if errors.Is(err, redis.Nil) {
-			if setErr := s.rdb.Set(ctx, key, available, 0).Err(); setErr != nil {
-				return anomalies, setErr
-			}
-			anomalies++
-			continue
-		}
+		anomaly, err := s.reconcileRedisStock(
+			ctx, key, available,
+			fmt.Sprintf("限时开售[%d]桶[%d]", bucket.CampaignID, bucket.BucketNo),
+			true, pendingKeys,
+		)
 		if err != nil {
 			return anomalies, err
 		}
-		redisStock, err := strconv.ParseInt(redisStockStr, 10, 64)
-		if err != nil {
-			continue
-		}
-		if redisStock > int64(available) {
-			if setErr := s.rdb.Set(ctx, key, available, 0).Err(); setErr != nil {
-				return anomalies, setErr
-			}
+		if anomaly {
 			anomalies++
 		}
 	}
@@ -260,17 +308,26 @@ func (s *TicketCompensationService) runBucketCompensation(ctx context.Context) (
 	return anomalies, nil
 }
 
-// Start 每 5 分钟执行一次票额对账。
+// Start 每 30 秒执行单笔恢复，并在同一个 Worker 内每 5 分钟执行一次全量对账。
 func (s *TicketCompensationService) Start(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(stockReservationRecoveryInterval)
 	defer ticker.Stop()
+	nextFullReconciliation := time.Now().Add(stockFullReconciliationInterval)
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			if _, err := s.RunCompensation(ctx); err != nil {
-				log.Printf("票额对账失败: %v", err)
+		case now := <-ticker.C:
+			if s.order != nil {
+				if _, err := s.order.RecoverStaleStockReservations(ctx, now); err != nil {
+					log.Printf("库存单笔恢复失败: %v", err)
+				}
+			}
+			if !now.Before(nextFullReconciliation) {
+				if _, err := s.RunCompensation(ctx); err != nil {
+					log.Printf("票额对账失败: %v", err)
+				}
+				nextFullReconciliation = now.Add(stockFullReconciliationInterval)
 			}
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"gofun/metrics"
 	"gofun/models"
 	"log"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -64,6 +65,7 @@ func EnsureRushBuckets(tx *gorm.DB, campaign *models.RushSaleCampaign, settings 
 }
 
 func deductTierBucket(tx *gorm.DB, tierID int64, bucketNo, quantity int) error {
+	stageStarted := time.Now()
 	result := tx.Model(&models.TicketTierBucket{}).
 		Where("tier_id = ? AND bucket_no = ? AND remaining_quota >= ?", tierID, bucketNo, quantity).
 		Updates(map[string]interface{}{
@@ -71,6 +73,7 @@ func deductTierBucket(tx *gorm.DB, tierID int64, bucketNo, quantity int) error {
 			"sold_count":      gorm.Expr("sold_count + ?", quantity),
 			"version":         gorm.Expr("version + 1"),
 		})
+	metrics.TicketOrderConsumerStageDuration.WithLabelValues("tier_bucket_update").Observe(time.Since(stageStarted).Seconds())
 	if result.Error != nil {
 		return result.Error
 	}
@@ -79,16 +82,22 @@ func deductTierBucket(tx *gorm.DB, tierID int64, bucketNo, quantity int) error {
 	}
 	// 仅当前桶扣到 0 时再 SUM 判断售罄，避免每单扫全部桶。
 	var bucketRem int
-	if err := tx.Model(&models.TicketTierBucket{}).
+	stageStarted = time.Now()
+	err := tx.Model(&models.TicketTierBucket{}).
 		Select("remaining_quota").
 		Where("tier_id = ? AND bucket_no = ?", tierID, bucketNo).
-		Scan(&bucketRem).Error; err != nil {
+		Scan(&bucketRem).Error
+	metrics.TicketOrderConsumerStageDuration.WithLabelValues("tier_bucket_remaining_read").Observe(time.Since(stageStarted).Seconds())
+	if err != nil {
 		return err
 	}
 	if bucketRem > 0 {
 		return nil
 	}
-	return refreshTierSoldOutFromBuckets(tx, tierID, quantity)
+	stageStarted = time.Now()
+	err = refreshTierSoldOutFromBuckets(tx, tierID, quantity)
+	metrics.TicketOrderConsumerStageDuration.WithLabelValues("tier_sold_out_refresh").Observe(time.Since(stageStarted).Seconds())
+	return err
 }
 
 func deductRushBucket(tx *gorm.DB, campaignID, tierID int64, bucketNo, quantity int) error {

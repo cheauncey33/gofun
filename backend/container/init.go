@@ -27,7 +27,7 @@ import (
 )
 
 func NewContainer(cfg *config.Config) (*Container, error) {
-	db, err := initDB(cfg.MySQL, cfg.Telemetry.Enabled)
+	db, workerDB, err := initDB(cfg.MySQL, cfg.Telemetry.Enabled)
 	if err != nil {
 		return nil, fmt.Errorf("init db: %w", err)
 	}
@@ -51,6 +51,7 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 
 	c := &Container{
 		DB:                db,
+		WorkerDB:          workerDB,
 		RDB:               rdb,
 		MQConn:            conn,
 		MQChannel:         ch,
@@ -93,8 +94,65 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	return c, nil
 }
 
-func initDB(cfg config.MySQLConfig, tracingEnabled bool) (*gorm.DB, error) {
-	db, err := gorm.Open(mysql.Open(cfg.DSN), &gorm.Config{
+func initDB(cfg config.MySQLConfig, tracingEnabled bool) (httpDB, workerDB *gorm.DB, err error) {
+	httpDB, err = openGormDB(cfg.DSN, tracingEnabled)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := configureSQLPool(httpDB, cfg.MaxIdleConns, cfg.MaxOpenConns, cfg.ConnMaxLifetime); err != nil {
+		return nil, nil, err
+	}
+
+	if err := migrations.Run(httpDB); err != nil {
+		return nil, nil, fmt.Errorf("执行数据库迁移: %w", err)
+	}
+	if httpDB.Migrator().HasIndex(&models.User{}, "uni_user_phone") {
+		if err := httpDB.Migrator().DropIndex(&models.User{}, "uni_user_phone"); err != nil {
+			return nil, nil, fmt.Errorf("删除遗留手机号唯一索引: %w", err)
+		}
+	}
+
+	var adminCount int64
+	httpDB.Model(&models.User{}).Where("role = ?", "admin").Count(&adminCount)
+	if adminCount == 0 {
+		hashed, _ := bcrypt.GenerateFromPassword([]byte("admin123"), 12)
+		httpDB.Where(models.User{Username: "admin"}).Assign(models.User{
+			Password:     string(hashed),
+			Balance:      9999,
+			BalanceCents: 999900,
+			Role:         "admin",
+		}).FirstOrCreate(&models.User{})
+		log.Println("默认管理员已创建: admin / admin123")
+	}
+
+	workerDB = httpDB
+	if cfg.WorkerMaxOpenConns > 0 {
+		workerDB, err = openGormDB(cfg.DSN, tracingEnabled)
+		if err != nil {
+			return nil, nil, fmt.Errorf("init worker db: %w", err)
+		}
+		workerIdle := cfg.WorkerMaxIdleConns
+		if workerIdle <= 0 {
+			workerIdle = cfg.MaxIdleConns
+		}
+		if workerIdle > cfg.WorkerMaxOpenConns {
+			workerIdle = cfg.WorkerMaxOpenConns
+		}
+		if err := configureSQLPool(workerDB, workerIdle, cfg.WorkerMaxOpenConns, cfg.ConnMaxLifetime); err != nil {
+			return nil, nil, err
+		}
+		log.Printf(
+			"MySQL 连接成功 (HTTP pool max_open=%d idle=%d; worker pool max_open=%d idle=%d)",
+			cfg.MaxOpenConns, cfg.MaxIdleConns, cfg.WorkerMaxOpenConns, workerIdle,
+		)
+	} else {
+		log.Printf("MySQL 连接成功 (shared pool max_open=%d idle=%d)", cfg.MaxOpenConns, cfg.MaxIdleConns)
+	}
+	return httpDB, workerDB, nil
+}
+
+func openGormDB(dsn string, tracingEnabled bool) (*gorm.DB, error) {
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{
 			SingularTable: true,
 		},
@@ -107,39 +165,24 @@ func initDB(cfg config.MySQLConfig, tracingEnabled bool) (*gorm.DB, error) {
 			return nil, fmt.Errorf("启用 GORM tracing: %w", err)
 		}
 	}
+	return db, nil
+}
 
+func configureSQLPool(db *gorm.DB, maxIdle, maxOpen, connMaxLifetimeSec int) error {
 	sqlDB, err := db.DB()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
-	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
-	sqlDB.SetConnMaxLifetime(time.Duration(cfg.ConnMaxLifetime) * time.Second)
-
-	if err := migrations.Run(db); err != nil {
-		return nil, fmt.Errorf("执行数据库迁移: %w", err)
+	if maxIdle > 0 {
+		sqlDB.SetMaxIdleConns(maxIdle)
 	}
-	if db.Migrator().HasIndex(&models.User{}, "uni_user_phone") {
-		if err := db.Migrator().DropIndex(&models.User{}, "uni_user_phone"); err != nil {
-			return nil, fmt.Errorf("删除遗留手机号唯一索引: %w", err)
-		}
+	if maxOpen > 0 {
+		sqlDB.SetMaxOpenConns(maxOpen)
 	}
-
-	var adminCount int64
-	db.Model(&models.User{}).Where("role = ?", "admin").Count(&adminCount)
-	if adminCount == 0 {
-		hashed, _ := bcrypt.GenerateFromPassword([]byte("admin123"), 12)
-		db.Where(models.User{Username: "admin"}).Assign(models.User{
-			Password:     string(hashed),
-			Balance:      9999,
-			BalanceCents: 999900,
-			Role:         "admin",
-		}).FirstOrCreate(&models.User{})
-		log.Println("默认管理员已创建: admin / admin123")
+	if connMaxLifetimeSec > 0 {
+		sqlDB.SetConnMaxLifetime(time.Duration(connMaxLifetimeSec) * time.Second)
 	}
-
-	log.Println("MySQL 连接成功")
-	return db, nil
+	return nil
 }
 
 // ticketingSchemaModels 用于测试票务模型边界；运行时结构由 migrations/*.sql 决定。
@@ -157,6 +200,7 @@ func ticketingSchemaModels() []interface{} {
 		&models.TicketOrderItem{},
 		&models.TicketOrderAttendee{},
 		&models.TicketOrderOutbox{},
+		&models.TicketStockRecoveryFence{},
 		&models.PaymentTransaction{},
 		&models.PaymentCallback{},
 		&models.RushSaleCampaign{},

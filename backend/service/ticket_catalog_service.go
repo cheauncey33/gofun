@@ -11,10 +11,12 @@ import (
 	"gofun/search"
 	"log"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
 
@@ -137,6 +139,14 @@ type TicketCatalogService struct {
 	searcher  search.EventSearcher
 	preferES  bool
 	inventory InventoryBucketSettings
+	cacheSF   singleflight.Group
+	// rushSales 由 main.go 在构建后注入，用于活动取消时联动关闭关联抢票活动。
+	rushSales *RushSaleService
+}
+
+// LinkRushSale 注入抢票服务；活动取消时联动关闭其关联的限时开售活动。
+func (s *TicketCatalogService) LinkRushSale(rushSales *RushSaleService) {
+	s.rushSales = rushSales
 }
 
 func NewTicketCatalogService(c *container.Container) *TicketCatalogService {
@@ -396,6 +406,7 @@ func (s *TicketCatalogService) PublishEvent(
 		return nil, err
 	}
 	s.upsertEventSearchIndex(ctx, event)
+	s.invalidateCatalogCaches(ctx, event.ID)
 	return event, nil
 }
 
@@ -449,6 +460,13 @@ func (s *TicketCatalogService) CancelEvent(
 		return nil, err
 	}
 	s.removeEventSearchIndex(ctx, event.ID)
+	s.invalidateCatalogCaches(ctx, event.ID)
+	// 联动关闭该活动所有进行中的抢票活动，防止取消后仍可抢购下单。
+	if s.rushSales != nil {
+		if err := s.rushSales.CancelEventCampaigns(ctx, event.ID); err != nil {
+			return nil, err
+		}
+	}
 	return event, nil
 }
 
@@ -495,6 +513,7 @@ func (s *TicketCatalogService) UnpublishEvent(
 		return nil, err
 	}
 	s.removeEventSearchIndex(ctx, event.ID)
+	s.invalidateCatalogCaches(ctx, event.ID)
 	return event, nil
 }
 
@@ -540,6 +559,7 @@ func (s *TicketCatalogService) DisableTicketTier(
 	if err := s.rdb.Del(ctx, ticketStockKey(tier.ID)).Err(); err != nil {
 		return nil, fmt.Errorf("清理票额缓存: %w", err)
 	}
+	s.invalidateCatalogCaches(ctx, event.ID)
 	return &tier, nil
 }
 
@@ -648,16 +668,43 @@ func (s *TicketCatalogService) ListPublishedEvents(
 	query TicketCatalogListQuery,
 ) ([]models.Event, int64, error) {
 	query.Normalize()
-	if query.Keyword != "" && s.preferES {
-		events, total, err := s.listPublishedViaES(ctx, query)
-		if err == nil {
-			return events, total, nil
-		}
-		log.Printf("[catalog] ES 检索不可用或结果不完整，降级 MySQL LIKE: %v", err)
-	}
-	return s.repo.ListPublishedEvents(
-		ctx, query.City, query.Categories(), query.Keyword, query.Page, query.PageSize,
+	listKey := catalogEventsListKey(
+		s.catalogListVersion(ctx),
+		query.City,
+		query.Category,
+		query.Keyword,
+		query.Page,
+		query.PageSize,
 	)
+	var cached cachedEventList
+	err := cacheAsideJSON(ctx, s.rdb, &s.cacheSF, listKey, catalogEventsListTTL, &cached, func(ctx context.Context) (cachedEventList, error) {
+		var (
+			events []models.Event
+			total  int64
+			err    error
+		)
+		if query.Keyword != "" && s.preferES {
+			events, total, err = s.listPublishedViaES(ctx, query)
+			if err != nil {
+				log.Printf("[catalog] ES 检索不可用或结果不完整，降级 MySQL LIKE: %v", err)
+				events, total, err = s.repo.ListPublishedEvents(
+					ctx, query.City, query.Categories(), query.Keyword, query.Page, query.PageSize,
+				)
+			}
+		} else {
+			events, total, err = s.repo.ListPublishedEvents(
+				ctx, query.City, query.Categories(), query.Keyword, query.Page, query.PageSize,
+			)
+		}
+		if err != nil {
+			return cachedEventList{}, err
+		}
+		return cachedEventList{Events: events, Total: total}, nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return cached.Events, cached.Total, nil
 }
 
 func (s *TicketCatalogService) listPublishedViaES(
@@ -828,40 +875,112 @@ type CatalogMeta struct {
 }
 
 func (s *TicketCatalogService) GetCatalogMeta(ctx context.Context) (*CatalogMeta, error) {
-	cities, categories, err := s.repo.ListPublishedFacets(ctx)
+	var cached CatalogMeta
+	err := cacheAsideJSON(ctx, s.rdb, &s.cacheSF, catalogMetaKey, catalogMetaTTL, &cached, func(ctx context.Context) (CatalogMeta, error) {
+		cities, categories, err := s.repo.ListPublishedFacets(ctx)
+		if err != nil {
+			return CatalogMeta{}, err
+		}
+		return CatalogMeta{Cities: cities, Categories: categories}, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	return &CatalogMeta{Cities: cities, Categories: categories}, nil
+	return &cached, nil
 }
 
 func (s *TicketCatalogService) GetPublishedEvent(
 	ctx context.Context,
 	eventID int64,
 ) (*models.Event, error) {
-	event, err := s.repo.FindEventDetail(ctx, eventID)
+	key := catalogEventKey(eventID)
+	var event models.Event
+	err := cacheAsideJSON(ctx, s.rdb, &s.cacheSF, key, catalogEventDetailTTL, &event, func(ctx context.Context) (models.Event, error) {
+		loaded, err := s.repo.FindEventDetail(ctx, eventID)
+		if err != nil {
+			if normalized := normalizeTicketNotFound(err); normalized == ErrTicketResourceNotFound {
+				return models.Event{}, ErrTicketResourceNotFound
+			}
+			return models.Event{}, err
+		}
+		if loaded.Status != models.EventStatusPublished {
+			return models.Event{}, ErrTicketResourceNotFound
+		}
+		// Cache static catalog shape; remaining_quota is overlaid from Redis after load.
+		return *loaded, nil
+	})
 	if err != nil {
-		return nil, normalizeTicketNotFound(err)
+		return nil, err
 	}
-	if event.Status != models.EventStatusPublished {
-		return nil, ErrTicketResourceNotFound
-	}
-	s.overlayTierRemainingFromBuckets(ctx, event)
-	return event, nil
+	s.overlayTierRemainingFromRedis(ctx, &event)
+	return &event, nil
 }
 
-func (s *TicketCatalogService) overlayTierRemainingFromBuckets(ctx context.Context, event *models.Event) {
-	if !s.inventory.Enabled || event == nil {
+// overlayTierRemainingFromRedis prefers warm Redis stock keys; falls back to MySQL
+// bucket sum only when Redis has not been warmed for that tier.
+func (s *TicketCatalogService) overlayTierRemainingFromRedis(ctx context.Context, event *models.Event) {
+	if event == nil {
 		return
 	}
 	for si := range event.Sessions {
 		for ti := range event.Sessions[si].TicketTiers {
 			tier := &event.Sessions[si].TicketTiers[ti]
-			if sum, err := sumTierBucketRemaining(ctx, s.db, tier.ID); err == nil {
-				tier.RemainingQuota = sum
+			if stock, ok := s.loadTierStockFromRedis(ctx, tier); ok {
+				tier.RemainingQuota = stock
+				continue
+			}
+			if s.inventory.Enabled {
+				if sum, err := sumTierBucketRemaining(ctx, s.db, tier.ID); err == nil {
+					tier.RemainingQuota = sum
+				}
 			}
 		}
 	}
+}
+
+func (s *TicketCatalogService) loadTierStockFromRedis(ctx context.Context, tier *models.TicketTier) (int, bool) {
+	if s.rdb == nil || tier == nil {
+		return 0, false
+	}
+	if s.inventory.Enabled {
+		n := s.inventory.EffectiveBucketCount(tier.TotalQuota)
+		keys := make([]string, n)
+		for i := 0; i < n; i++ {
+			keys[i] = TicketStockBucketKey(tier.ID, i)
+		}
+		vals, err := s.rdb.MGet(ctx, keys...).Result()
+		if err != nil {
+			return 0, false
+		}
+		sum := 0
+		seen := 0
+		for _, v := range vals {
+			if v == nil {
+				continue
+			}
+			seen++
+			switch t := v.(type) {
+			case string:
+				if parsed, parseErr := strconv.Atoi(t); parseErr == nil {
+					sum += parsed
+				}
+			}
+		}
+		if seen == 0 {
+			return 0, false
+		}
+		return sum, true
+	}
+	n, err := s.rdb.Get(ctx, ticketStockKey(tier.ID)).Int()
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// Deprecated path kept for callers that still want MySQL-only overlay.
+func (s *TicketCatalogService) overlayTierRemainingFromBuckets(ctx context.Context, event *models.Event) {
+	s.overlayTierRemainingFromRedis(ctx, event)
 }
 
 func (s *TicketCatalogService) ListOrganizerEvents(

@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -52,6 +53,7 @@ var ticketIntegrationModels = []interface{}{
 	&models.TicketOrderItem{},
 	&models.TicketOrderAttendee{},
 	&models.TicketOrderOutbox{},
+	&models.TicketStockRecoveryFence{},
 	&models.PaymentTransaction{},
 	&models.PaymentCallback{},
 	&models.RushSaleCampaign{},
@@ -171,6 +173,186 @@ func (e *orderIntegrationEnv) newUser(t *testing.T, username string) *models.Use
 
 func validPurchaseInfo() PurchaseInfoInput {
 	return PurchaseInfoInput{ContactName: "张三", ContactPhone: "13800138000", TermsAccepted: true}
+}
+
+// Redis 已完成预扣但 HTTP 没拿到结果时，相同幂等键重试应复用原 order_id，不能再次扣库存。
+func TestIntegrationRetryAfterUnknownRedisReserve(t *testing.T) {
+	env := newOrderIntegrationEnv(t)
+	ctx := context.Background()
+	tier := env.seedPurchasableTier(t, 3, 3)
+	user := env.newUser(t, fmt.Sprintf("unknown-redis-%d", tier.ID))
+	idempotencyKey := fmt.Sprintf("idem-unknown-redis-%d", tier.ID)
+	proposedOrderID := env.svc.node.Generate().Int64()
+
+	reservation, code, err := env.svc.reserveTicketStock(
+		ctx, user.ID, tier, 1, idempotencyKey, proposedOrderID,
+	)
+	if err != nil || code != stockReservationCodeCreated {
+		t.Fatalf("initial Redis reserve code=%d err=%v", code, err)
+	}
+
+	receipt, err := env.svc.CreateOrder(ctx, user.ID, idempotencyKey, "req-retry", CreateTicketOrderInput{
+		TicketTierID:      tier.ID,
+		Quantity:          1,
+		PurchaseInfoInput: validPurchaseInfo(),
+	})
+	if err != nil {
+		t.Fatalf("retry CreateOrder: %v", err)
+	}
+	if receipt.OrderID != reservation.OrderID {
+		t.Fatalf("retry order ID=%d, want reserved ID=%d", receipt.OrderID, reservation.OrderID)
+	}
+	stock, err := env.rdb.Get(ctx, ticketStockKey(tier.ID)).Int()
+	if err != nil || stock != 2 {
+		t.Fatalf("Redis stock after retry=%d err=%v, want 2", stock, err)
+	}
+	if state := env.mr.HGet(reservation.Key, "state"); state != stockReservationStateCommitted {
+		t.Fatalf("reservation state=%q, want committed", state)
+	}
+	var orderFence models.TicketStockRecoveryFence
+	if err := env.db.First(&orderFence, "order_id = ?", reservation.OrderID).Error; err != nil {
+		t.Fatalf("read order fence: %v", err)
+	}
+	if orderFence.Owner != models.TicketStockRecoveryFenceOrder {
+		t.Fatalf("fence owner=%q, want order", orderFence.Owner)
+	}
+}
+
+// 无 MySQL 订单的超时 pending 凭证必须归还库存，并且重复恢复不能多归还。
+func TestIntegrationRecoverOrphanStockReservation(t *testing.T) {
+	env := newOrderIntegrationEnv(t)
+	ctx := context.Background()
+	tier := env.seedPurchasableTier(t, 2, 2)
+	user := env.newUser(t, fmt.Sprintf("orphan-reserve-%d", tier.ID))
+
+	reservation, code, err := env.svc.reserveTicketStock(
+		ctx, user.ID, tier, 1, fmt.Sprintf("idem-orphan-%d", tier.ID), env.svc.node.Generate().Int64(),
+	)
+	if err != nil || code != stockReservationCodeCreated {
+		t.Fatalf("reserve orphan code=%d err=%v", code, err)
+	}
+
+	recovered, err := env.svc.RecoverStaleStockReservations(
+		ctx, time.Now().Add(stockReservationRecoveryGrace),
+	)
+	if err != nil || recovered != 1 {
+		t.Fatalf("recover orphan recovered=%d err=%v", recovered, err)
+	}
+	stock, err := env.rdb.Get(ctx, ticketStockKey(tier.ID)).Int()
+	if err != nil || stock != 2 {
+		t.Fatalf("Redis stock after recovery=%d err=%v, want 2", stock, err)
+	}
+	if env.mr.Exists(reservation.Key) {
+		t.Fatal("orphan reservation should be deleted")
+	}
+	var recoveryFence models.TicketStockRecoveryFence
+	if err := env.db.First(&recoveryFence, "order_id = ?", reservation.OrderID).Error; err != nil {
+		t.Fatalf("read recovery fence: %v", err)
+	}
+	if recoveryFence.Owner != models.TicketStockRecoveryFenceRecovery {
+		t.Fatalf("fence owner=%q, want recovery", recoveryFence.Owner)
+	}
+	recovered, err = env.svc.RecoverStaleStockReservations(
+		ctx, time.Now().Add(stockReservationRecoveryGrace),
+	)
+	if err != nil || recovered != 0 {
+		t.Fatalf("duplicate recovery recovered=%d err=%v", recovered, err)
+	}
+}
+
+// 恢复任务在未提交订单上查不到记录时，会阻塞在同一个 order_id 栅栏上；
+// 原事务提交后只能确认 Redis 预扣，不能再把库存加回。
+func TestIntegrationRecoveryFenceWaitsForOrderCommit(t *testing.T) {
+	env := newOrderIntegrationEnv(t)
+	ctx := context.Background()
+	tier := env.seedPurchasableTier(t, 2, 2)
+	user := env.newUser(t, fmt.Sprintf("fence-race-%d", tier.ID))
+	idempotencyKey := fmt.Sprintf("idem-fence-race-%d", tier.ID)
+
+	reservation, code, err := env.svc.reserveTicketStock(
+		ctx, user.ID, tier, 1, idempotencyKey, env.svc.node.Generate().Int64(),
+	)
+	if err != nil || code != stockReservationCodeCreated {
+		t.Fatalf("reserve code=%d err=%v", code, err)
+	}
+	record, err := env.svc.loadStockReservation(ctx, reservation.Key)
+	if err != nil || record == nil {
+		t.Fatalf("load reservation record=%#v err=%v", record, err)
+	}
+
+	var session models.EventSession
+	if err := env.db.First(&session, tier.SessionID).Error; err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	var event models.Event
+	if err := env.db.First(&event, session.EventID).Error; err != nil {
+		t.Fatalf("load event: %v", err)
+	}
+	now := time.Now()
+	order := &models.TicketOrder{
+		Base:                  models.Base{ID: reservation.OrderID},
+		OrderNo:               strconv.FormatInt(reservation.OrderID, 10),
+		UserID:                user.ID,
+		OrganizerID:           event.OrganizerID,
+		EventID:               event.ID,
+		SessionID:             session.ID,
+		OrderSource:           models.TicketOrderSourceNormal,
+		Status:                models.TicketOrderStatusQueued,
+		PaymentStatus:         models.PaymentStatusUnpaid,
+		TotalAmountCents:      tier.PriceCents,
+		ContactName:           "张三",
+		ContactPhone:          "13800138000",
+		PurchaseNoticeVersion: purchaseNoticeVersion,
+		TermsAcceptedAt:       &now,
+		IdempotencyKey:        idempotencyKey,
+		ExpiresAt:             now.Add(15 * time.Minute),
+	}
+
+	tx := env.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		t.Fatalf("begin order tx: %v", tx.Error)
+	}
+	defer tx.Rollback()
+	if err := tx.Create(&models.TicketStockRecoveryFence{
+		OrderID: reservation.OrderID,
+		Owner:   models.TicketStockRecoveryFenceOrder,
+	}).Error; err != nil {
+		t.Fatalf("insert uncommitted order fence: %v", err)
+	}
+	if err := tx.Create(order).Error; err != nil {
+		t.Fatalf("insert uncommitted order: %v", err)
+	}
+
+	type recoveryResult struct {
+		outcome stockReservationRecoveryOutcome
+		err     error
+	}
+	resultCh := make(chan recoveryResult, 1)
+	go func() {
+		outcome, err := env.svc.claimStockReservationRecovery(ctx, *record)
+		resultCh <- recoveryResult{outcome: outcome, err: err}
+	}()
+	select {
+	case got := <-resultCh:
+		t.Fatalf("recovery returned before order transaction ended: %#v", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := tx.Commit().Error; err != nil {
+		t.Fatalf("commit order tx: %v", err)
+	}
+
+	select {
+	case got := <-resultCh:
+		if got.err != nil || got.outcome != stockReservationRecoveryConfirmed {
+			t.Fatalf("recovery after commit=%#v", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("recovery did not finish after order commit")
+	}
+	stock, err := env.rdb.Get(ctx, ticketStockKey(tier.ID)).Int()
+	if err != nil || stock != 1 {
+		t.Fatalf("Redis stock after race=%d err=%v, want 1", stock, err)
+	}
 }
 
 // 用例 1：N 个不同用户并发抢 M 张票（N>M），成功数恒等于 M，Redis 库存归零，无超卖。
@@ -485,5 +667,138 @@ func TestIntegrationPaymentAndTimeoutSerialize(t *testing.T) {
 	}
 	if order.Status != models.TicketOrderStatusPaid && order.Status != models.TicketOrderStatusCancelled {
 		t.Fatalf("支付/超时竞争后订单状态 = %s，不是 paid/cancelled", order.Status)
+	}
+}
+
+// 用例 4：幂等缓存命中后必须回源刷新状态，客户端重试不能拿到过期的 queued 快照。
+func TestIntegrationIdempotencyCacheRefreshesStatus(t *testing.T) {
+	env := newOrderIntegrationEnv(t)
+	ctx := context.Background()
+
+	tier := env.seedPurchasableTier(t, 100, 6)
+	user := env.newUser(t, fmt.Sprintf("idem-refresh-user-%d", tier.ID))
+	idemKey := fmt.Sprintf("idem-refresh-%d", tier.ID)
+
+	first, err := env.svc.CreateOrder(ctx, user.ID, idemKey, "req-1", CreateTicketOrderInput{
+		TicketTierID: tier.ID, Quantity: 1, PurchaseInfoInput: validPurchaseInfo(),
+	})
+	if err != nil {
+		t.Fatalf("首次下单失败: %v", err)
+	}
+	// 模拟极端场景：缓存快照仍是 queued，但订单真实状态已推进到 pending_payment。
+	if err := env.rdb.Set(ctx, ticketIdempotencyRedisKey(user.ID, idemKey),
+		fmt.Sprintf("%d|queued", first.OrderID), time.Minute).Err(); err != nil {
+		t.Fatalf("预置过期缓存快照: %v", err)
+	}
+	if err := env.svc.ProcessOrderTask(ctx, TicketOrderMessage{
+		OrderID: first.OrderID, UserID: user.ID, TicketTierID: tier.ID, Quantity: 1,
+	}); err != nil {
+		t.Fatalf("推进 pending_payment: %v", err)
+	}
+
+	receipt, err := env.svc.lookupIdempotentOrder(ctx, user.ID, idemKey)
+	if err != nil {
+		t.Fatalf("幂等回源查询失败: %v", err)
+	}
+	if receipt.OrderID != first.OrderID {
+		t.Fatalf("幂等命中订单 %d，应为 %d", receipt.OrderID, first.OrderID)
+	}
+	if receipt.Status != models.TicketOrderStatusPendingPayment {
+		t.Fatalf("幂等缓存命中返回状态 = %s，应为真实状态 pending_payment", receipt.Status)
+	}
+}
+
+// 用例 5：WarmTicketQuota 只重建在售票档的 Redis 库存，已下架票档不会复活。
+func TestIntegrationWarmTicketQuotaSkipsDisabledTiers(t *testing.T) {
+	env := newOrderIntegrationEnv(t)
+	ctx := context.Background()
+
+	tier := env.seedPurchasableTier(t, 100, 6)
+	var session models.EventSession
+	if err := env.db.First(&session, tier.SessionID).Error; err != nil {
+		t.Fatalf("读取测试场次失败: %v", err)
+	}
+	disabled := models.TicketTier{
+		SessionID: session.ID, Name: "已下架票", PriceCents: 100,
+		TotalQuota: 10, RemainingQuota: 10, Status: models.TicketTierStatusDisabled,
+	}
+	if err := env.db.Create(&disabled).Error; err != nil {
+		t.Fatalf("创建下架票档失败: %v", err)
+	}
+	// 模拟取消前遗留的 Redis 库存 key。
+	if err := env.rdb.Set(ctx, ticketStockKey(disabled.ID), 10, 0).Err(); err != nil {
+		t.Fatalf("预置遗留 key: %v", err)
+	}
+	if err := env.svc.WarmTicketQuota(ctx); err != nil {
+		t.Fatalf("预热失败: %v", err)
+	}
+	got, err := env.rdb.Get(ctx, ticketStockKey(tier.ID)).Int64()
+	if err != nil || got != 100 {
+		t.Fatalf("在售票档预热后 = %d, err=%v，应为 100", got, err)
+	}
+	// 删除下架票档 key 后再预热，确认不会被重建。
+	if err := env.rdb.Del(ctx, ticketStockKey(disabled.ID)).Err(); err != nil {
+		t.Fatalf("删除遗留 key: %v", err)
+	}
+	if err := env.svc.WarmTicketQuota(ctx); err != nil {
+		t.Fatalf("二次预热失败: %v", err)
+	}
+	if _, err := env.rdb.Get(ctx, ticketStockKey(disabled.ID)).Int64(); !errors.Is(err, redis.Nil) {
+		t.Fatalf("下架票档 key 不应被重建，got err=%v", err)
+	}
+}
+
+// 用例 6：活动取消联动关闭抢票活动：状态置 cancelled、Redis 库存与本地缓存清理。
+func TestIntegrationCancelEventCampaignsClosesRush(t *testing.T) {
+	env := newOrderIntegrationEnv(t)
+	ctx := context.Background()
+
+	tier := env.seedPurchasableTier(t, 100, 6)
+	var session models.EventSession
+	if err := env.db.First(&session, tier.SessionID).Error; err != nil {
+		t.Fatalf("读取测试场次失败: %v", err)
+	}
+	var event models.Event
+	if err := env.db.First(&event, session.EventID).Error; err != nil {
+		t.Fatalf("读取测试活动失败: %v", err)
+	}
+	campaign := models.RushSaleCampaign{
+		OrganizerID: event.OrganizerID, TicketTierID: tier.ID,
+		Name: "测试秒杀", RushPriceCents: 100,
+		TotalQuota: 10, RemainingQuota: 10, PerUserLimit: 1,
+		StartsAt: time.Now().Add(-time.Hour), EndsAt: time.Now().Add(time.Hour),
+		Status: models.RushSaleStatusActive,
+	}
+	if err := env.db.Create(&campaign).Error; err != nil {
+		t.Fatalf("创建抢票活动失败: %v", err)
+	}
+	if err := env.rdb.Set(ctx, rushStockKey(campaign.ID), 10, 0).Err(); err != nil {
+		t.Fatalf("预热抢票库存: %v", err)
+	}
+	cache := gocache.New(time.Minute, time.Minute)
+	cache.Set(rushCampaignLocalKey(campaign.ID), campaign, time.Minute)
+	rush := &RushSaleService{
+		db: env.db, rdb: env.rdb, order: env.svc, localCache: cache,
+	}
+	if err := rush.CancelEventCampaigns(ctx, event.ID); err != nil {
+		t.Fatalf("取消活动联动失败: %v", err)
+	}
+
+	var after models.RushSaleCampaign
+	if err := env.db.First(&after, campaign.ID).Error; err != nil {
+		t.Fatalf("读取抢票活动失败: %v", err)
+	}
+	if after.Status != models.RushSaleStatusCancelled {
+		t.Fatalf("抢票活动状态 = %s，应为 cancelled", after.Status)
+	}
+	if _, err := env.rdb.Get(ctx, rushStockKey(campaign.ID)).Int64(); !errors.Is(err, redis.Nil) {
+		t.Fatalf("抢票库存 key 应被删除，got err=%v", err)
+	}
+	if _, found := cache.Get(rushCampaignLocalKey(campaign.ID)); found {
+		t.Fatal("抢票活动本地缓存应被清理")
+	}
+	// 无关联抢票活动的活动取消不应报错。
+	if err := rush.CancelEventCampaigns(ctx, 999999999); err != nil {
+		t.Fatalf("无关联活动取消联动报错: %v", err)
 	}
 }

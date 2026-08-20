@@ -86,6 +86,8 @@ func main() {
 		ticketOrderSvc,
 		time.Duration(cfg.RushSale.CampaignCacheTTLMS)*time.Millisecond,
 	)
+	// 活动取消时联动关闭其关联的抢票活动。
+	ticketCatalogSvc.LinkRushSale(rushSaleSvc)
 	ticketOrderConsumer := service.NewTicketOrderConsumer(
 		cont.NewMQChannel,
 		cont.MQQueueName,
@@ -104,7 +106,7 @@ func main() {
 	eventCommentSvc := service.NewEventCommentService(cont)
 	eventCommentCtrl := controller.NewEventCommentController(eventCommentSvc)
 	orderSocketHandler := ws.NewHandler(orderHub, cfg.Cors.AllowOrigins...)
-	ticketCompensationSvc := service.NewTicketCompensationService(cont)
+	ticketCompensationSvc := service.NewTicketCompensationService(cont, ticketOrderSvc)
 	ticketCompensationSvc.ConfigureInventory(cfg.Inventory)
 	eventSearchCompensationSvc := service.NewEventSearchCompensationService(
 		ticketCatalogSvc,
@@ -130,6 +132,10 @@ func main() {
 		writeLimit = writeLimitMiddleware(writeLimiter)
 	}
 
+	// 先收敛上次进程在 HTTP 中断后遗留的 pending 预扣，再按 MySQL 重建 Redis 票额。
+	if _, err := ticketOrderSvc.RecoverAllStockReservations(context.Background()); err != nil {
+		logger.Log.Fatal("Redis 预扣凭证恢复失败", zap.Error(err))
+	}
 	// MySQL 是最终票额来源，启动时将票档剩余量写入 Gofun 独立 Redis 命名空间。
 	if err := ticketOrderSvc.WarmTicketQuota(context.Background()); err != nil {
 		logger.Log.Fatal("票档预热 Redis 失败", zap.Error(err))
@@ -254,6 +260,7 @@ func main() {
 	go metrics.StartRuntimeCollector(
 		mainCtx,
 		cont.DB,
+		cont.WorkerDB,
 		cont.NewMQChannel,
 		cont.MQQueueName,
 		cont.MQRetryQueueName,

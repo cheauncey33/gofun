@@ -14,7 +14,11 @@ import (
 )
 
 type Container struct {
-	DB               *gorm.DB
+	// DB 供 HTTP / 控制器路径使用。
+	DB *gorm.DB
+	// WorkerDB 供 Consumer / Outbox / Timeout / 库存补偿等后台路径使用。
+	// 未启用 worker 池时与 DB 指向同一实例。
+	WorkerDB         *gorm.DB
 	RDB              *redis.Client
 	MQConn           *amqp.Connection
 	MQChannel        *amqp.Channel
