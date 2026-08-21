@@ -56,7 +56,7 @@ groups:
           description: "最老 pending/publishing Outbox 已等待 {{ $value | humanizeDuration }}。"
 
       - alert: GofunRabbitMQNoConsumer
-        expr: sum(mq_queue_ready_messages{queue=~"fuchang\\.it\\.order\\.(queue|retry)"}) > 0 and sum(mq_queue_consumers{queue=~"fuchang\\.it\\.order\\.(queue|retry)"}) == 0
+        expr: sum(mq_queue_ready_messages{queue=~"fuchang\\.(it\\.)?order\\.(queue|retry)"}) > 0 and sum(mq_queue_consumers{queue=~"fuchang\\.(it\\.)?order\\.(queue|retry)"}) == 0
         for: 1m
         labels:
           severity: critical
@@ -65,10 +65,10 @@ groups:
           description: "票务工作队列存在 ready 消息，但消费者数量为 0。"
 
       - alert: GofunRabbitMQBacklogNotDraining
-        expr: sum(mq_queue_ready_messages{queue=~"fuchang\\.it\\.order\\.(queue|retry)"}) > 0 and deriv((sum(mq_queue_ready_messages{queue=~"fuchang\\.it\\.order\\.(queue|retry)"}))[5m:15s]) >= 0
+        expr: sum(mq_queue_ready_messages{queue=~"fuchang\\.(it\\.)?order\\.(queue|retry)"}) > 20 and deriv((sum(mq_queue_ready_messages{queue=~"fuchang\\.(it\\.)?order\\.(queue|retry)"}))[5m:15s]) > 0
         for: 2m
         labels:
           severity: warning
         annotations:
-          summary: "RabbitMQ 积压持续未下降"
-          description: "票务工作队列连续观察窗口内没有排空趋势。"
+          summary: "RabbitMQ 积压持续上升"
+          description: "票务工作队列深度超过 20 且观察窗口内仍在增长。"
