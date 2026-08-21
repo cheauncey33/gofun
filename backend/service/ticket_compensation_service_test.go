@@ -55,3 +55,20 @@ func TestReconcileRedisStockIsConservative(t *testing.T) {
 		t.Fatalf("low stock was guessed upward to %q", got)
 	}
 }
+
+func TestLowerRedisStockIfUnchangedSkipsConcurrentChange(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	ctx := t.Context()
+	key := "stock:cas"
+	mr.Set(key, "4")
+
+	changed, err := lowerRedisStockIfUnchangedScript.Run(ctx, rdb, []string{key}, "8", 5).Int64()
+	if err != nil || changed != 0 {
+		t.Fatalf("cas changed=%d err=%v, want 0", changed, err)
+	}
+	if got, _ := mr.Get(key); got != "4" {
+		t.Fatalf("concurrent stock overwritten to %q", got)
+	}
+}

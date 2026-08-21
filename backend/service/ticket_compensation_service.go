@@ -112,11 +112,11 @@ func (s *TicketCompensationService) reconcileRedisStock(
 		if err != nil {
 			return false, err
 		}
-		if changed == 1 {
-			log.Printf("%s Redis 库存偏多，已从%d下调为%d", description, redisStock, expected)
-		} else {
+		if changed != 1 {
 			log.Printf("%s 对账期间库存发生并发变化，本轮不覆盖", description)
+			return false, nil
 		}
+		log.Printf("%s Redis 库存偏多，已从%d下调为%d", description, redisStock, expected)
 		metrics.StockReconciliationMismatchTotal.WithLabelValues("too_high").Inc()
 		return true, nil
 	}
@@ -146,18 +146,11 @@ func (s *TicketCompensationService) runStandardCompensation(
 		return 0, nil
 	}
 
-	var queuedOrders []models.TicketOrder
-	if err := s.db.WithContext(ctx).Preload("Items").
-		Where("status = ?", models.TicketOrderStatusQueued).
-		Find(&queuedOrders).Error; err != nil {
+	occ, err := loadQueuedStockOccupancy(ctx, s.db, s.inventory)
+	if err != nil {
 		return 0, err
 	}
-	queuedByTier := make(map[int64]int)
-	for _, order := range queuedOrders {
-		for _, item := range order.Items {
-			queuedByTier[item.TicketTierID] += item.Quantity
-		}
-	}
+	queuedByTier := occ.byTier
 
 	anomalies := 0
 	for _, tier := range tiers {
@@ -194,19 +187,11 @@ func (s *TicketCompensationService) runBucketCompensation(
 	if err := s.db.WithContext(ctx).Find(&buckets).Error; err != nil {
 		return 0, err
 	}
-	var queuedOrders []models.TicketOrder
-	if err := s.db.WithContext(ctx).Preload("Items").
-		Where("status = ?", models.TicketOrderStatusQueued).
-		Find(&queuedOrders).Error; err != nil {
+	occ, err := loadQueuedStockOccupancy(ctx, s.db, s.inventory)
+	if err != nil {
 		return 0, err
 	}
-	queuedByBucket := make(map[string]int)
-	for _, order := range queuedOrders {
-		for _, item := range order.Items {
-			b := queuedOrderStockBucket(&order, s.inventory)
-			queuedByBucket[fmt.Sprintf("%d:%d", item.TicketTierID, b)] += item.Quantity
-		}
-	}
+	queuedByBucket := occ.byTierBucket
 
 	anomalies := 0
 	parentTierSum := make(map[int64]int)
@@ -266,17 +251,7 @@ func (s *TicketCompensationService) runBucketCompensation(
 	if err := s.db.WithContext(ctx).Find(&rushBuckets).Error; err != nil {
 		return anomalies, err
 	}
-	queuedByRushBucket := make(map[string]int)
-	for _, order := range queuedOrders {
-		if order.RushSaleCampaignID == nil {
-			continue
-		}
-		for _, item := range order.Items {
-			b := queuedOrderRushBucket(&order, s.inventory)
-			queuedByRushBucket[fmt.Sprintf("%d:%d", *order.RushSaleCampaignID, b)] += item.Quantity
-			_ = item
-		}
-	}
+	queuedByRushBucket := occ.byCampaignBucket
 	parentCampaignSum := make(map[int64]int)
 	for _, bucket := range rushBuckets {
 		available := bucket.RemainingQuota - queuedByRushBucket[fmt.Sprintf("%d:%d", bucket.CampaignID, bucket.BucketNo)]
@@ -324,18 +299,13 @@ func (s *TicketCompensationService) Start(ctx context.Context) {
 			return
 		case now := <-ticker.C:
 			if s.order != nil {
-				recoveryOK := true
 				if _, err := s.order.RecoverStaleStockReservations(ctx, now); err != nil {
-					recoveryOK = false
 					log.Printf("库存单笔恢复失败: %v", err)
+				} else {
+					metrics.StockRecoveryLastSuccessTimestamp.SetToCurrentTime()
 				}
 				if err := s.order.observePendingStockReservationMetrics(ctx, now); err != nil {
-					recoveryOK = false
-					metrics.StockReservationRecoveryTotal.WithLabelValues("error").Inc()
 					log.Printf("采集库存预扣状态失败: %v", err)
-				}
-				if recoveryOK {
-					metrics.StockRecoveryLastSuccessTimestamp.SetToCurrentTime()
 				}
 			}
 			if !now.Before(nextFullReconciliation) {
