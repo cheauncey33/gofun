@@ -132,7 +132,8 @@ func main() {
 		writeLimit = writeLimitMiddleware(writeLimiter)
 	}
 
-	// 先收敛上次进程在 HTTP 中断后遗留的 pending 预扣，再按 MySQL 重建 Redis 票额。
+	// 先恢复超过宽限期的遗留 pending 预扣；宽限期内凭证可能属于其他实例，留给周期 Worker。
+	// WarmTicketQuota 会跳过仍有 pending 的库存 key，避免覆盖在途预扣。
 	if _, err := ticketOrderSvc.RecoverAllStockReservations(context.Background()); err != nil {
 		logger.Log.Fatal("Redis 预扣凭证恢复失败", zap.Error(err))
 	}

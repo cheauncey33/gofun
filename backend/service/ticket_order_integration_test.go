@@ -946,6 +946,33 @@ func TestIntegrationWarmTicketQuotaSkipsDisabledTiers(t *testing.T) {
 	}
 }
 
+func TestIntegrationWarmTicketQuotaSkipsPendingReservationKeys(t *testing.T) {
+	env := newOrderIntegrationEnv(t)
+	ctx := context.Background()
+	tier := env.seedPurchasableTier(t, 5, 5)
+	user := env.newUser(t, fmt.Sprintf("warm-skip-pending-%d", tier.ID))
+
+	reservation, code, err := env.svc.reserveTicketStock(
+		ctx, user.ID, tier, 1, fmt.Sprintf("idem-warm-skip-%d", tier.ID), env.svc.node.Generate().Int64(),
+	)
+	if err != nil || code != stockReservationCodeCreated {
+		t.Fatalf("reserve code=%d err=%v", code, err)
+	}
+	if stock, _ := env.rdb.Get(ctx, ticketStockKey(tier.ID)).Int(); stock != 4 {
+		t.Fatalf("stock after reserve=%d, want 4", stock)
+	}
+
+	if err := env.svc.WarmTicketQuota(ctx); err != nil {
+		t.Fatalf("warm with pending reservation: %v", err)
+	}
+	if stock, _ := env.rdb.Get(ctx, ticketStockKey(tier.ID)).Int(); stock != 4 {
+		t.Fatalf("warm overwrote pending stock to %d, want 4", stock)
+	}
+	if !env.mr.Exists(reservation.Key) {
+		t.Fatal("pending reservation must remain after warm")
+	}
+}
+
 // 用例 6：活动取消联动关闭抢票活动：状态置 cancelled、Redis 库存与本地缓存清理。
 func TestIntegrationCancelEventCampaignsClosesRush(t *testing.T) {
 	env := newOrderIntegrationEnv(t)

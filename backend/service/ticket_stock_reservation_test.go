@@ -223,3 +223,48 @@ func TestPendingStockReservationKeys(t *testing.T) {
 		t.Fatalf("pending stock keys after confirm=%v, want empty", keys)
 	}
 }
+
+func TestPendingReservationHashHasNoTTL(t *testing.T) {
+	svc, mr := newStockReservationTestService(t)
+	tier := &models.TicketTier{Base: models.Base{ID: 121}, TotalQuota: 3}
+	mr.Set(ticketStockKey(tier.ID), "3")
+
+	reservation, code, err := svc.reserveTicketStock(
+		t.Context(), 23, tier, 1, "idem-pending-ttl", 12101,
+	)
+	if err != nil || code != stockReservationCodeCreated {
+		t.Fatalf("reserve code=%d err=%v", code, err)
+	}
+	if ttl := mr.TTL(reservation.Key); ttl > 0 {
+		t.Fatalf("pending reservation TTL=%s, want none so recovery can still read quantity", ttl)
+	}
+
+	svc.confirmStockReservation(t.Context(), reservation)
+	if ttl := mr.TTL(reservation.Key); ttl <= 0 {
+		t.Fatalf("committed reservation TTL=%s, want positive cleanup window", ttl)
+	}
+}
+
+func TestRecoverAllLeavesFreshReservations(t *testing.T) {
+	svc, mr := newStockReservationTestService(t)
+	tier := &models.TicketTier{Base: models.Base{ID: 131}, TotalQuota: 3}
+	mr.Set(ticketStockKey(tier.ID), "3")
+
+	reservation, code, err := svc.reserveTicketStock(
+		t.Context(), 24, tier, 1, "idem-recover-all-fresh", 13101,
+	)
+	if err != nil || code != stockReservationCodeCreated {
+		t.Fatalf("reserve code=%d err=%v", code, err)
+	}
+
+	recovered, err := svc.RecoverAllStockReservations(t.Context())
+	if err != nil || recovered != 0 {
+		t.Fatalf("recover all fresh recovered=%d err=%v", recovered, err)
+	}
+	if !mr.Exists(reservation.Key) {
+		t.Fatal("fresh pending reservation must survive startup recovery")
+	}
+	if got := mustRedisValue(t, mr, ticketStockKey(tier.ID)); got != "2" {
+		t.Fatalf("stock after recover-all=%s, want 2", got)
+	}
+}

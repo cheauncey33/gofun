@@ -72,7 +72,7 @@ redis.call('HSET', KEYS[2],
   'state', 'pending',
   'remaining', tostring(remaining),
   'created_at_ms', ARGV[8])
-redis.call('PEXPIRE', KEYS[2], ARGV[9])
+redis.call('PERSIST', KEYS[2])
 redis.call('ZADD', KEYS[3], ARGV[8], KEYS[2])
 return {1, ARGV[2], remaining, ARGV[6]}
 `)
@@ -122,7 +122,7 @@ redis.call('HSET', KEYS[4],
   'state', 'pending',
   'remaining', tostring(remaining),
   'created_at_ms', ARGV[11])
-redis.call('PEXPIRE', KEYS[4], ARGV[12])
+redis.call('PERSIST', KEYS[4])
 redis.call('ZADD', KEYS[5], ARGV[11], KEYS[4])
 return {1, ARGV[7], remaining, ARGV[9]}
 `)
@@ -511,6 +511,7 @@ func (s *TicketOrderService) pendingStockReservationKeys(ctx context.Context) (m
 				rushKey = RushStockBucketKey(reservation.CampaignID, reservation.RushBucketNo)
 			}
 			stockKeys[rushKey] = struct{}{}
+			stockKeys[rushUserCountKey(reservation.CampaignID, reservation.UserID)] = struct{}{}
 		}
 	}
 	return stockKeys, nil
@@ -616,32 +617,40 @@ func (s *TicketOrderService) RecoverStaleStockReservations(ctx context.Context, 
 	return recovered, recoveryErr
 }
 
-// RecoverAllStockReservations 在启动库存预热前处理上次进程遗留的全部 pending 凭证。
-// 这样 WarmTicketQuota 随后按 MySQL 重建 Redis 时，不会留下一个稍后再次归还的旧凭证。
+func (s *TicketOrderService) stalePendingReservationCount(ctx context.Context, now time.Time) (int64, error) {
+	cutoff := now.Add(-stockReservationRecoveryGrace).UnixMilli()
+	return s.rdb.ZCount(ctx, stockReservationPendingKey, "-inf", strconv.FormatInt(cutoff, 10)).Result()
+}
+
+// RecoverAllStockReservations 启动时只恢复超过宽限期的 pending 凭证。
+// 宽限期内的凭证可能属于其他仍在服务的实例，不能在滚动发布时整表回滚。
+// 崩溃遗留的新凭证由周期 Worker 在宽限期后处理；WarmTicketQuota 会跳过仍有
+// pending 的库存 key，避免覆盖在途预扣后再被归还造成超卖。
 func (s *TicketOrderService) RecoverAllStockReservations(ctx context.Context) (int, error) {
 	total := 0
 	for {
-		before, err := s.rdb.ZCard(ctx, stockReservationPendingKey).Result()
+		now := time.Now()
+		stale, err := s.stalePendingReservationCount(ctx, now)
 		if err != nil {
 			return total, err
 		}
-		if before == 0 {
+		if stale == 0 {
 			return total, nil
 		}
-		recovered, err := s.RecoverStaleStockReservations(ctx, time.Now().Add(stockReservationRecoveryGrace))
+		recovered, err := s.RecoverStaleStockReservations(ctx, now)
 		total += recovered
 		if err != nil {
 			return total, err
 		}
-		remaining, err := s.rdb.ZCard(ctx, stockReservationPendingKey).Result()
+		remainingStale, err := s.stalePendingReservationCount(ctx, now)
 		if err != nil {
 			return total, err
 		}
-		if remaining == 0 {
+		if remainingStale == 0 {
 			return total, nil
 		}
-		if remaining >= before {
-			return total, fmt.Errorf("仍有 %d 条 Redis pending 预扣无法恢复", remaining)
+		if remainingStale >= stale {
+			return total, fmt.Errorf("仍有 %d 条过期 Redis pending 预扣无法恢复", remainingStale)
 		}
 	}
 }

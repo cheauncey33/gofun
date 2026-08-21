@@ -283,64 +283,14 @@ func (s *TicketOrderService) WarmTicketQuota(ctx context.Context) error {
 		Find(&tiers).Error; err != nil {
 		return err
 	}
-	var queuedOrders []models.TicketOrder
-	if err := db.WithContext(ctx).
-		Where("status = ?", models.TicketOrderStatusQueued).
-		Find(&queuedOrders).Error; err != nil {
+	occ, err := loadQueuedStockOccupancy(ctx, db, s.inventory)
+	if err != nil {
 		return err
 	}
-	queuedByTier := make(map[int64]int)
-	queuedByCampaign := make(map[int64]int)
-	queuedByTierBucket := make(map[string]int)
-	queuedByCampaignBucket := make(map[string]int)
-	if len(queuedOrders) > 0 {
-		// Aggregate items in SQL — Preload(Items) on tens of thousands of orders
-		// blows MySQL's prepared-statement placeholder limit (Error 1390).
-		type queuedItemRow struct {
-			OrderID      int64 `gorm:"column:order_id"`
-			TicketTierID int64 `gorm:"column:ticket_tier_id"`
-			Quantity     int   `gorm:"column:quantity"`
-		}
-		orderIDs := make([]int64, 0, len(queuedOrders))
-		orderByID := make(map[int64]models.TicketOrder, len(queuedOrders))
-		for _, order := range queuedOrders {
-			orderIDs = append(orderIDs, order.ID)
-			orderByID[order.ID] = order
-		}
-		const queuedItemChunk = 500
-		for start := 0; start < len(orderIDs); start += queuedItemChunk {
-			end := start + queuedItemChunk
-			if end > len(orderIDs) {
-				end = len(orderIDs)
-			}
-			var itemRows []queuedItemRow
-			if err := db.WithContext(ctx).Raw(`
-				SELECT order_id, ticket_tier_id, quantity
-				FROM ticket_order_item
-				WHERE delete_time IS NULL AND order_id IN ?
-			`, orderIDs[start:end]).Scan(&itemRows).Error; err != nil {
-				return err
-			}
-			for _, item := range itemRows {
-				order, ok := orderByID[item.OrderID]
-				if !ok {
-					continue
-				}
-				queuedByTier[item.TicketTierID] += item.Quantity
-				if order.RushSaleCampaignID != nil {
-					queuedByCampaign[*order.RushSaleCampaignID] += item.Quantity
-				}
-				if s.inventory.Enabled {
-					stockBucket := queuedOrderStockBucket(&order, s.inventory)
-					queuedByTierBucket[fmt.Sprintf("%d:%d", item.TicketTierID, stockBucket)] += item.Quantity
-					if order.RushSaleCampaignID != nil {
-						rushBucket := queuedOrderRushBucket(&order, s.inventory)
-						queuedByCampaignBucket[fmt.Sprintf("%d:%d", *order.RushSaleCampaignID, rushBucket)] += item.Quantity
-					}
-				}
-			}
-		}
-	}
+	queuedByTier := occ.byTier
+	queuedByCampaign := occ.byCampaign
+	queuedByTierBucket := occ.byTierBucket
+	queuedByCampaignBucket := occ.byCampaignBucket
 	values := make(map[string]interface{})
 	if s.inventory.Enabled {
 		tierIDs := make([]int64, 0, len(tiers))
@@ -436,6 +386,20 @@ func (s *TicketOrderService) WarmTicketQuota(ctx context.Context) error {
 	}
 	for _, row := range purchasedRows {
 		values[rushUserCountKey(row.CampaignID, row.UserID)] = row.Quantity
+	}
+	pendingKeys, err := s.pendingStockReservationKeys(ctx)
+	if err != nil {
+		return fmt.Errorf("读取在途库存预扣: %w", err)
+	}
+	if len(pendingKeys) > 0 {
+		filtered := make(map[string]interface{}, len(values))
+		for key, value := range values {
+			if _, skip := pendingKeys[key]; skip {
+				continue
+			}
+			filtered[key] = value
+		}
+		values = filtered
 	}
 	if len(values) == 0 {
 		return nil
