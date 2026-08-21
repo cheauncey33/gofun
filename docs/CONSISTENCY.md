@@ -67,10 +67,10 @@
 
 ## 库存恢复 Worker
 
-- Redis Lua 在扣减库存时同步写入 pending 预扣凭证；HTTP 成功后确认凭证，明确失败后回滚。
-- Worker 每 30 秒扫描超过宽限期的 pending 凭证，每 5 分钟在同一循环内执行一次总量对账。
+- Redis Lua 在扣减库存时同步写入 pending 预扣凭证；HTTP 成功后确认凭证，明确失败后回滚。pending Hash 在确认前不设 TTL，避免凭证过期后只清 ZSET、库存无法按 quantity 归还。
+- Worker 每 30 秒扫描超过宽限期的 pending 凭证，每 5 分钟在同一循环内执行一次总量对账。启动时的 `RecoverAllStockReservations` 同样只处理过期凭证，避免滚动发布回滚其他实例的在途预扣。
 - 扫描器一次查不到订单并不等于可以回滚。它必须尝试写入 `ticket_stock_recovery_fence(owner=recovery)`；订单事务会写入同一个 `order_id` 的 `owner=order`。InnoDB 唯一键冲突会等待先到事务结束，因此两者只有一方能取得处理权。
-- 全量对账使用 `MySQL remaining_quota - queued 占用` 计算安全可用量。Redis 偏多时通过“值未变化才下调”的 Lua 修复；key 缺失且存在 pending 时不重建；Redis 偏少只记录异常，由单笔凭证恢复，不直接增加。
+- 全量对账使用 `MySQL remaining_quota - queued 占用` 计算安全可用量。Redis 偏多时通过“值未变化才下调”的 Lua 修复，且只在真正写入后计数；key 缺失且存在 pending 时不重建；Redis 偏少只记录异常，由单笔凭证恢复，不直接增加。`WarmTicketQuota` 跳过仍有 pending 的库存 key。
 
 面试表述可以收敛为：**用 Worker 定时扫描 Redis 预扣凭证并做库存对账，通过 MySQL 唯一栅栏解决事务提交与补偿回滚竞态，以更简单、可控的方式实现最终一致性。**
 
