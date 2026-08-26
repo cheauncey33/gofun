@@ -8,7 +8,7 @@ export function isGarbledText(value) {
   return false
 }
 
-export function productName(product, fallback = '零食') {
+export function productName(product, fallback = '演出') {
   const id = product?.id ?? product?.ID ?? product?.product_id ?? product?.ProductID
   const name = product?.name ?? product?.Name ?? product?.product_name
   if (isGarbledText(name)) return id ? `${fallback} #${id}` : fallback
@@ -24,18 +24,83 @@ export function moneyCents(cents) {
   return money(Number(cents || 0) / 100)
 }
 
-export const snackPlaceholder = '/snack-placeholder.svg'
+export const eventPlaceholder = '/event-placeholder.svg'
 
 export function imageUrl(value) {
-  if (!value || typeof value !== 'string') return snackPlaceholder
+  if (!value || typeof value !== 'string') return eventPlaceholder
   const text = value.trim()
-  if (!text || isGarbledText(text)) return snackPlaceholder
+  if (!text || isGarbledText(text)) return eventPlaceholder
   return text
 }
 
 export function shortDateTime(value) {
-  if (!value) return '-'
-  return String(value).replace('T', ' ').slice(0, 19)
+  const ms = parseTimeMs(value)
+  if (!Number.isFinite(ms)) return '-'
+  const d = new Date(ms)
+  const pad = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+export function formatClock(value) {
+  const ms = parseTimeMs(value)
+  if (!Number.isFinite(ms)) return '--'
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  }).format(new Date(ms))
+}
+
+export function parseTimeMs(value) {
+  if (value == null || value === '') return NaN
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value < 1e12 ? value * 1000 : value
+  }
+  const parsed = Date.parse(String(value))
+  return Number.isFinite(parsed) ? parsed : NaN
+}
+
+export const ticketOrderStatusText = {
+  queued: '排队确认中',
+  pending_payment: '待支付',
+  paid: '已支付',
+  cancelled: '已取消',
+  failed: '创建失败',
+}
+
+export function ticketOrderLabel(order) {
+  if (order?.payment_status === 'refunded') return '已退款'
+  if (order?.payment_status === 'refunding') return '退款中'
+  return ticketOrderStatusText[order?.status] || order?.status || '—'
+}
+
+export function ticketOrderStatusClass(order) {
+  if (order?.payment_status === 'refunded' || order?.payment_status === 'refunding') {
+    return order.payment_status
+  }
+  return order?.status || ''
+}
+
+export function remainingSecondsUntil(expiresAt, expiresAtUnix, nowMs = Date.now(), orderId) {
+  const candidates = []
+  const unix = Number(expiresAtUnix)
+  if (unix > 0) candidates.push(unix * 1000)
+  const parsed = parseTimeMs(expiresAt)
+  if (Number.isFinite(parsed)) candidates.push(parsed)
+  const createdMs = snowflakeCreatedMs(orderId)
+  if (Number.isFinite(createdMs)) candidates.push(createdMs + 15 * 60 * 1000)
+  if (!candidates.length) return null
+  const deadline = Math.max(...candidates)
+  return Math.max(0, Math.floor((deadline - nowMs) / 1000))
+}
+
+function snowflakeCreatedMs(id) {
+  if (id == null || id === '') return NaN
+  try {
+    const n = BigInt(String(id))
+    if (n <= 0n) return NaN
+    return Number((n >> 22n) + 1288834974657n)
+  } catch {
+    return NaN
+  }
 }
 
 export const orderStatusText = {

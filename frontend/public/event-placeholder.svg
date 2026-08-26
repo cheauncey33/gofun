@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480" role="img" aria-label="Event placeholder">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e8f4ff"/>
+      <stop offset="100%" stop-color="#f7f0ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="480" rx="24" fill="url(#bg)"/>
+  <circle cx="320" cy="190" r="72" fill="#ffffff" opacity="0.86"/>
+  <path d="M277 213l28-34 24 25 18-20 36 45h-106z" fill="#7c83fd" opacity="0.78"/>
+  <circle cx="344" cy="177" r="9" fill="#ffb86b"/>
+  <text x="320" y="302" fill="#27324a" font-family="Arial, sans-serif" font-size="30" font-weight="700" text-anchor="middle">Gofun</text>
+  <text x="320" y="334" fill="#68738a" font-family="Arial, sans-serif" font-size="22" text-anchor="middle">Event poster</text>
+</svg>

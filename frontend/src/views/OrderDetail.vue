@@ -2,8 +2,9 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import QrcodeVue from 'qrcode.vue'
 import api from '../api'
+import AdmissionTicketCard from '../components/AdmissionTicketCard.vue'
+import { parseTimeMs, ticketOrderLabel } from '../utils/display.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -12,18 +13,13 @@ const loading = ref(true)
 const actionLoading = ref(false)
 let queueTimer
 
-const statusText = {
-  queued: '排队确认中', pending_payment: '待支付', paid: '已支付',
-  cancelled: '已取消', failed: '创建失败',
-}
 const money = cents => `¥${(cents / 100).toFixed(2)}`
-const dateTime = value => value ? new Intl.DateTimeFormat('zh-CN', {
-  year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
-}).format(new Date(value)) : '—'
-const ticketStatus = {
-  valid: { label: '可入场', tone: 'valid' },
-  used: { label: '已核销', tone: 'used' },
-  revoked: { label: '已作废', tone: 'revoked' },
+const dateTime = value => {
+  const ms = parseTimeMs(value)
+  if (!Number.isFinite(ms)) return '—'
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  }).format(new Date(ms))
 }
 const attendeeFor = sequence => order.value?.attendees?.find(item => item.sequence_no === sequence)
 const hasUsedTicket = () => (order.value?.tickets || []).some(item => item.status === 'used')
@@ -56,8 +52,8 @@ async function cancel(reason = '用户主动取消') {
   try {
     await ElMessageBox.confirm(
       paid
-        ? '退款后电子票将作废，票额归还。已核销订单无法退款。是否继续？'
-        : '取消后票额会立即归还，是否继续？',
+        ? '退款后电子票将作废。已入场的订单无法退款。是否继续？'
+        : '取消后门票将退回，是否继续？',
       paid ? '申请退款' : '取消订单',
     )
     actionLoading.value = true
@@ -90,10 +86,13 @@ onBeforeUnmount(() => {
       <header>
         <div>
           <p>订单号 {{ order.order_no }}</p>
-          <h1>{{ statusText[order.status] }}</h1>
-          <span v-if="order.status === 'queued'">票额确认中，约 1–3 秒后可支付；本页会自动刷新</span>
+          <h1>{{ ticketOrderLabel(order) }}</h1>
+          <span v-if="order.status === 'queued'">正在确认座位，完成后即可支付</span>
           <span v-else-if="order.status === 'pending_payment'">请在 {{ dateTime(order.expires_at) }} 前完成支付</span>
-          <span v-else>{{ order.cancel_reason || '—' }}</span>
+          <span v-else-if="order.payment_status === 'refunded'">退款已完成，电子票已作废</span>
+          <span v-else-if="order.payment_status === 'refunding'">退款处理中</span>
+          <span v-else-if="order.status === 'paid'">电子票已生成</span>
+          <span v-else>{{ order.cancel_reason }}</span>
         </div>
         <strong>{{ money(order.total_amount_cents) }}</strong>
       </header>
@@ -101,26 +100,29 @@ onBeforeUnmount(() => {
       <section v-if="order.status === 'queued'" class="queue-banner">
         <div class="pulse-lines"><i></i><i></i><i></i><i></i><i></i></div>
         <div>
-          <strong>正在排队确认票额</strong>
-          <p>订单已进入消息队列，消费者正在核对 MySQL 票额。确认完成后将进入待支付。</p>
+          <strong>正在确认座位</strong>
+          <p>请稍候，确认完成后即可支付。</p>
         </div>
-        <button type="button" @click="load">立即刷新</button>
+        <button type="button" @click="load">刷新</button>
       </section>
 
       <section v-if="order.items?.[0]" class="ticket">
-        <div class="ticket-date"><span>DATE</span><strong>{{ dateTime(order.items[0].session_starts_at_snapshot) }}</strong></div>
+        <div class="ticket-date"><span>场次</span><strong>{{ dateTime(order.items[0].session_starts_at_snapshot) }}</strong></div>
         <div>
           <small>{{ order.order_source === 'rush_sale' ? '限时开售' : '普通购票' }}</small>
           <h2>{{ order.items[0].event_title_snapshot }}</h2>
           <p>{{ order.items[0].venue_name_snapshot }}</p>
           <p>{{ order.items[0].venue_address_snapshot }}</p>
+          <p v-if="order.session_seats?.length">
+            座位 {{ order.session_seats.map(item => item.seat?.label).filter(Boolean).join('、') }}
+          </p>
         </div>
         <div class="tier"><span>票档</span><strong>{{ order.items[0].tier_name_snapshot }}</strong><small>× {{ order.items[0].quantity }}</small></div>
       </section>
       <section class="purchase-info">
         <div>
           <small>联系人</small>
-          <strong>{{ order.contact_name || '历史订单未记录' }}</strong>
+          <strong>{{ order.contact_name || '—' }}</strong>
           <span>{{ order.contact_phone ? `${order.contact_phone.slice(0, 3)}****${order.contact_phone.slice(-4)}` : '—' }}</span>
         </div>
         <template v-if="order.real_name_required">
@@ -135,45 +137,17 @@ onBeforeUnmount(() => {
         <header class="ticket-section-heading">
           <div>
             <h2>电子票</h2>
-            <p>每张票对应一个独立入场凭证，请勿将二维码公开转发。</p>
+            <p>每张票对应一个独立入场凭证。入场时打开二维码即可，请勿截图转发。</p>
           </div>
-          <span>共 {{ order.tickets.length }} 张</span>
+          <router-link class="tickets-link" to="/orders?tab=tickets">全部电子票 →</router-link>
         </header>
         <div class="electronic-ticket-list">
-          <article
+          <AdmissionTicketCard
             v-for="admissionTicket in order.tickets"
             :key="admissionTicket.id"
-            class="electronic-ticket"
-            :class="ticketStatus[admissionTicket.status]?.tone"
-          >
-            <div class="ticket-copy">
-              <span>Gofun 电子票 {{ admissionTicket.sequence_no }}</span>
-              <h3>{{ admissionTicket.order_item?.event_title_snapshot }}</h3>
-              <p>
-                {{ admissionTicket.order_item?.tier_name_snapshot }} ·
-                {{ dateTime(admissionTicket.order_item?.session_starts_at_snapshot) }}
-              </p>
-              <small>票号 {{ admissionTicket.ticket_no }}</small>
-              <small v-if="attendeeFor(admissionTicket.sequence_no)" class="ticket-attendee">
-                观演人 {{ attendeeFor(admissionTicket.sequence_no).name }} · {{ attendeeFor(admissionTicket.sequence_no).id_number_masked }}
-              </small>
-            </div>
-            <div class="ticket-code">
-              <QrcodeVue
-                v-if="admissionTicket.status === 'valid'"
-                :value="admissionTicket.credential"
-                :size="132"
-                level="M"
-                render-as="svg"
-              />
-              <div v-else class="ticket-code-state">
-                <strong>{{ ticketStatus[admissionTicket.status]?.label }}</strong>
-                <small v-if="admissionTicket.used_at">{{ dateTime(admissionTicket.used_at) }}</small>
-                <small v-else-if="admissionTicket.revoked_at">{{ dateTime(admissionTicket.revoked_at) }}</small>
-              </div>
-              <b>{{ ticketStatus[admissionTicket.status]?.label }}</b>
-            </div>
-          </article>
+            :ticket="admissionTicket"
+            :attendee="attendeeFor(admissionTicket.sequence_no)"
+          />
         </div>
       </section>
       <div v-if="order.status === 'pending_payment'" class="actions">
@@ -228,21 +202,10 @@ header > strong { color: #ef715c; font-size: 30px; }
 .ticket-section-heading { margin: 0 0 16px; padding: 0; background: transparent; color: var(--ink); align-items: end; }
 .ticket-section-heading h2 { margin: 0; font: 720 24px var(--font-display); }
 .ticket-section-heading p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
-.ticket-section-heading > span { color: var(--muted); font-size: 12px; }
+.ticket-section-heading > span, .tickets-link { color: var(--muted); font-size: 12px; }
+.tickets-link { text-decoration: none; }
 .electronic-ticket-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.electronic-ticket { min-height: 194px; padding: 24px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); display: grid; grid-template-columns: 1fr 150px; gap: 20px; background: rgba(255,255,255,.24); position: relative; }
-.electronic-ticket::before { content: ''; position: absolute; top: 0; bottom: 0; right: 173px; border-left: 1px dashed var(--line-strong); }
-.ticket-copy > span { color: var(--red); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
-.ticket-copy h3 { margin: 8px 0; font: 700 18px var(--font-display); }
-.ticket-copy p, .ticket-copy small { color: var(--muted); }
-.ticket-copy .ticket-attendee { margin-top: 8px; display: block; color: var(--ink); }
-.ticket-code { display: grid; place-items: center; gap: 8px; }
-.ticket-code b { font-size: 12px; }
-.ticket-code-state { min-height: 132px; display: grid; place-content: center; text-align: center; color: var(--muted); }
-.electronic-ticket.valid { border-color: rgba(181,52,41,.45); }
-.electronic-ticket.used, .electronic-ticket.revoked { opacity: .72; }
 @media (max-width: 780px) {
-  .ticket, .electronic-ticket-list, .electronic-ticket, .queue-banner { grid-template-columns: 1fr; }
-  .electronic-ticket::before { display: none; }
+  .ticket, .electronic-ticket-list, .queue-banner { grid-template-columns: 1fr; }
 }
 </style>

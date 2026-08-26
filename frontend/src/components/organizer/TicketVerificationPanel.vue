@@ -178,7 +178,7 @@ function resultType(value) {
         id="session-filter"
         v-model="sessionFilter"
         clearable
-        placeholder="填写 session_id 后只核销该场次的票"
+        placeholder="填写场次后只核销该场次的票"
       />
 
       <label class="manual-label" for="ticket-credential">手动输入票码</label>
@@ -187,7 +187,7 @@ function resultType(value) {
           id="ticket-credential"
           v-model="credential"
           clearable
-          placeholder="粘贴以 FC1. 开头的完整票码"
+          placeholder="粘贴完整票码"
           @keyup.enter="verify()"
         />
         <el-button type="primary" :loading="submitting" @click="verify()">核销</el-button>

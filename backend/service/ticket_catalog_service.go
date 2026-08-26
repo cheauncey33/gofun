@@ -74,13 +74,14 @@ func splitCSV(raw string) []string {
 }
 
 type CreateOrganizerInput struct {
-	Name         string `json:"name" binding:"required"`
-	Slug         string `json:"slug" binding:"required"`
-	LogoURL      string `json:"logo_url"`
-	Description  string `json:"description"`
-	ContactName  string `json:"contact_name"`
-	ContactPhone string `json:"contact_phone"`
-	OwnerUserID  int64  `json:"owner_user_id,string" binding:"required"`
+	Name          string `json:"name" binding:"required"`
+	Slug          string `json:"slug" binding:"required"`
+	LogoURL       string `json:"logo_url"`
+	Description   string `json:"description"`
+	ContactName   string `json:"contact_name"`
+	ContactPhone  string `json:"contact_phone"`
+	OwnerUserID   int64  `json:"owner_user_id,string"`
+	OwnerUsername string `json:"owner_username"`
 }
 
 type CreateVenueInput struct {
@@ -101,6 +102,7 @@ type CreateEventInput struct {
 	Description        string `json:"description"`
 	RealNameRequired   bool   `json:"real_name_required"`
 	MaxTicketsPerOrder int    `json:"max_tickets_per_order"`
+	SaleMode           string `json:"sale_mode"`
 }
 
 type CreateEventSessionInput struct {
@@ -116,8 +118,9 @@ type CreateTicketTierInput struct {
 	Description        string `json:"description"`
 	PriceCents         int64  `json:"price_cents" binding:"required"`
 	OriginalPriceCents *int64 `json:"original_price_cents"`
-	TotalQuota         int    `json:"total_quota" binding:"required"`
+	TotalQuota         int    `json:"total_quota"`
 	PurchaseLimit      int    `json:"purchase_limit"`
+	AssignPlaceNo      *bool  `json:"assign_place_no"`
 }
 
 type MyOrganizerView struct {
@@ -173,16 +176,12 @@ func (s *TicketCatalogService) CreateOrganizer(
 ) (*models.Organizer, error) {
 	input.Name = strings.TrimSpace(input.Name)
 	input.Slug = strings.ToLower(strings.TrimSpace(input.Slug))
-	if input.Name == "" || !organizerSlugPattern.MatchString(input.Slug) || input.OwnerUserID <= 0 {
+	if input.Name == "" || !organizerSlugPattern.MatchString(input.Slug) {
 		return nil, ErrInvalidTicketCatalog
 	}
-	var userCount int64
-	if err := s.db.WithContext(ctx).Model(&models.User{}).
-		Where("id = ?", input.OwnerUserID).Count(&userCount).Error; err != nil {
+	ownerID, err := s.resolveOrganizerOwnerID(ctx, input)
+	if err != nil {
 		return nil, err
-	}
-	if userCount == 0 {
-		return nil, fmt.Errorf("%w: 负责人用户不存在", ErrInvalidTicketCatalog)
 	}
 	organizer := &models.Organizer{
 		Name:         input.Name,
@@ -194,10 +193,40 @@ func (s *TicketCatalogService) CreateOrganizer(
 		Status:       models.OrganizerStatusActive,
 		AuditStatus:  models.AuditStatusApproved,
 	}
-	if err := s.repo.CreateOrganizerWithOwner(ctx, organizer, input.OwnerUserID); err != nil {
+	if err := s.repo.CreateOrganizerWithOwner(ctx, organizer, ownerID); err != nil {
 		return nil, err
 	}
 	return organizer, nil
+}
+
+func (s *TicketCatalogService) resolveOrganizerOwnerID(
+	ctx context.Context,
+	input CreateOrganizerInput,
+) (int64, error) {
+	if input.OwnerUserID > 0 {
+		var userCount int64
+		if err := s.db.WithContext(ctx).Model(&models.User{}).
+			Where("id = ?", input.OwnerUserID).Count(&userCount).Error; err != nil {
+			return 0, err
+		}
+		if userCount == 0 {
+			return 0, fmt.Errorf("%w: 负责人用户不存在", ErrInvalidTicketCatalog)
+		}
+		return input.OwnerUserID, nil
+	}
+	username := strings.TrimSpace(input.OwnerUsername)
+	if username == "" {
+		return 0, fmt.Errorf("%w: 请填写负责人用户名", ErrInvalidTicketCatalog)
+	}
+	var user models.User
+	err := s.db.WithContext(ctx).Select("id").Where("username = ?", username).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, fmt.Errorf("%w: 负责人用户不存在", ErrInvalidTicketCatalog)
+	}
+	if err != nil {
+		return 0, err
+	}
+	return user.ID, nil
 }
 
 func (s *TicketCatalogService) ListOrganizers(
@@ -326,6 +355,10 @@ func (s *TicketCatalogService) CreateEvent(
 	if input.MaxTicketsPerOrder < 1 || input.MaxTicketsPerOrder > 20 {
 		return nil, fmt.Errorf("%w: 单笔限购须为 1 到 20", ErrInvalidTicketCatalog)
 	}
+	saleMode, err := models.ParseEventSaleMode(input.SaleMode)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidTicketCatalog, err.Error())
+	}
 	event := &models.Event{
 		OrganizerID:        organizerID,
 		Title:              input.Title,
@@ -336,10 +369,69 @@ func (s *TicketCatalogService) CreateEvent(
 		Status:             models.EventStatusDraft,
 		RealNameRequired:   input.RealNameRequired,
 		MaxTicketsPerOrder: input.MaxTicketsPerOrder,
+		SaleMode:           saleMode,
 	}
 	if err := s.repo.CreateEvent(ctx, event); err != nil {
 		return nil, err
 	}
+	return event, nil
+}
+
+func (s *TicketCatalogService) UpdateEvent(
+	ctx context.Context,
+	userID, organizerID, eventID int64,
+	input CreateEventInput,
+) (*models.Event, error) {
+	if err := s.requireOrganizerAccess(ctx, organizerID, userID); err != nil {
+		return nil, err
+	}
+	event, err := s.repo.FindEventByID(ctx, eventID)
+	if err != nil {
+		return nil, normalizeTicketNotFound(err)
+	}
+	if event.OrganizerID != organizerID {
+		return nil, ErrOrganizerForbidden
+	}
+	if event.Status != models.EventStatusDraft && event.Status != models.EventStatusPublished {
+		return nil, fmt.Errorf("%w: 只有草稿或售票中的活动可以编辑", ErrInvalidTicketCatalog)
+	}
+	input.Title = strings.TrimSpace(input.Title)
+	input.Category = strings.TrimSpace(input.Category)
+	if input.Title == "" || input.Category == "" {
+		return nil, ErrInvalidTicketCatalog
+	}
+	event.Title = input.Title
+	event.Subtitle = strings.TrimSpace(input.Subtitle)
+	event.Category = input.Category
+	event.CoverURL = strings.TrimSpace(input.CoverURL)
+	event.Description = strings.TrimSpace(input.Description)
+	if event.Status == models.EventStatusDraft {
+		if input.MaxTicketsPerOrder == 0 {
+			input.MaxTicketsPerOrder = event.MaxTicketsPerOrder
+		}
+		if input.MaxTicketsPerOrder == 0 {
+			input.MaxTicketsPerOrder = 6
+		}
+		if input.MaxTicketsPerOrder < 1 || input.MaxTicketsPerOrder > 20 {
+			return nil, fmt.Errorf("%w: 单笔限购须为 1 到 20", ErrInvalidTicketCatalog)
+		}
+		event.MaxTicketsPerOrder = input.MaxTicketsPerOrder
+		event.RealNameRequired = input.RealNameRequired
+		saleMode, err := models.ParseEventSaleMode(input.SaleMode)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidTicketCatalog, err.Error())
+		}
+		event.SaleMode = saleMode
+	}
+	if err := s.repo.SaveEvent(ctx, event); err != nil {
+		return nil, err
+	}
+	if event.Status == models.EventStatusPublished {
+		if detailed, detailErr := s.repo.FindEventDetail(ctx, event.ID); detailErr == nil {
+			s.upsertEventSearchIndex(ctx, detailed)
+		}
+	}
+	s.invalidateCatalogCaches(ctx, event.ID)
 	return event, nil
 }
 
@@ -376,28 +468,36 @@ func (s *TicketCatalogService) PublishEvent(
 			return nil, fmt.Errorf("%w: 每个场次至少需要一个票档", ErrInvalidTicketCatalog)
 		}
 	}
-	stockValues := make(map[string]interface{})
-	for _, session := range event.Sessions {
-		for _, tier := range session.TicketTiers {
-			if s.inventory.Enabled {
-				if err := EnsureTierBuckets(s.db.WithContext(ctx), &tier, s.inventory); err != nil {
-					return nil, fmt.Errorf("发布前拆桶: %w", err)
+	if event.SaleMode.IsSeated() {
+		if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			return s.generateSessionSeats(tx, event)
+		}); err != nil {
+			return nil, err
+		}
+	} else {
+		stockValues := make(map[string]interface{})
+		for _, session := range event.Sessions {
+			for _, tier := range session.TicketTiers {
+				if s.inventory.Enabled {
+					if err := EnsureTierBuckets(s.db.WithContext(ctx), &tier, s.inventory); err != nil {
+						return nil, fmt.Errorf("发布前拆桶: %w", err)
+					}
+					var buckets []models.TicketTierBucket
+					if err := s.db.WithContext(ctx).
+						Where("tier_id = ?", tier.ID).Find(&buckets).Error; err != nil {
+						return nil, err
+					}
+					for _, bucket := range buckets {
+						stockValues[TicketStockBucketKey(bucket.TierID, bucket.BucketNo)] = bucket.RemainingQuota
+					}
+				} else {
+					stockValues[ticketStockKey(tier.ID)] = tier.RemainingQuota
 				}
-				var buckets []models.TicketTierBucket
-				if err := s.db.WithContext(ctx).
-					Where("tier_id = ?", tier.ID).Find(&buckets).Error; err != nil {
-					return nil, err
-				}
-				for _, bucket := range buckets {
-					stockValues[TicketStockBucketKey(bucket.TierID, bucket.BucketNo)] = bucket.RemainingQuota
-				}
-			} else {
-				stockValues[ticketStockKey(tier.ID)] = tier.RemainingQuota
 			}
 		}
-	}
-	if err := s.rdb.MSet(ctx, stockValues).Err(); err != nil {
-		return nil, fmt.Errorf("发布前初始化票额缓存: %w", err)
+		if err := s.rdb.MSet(ctx, stockValues).Err(); err != nil {
+			return nil, fmt.Errorf("发布前初始化票额缓存: %w", err)
+		}
 	}
 	now := time.Now()
 	event.Status = models.EventStatusPublished
@@ -496,15 +596,39 @@ func (s *TicketCatalogService) UnpublishEvent(
 	if paidCount > 0 {
 		return nil, fmt.Errorf("%w: 存在已支付订单，请先取消活动并退款", ErrInvalidTicketCatalog)
 	}
-	stockKeys := make([]string, 0)
-	for _, session := range event.Sessions {
-		for i := range session.TicketTiers {
-			stockKeys = append(stockKeys, s.tierStockRedisKeys(&session.TicketTiers[i])...)
+	if event.SaleMode.IsSeated() {
+		sessionIDs := make([]int64, 0, len(event.Sessions))
+		for _, session := range event.Sessions {
+			sessionIDs = append(sessionIDs, session.ID)
 		}
-	}
-	if len(stockKeys) > 0 {
-		if err := s.rdb.Del(ctx, stockKeys...).Err(); err != nil {
-			return nil, fmt.Errorf("清理票额缓存: %w", err)
+		if len(sessionIDs) > 0 {
+			var occupied int64
+			if err := s.db.WithContext(ctx).Model(&models.SessionSeat{}).
+				Where("session_id IN ? AND status IN ?", sessionIDs, []models.SessionSeatStatus{
+					models.SessionSeatHeld, models.SessionSeatSold,
+				}).Count(&occupied).Error; err != nil {
+				return nil, err
+			}
+			if occupied > 0 {
+				return nil, fmt.Errorf("%w: 仍有占用中的座位，请先处理待支付订单", ErrInvalidTicketCatalog)
+			}
+			if err := s.db.WithContext(ctx).Unscoped().
+				Where("session_id IN ?", sessionIDs).
+				Delete(&models.SessionSeat{}).Error; err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		stockKeys := make([]string, 0)
+		for _, session := range event.Sessions {
+			for i := range session.TicketTiers {
+				stockKeys = append(stockKeys, s.tierStockRedisKeys(&session.TicketTiers[i])...)
+			}
+		}
+		if len(stockKeys) > 0 {
+			if err := s.rdb.Del(ctx, stockKeys...).Err(); err != nil {
+				return nil, fmt.Errorf("清理票额缓存: %w", err)
+			}
 		}
 	}
 	event.Status = models.EventStatusDraft
@@ -585,10 +709,8 @@ func (s *TicketCatalogService) CreateSession(
 	if event.Status != models.EventStatusDraft {
 		return nil, fmt.Errorf("%w: 已发布活动不可新增场次", ErrInvalidTicketCatalog)
 	}
-	if !input.StartsAt.Before(input.EndsAt) ||
-		!input.SaleStartsAt.Before(input.SaleEndsAt) ||
-		input.SaleEndsAt.After(input.StartsAt) {
-		return nil, fmt.Errorf("%w: 场次或售票时间范围错误", ErrInvalidTicketCatalog)
+	if err := validateSessionTimes(input.StartsAt, input.EndsAt, input.SaleStartsAt, input.SaleEndsAt); err != nil {
+		return nil, err
 	}
 	session := &models.EventSession{
 		EventID:      eventID,
@@ -628,7 +750,12 @@ func (s *TicketCatalogService) CreateTicketTier(
 		return nil, fmt.Errorf("%w: 已发布活动不可新增票档，请先下架或创建新活动", ErrInvalidTicketCatalog)
 	}
 	input.Name = strings.TrimSpace(input.Name)
-	if input.Name == "" || input.PriceCents <= 0 || input.TotalQuota <= 0 {
+	if input.Name == "" || input.PriceCents <= 0 {
+		return nil, ErrInvalidTicketCatalog
+	}
+	if event.SaleMode.IsSeated() {
+		input.TotalQuota = 0
+	} else if input.TotalQuota <= 0 {
 		return nil, ErrInvalidTicketCatalog
 	}
 	if input.PurchaseLimit == 0 {
@@ -640,6 +767,13 @@ func (s *TicketCatalogService) CreateTicketTier(
 	if input.OriginalPriceCents != nil && *input.OriginalPriceCents < input.PriceCents {
 		return nil, fmt.Errorf("%w: 原价不能低于售价", ErrInvalidTicketCatalog)
 	}
+	assignPlaceNo := true
+	if input.AssignPlaceNo != nil {
+		assignPlaceNo = *input.AssignPlaceNo
+	}
+	if event.SaleMode.IsSeated() || event.Category == "展览" {
+		assignPlaceNo = false
+	}
 	tier := &models.TicketTier{
 		SessionID:          sessionID,
 		Name:               input.Name,
@@ -649,11 +783,15 @@ func (s *TicketCatalogService) CreateTicketTier(
 		TotalQuota:         input.TotalQuota,
 		RemainingQuota:     input.TotalQuota,
 		PurchaseLimit:      input.PurchaseLimit,
+		AssignPlaceNo:      assignPlaceNo,
 		Status:             models.TicketTierStatusOnSale,
 	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(tier).Error; err != nil {
 			return err
+		}
+		if event.SaleMode.IsSeated() {
+			return nil
 		}
 		return EnsureTierBuckets(tx, tier, s.inventory)
 	})
@@ -661,6 +799,173 @@ func (s *TicketCatalogService) CreateTicketTier(
 		return nil, err
 	}
 	return tier, nil
+}
+
+func validateSessionTimes(startsAt, endsAt, saleStartsAt, saleEndsAt time.Time) error {
+	if startsAt.IsZero() || endsAt.IsZero() || saleStartsAt.IsZero() || saleEndsAt.IsZero() {
+		return fmt.Errorf("%w: 场次或售票时间范围错误", ErrInvalidTicketCatalog)
+	}
+	if !startsAt.Before(endsAt) || !saleStartsAt.Before(saleEndsAt) || saleEndsAt.After(startsAt) {
+		return fmt.Errorf("%w: 场次或售票时间范围错误", ErrInvalidTicketCatalog)
+	}
+	return nil
+}
+
+func (s *TicketCatalogService) UpdateSession(
+	ctx context.Context,
+	userID, organizerID, sessionID int64,
+	input CreateEventSessionInput,
+) (*models.EventSession, error) {
+	if err := s.requireOrganizerAccess(ctx, organizerID, userID); err != nil {
+		return nil, err
+	}
+	session, err := s.repo.FindSessionByID(ctx, sessionID)
+	if err != nil {
+		return nil, normalizeTicketNotFound(err)
+	}
+	event, err := s.repo.FindEventByID(ctx, session.EventID)
+	if err != nil {
+		return nil, normalizeTicketNotFound(err)
+	}
+	if event.OrganizerID != organizerID {
+		return nil, ErrOrganizerForbidden
+	}
+	if event.Status != models.EventStatusDraft && event.Status != models.EventStatusPublished {
+		return nil, fmt.Errorf("%w: 只有草稿或售票中的活动可以改场次", ErrInvalidTicketCatalog)
+	}
+	if err := validateSessionTimes(input.StartsAt, input.EndsAt, input.SaleStartsAt, input.SaleEndsAt); err != nil {
+		return nil, err
+	}
+	if event.Status == models.EventStatusDraft {
+		venue, venueErr := s.repo.FindVenueByID(ctx, input.VenueID)
+		if venueErr != nil {
+			return nil, normalizeTicketNotFound(venueErr)
+		}
+		if venue.OrganizerID != organizerID {
+			return nil, ErrOrganizerForbidden
+		}
+		session.VenueID = input.VenueID
+	}
+	session.StartsAt = input.StartsAt
+	session.EndsAt = input.EndsAt
+	session.SaleStartsAt = input.SaleStartsAt
+	session.SaleEndsAt = input.SaleEndsAt
+	if err := s.db.WithContext(ctx).Save(session).Error; err != nil {
+		return nil, err
+	}
+	s.invalidateCatalogCaches(ctx, event.ID)
+	return session, nil
+}
+
+type UpdateTicketTierInput struct {
+	Name        string `json:"name" binding:"required"`
+	Description string `json:"description"`
+	PriceCents  int64  `json:"price_cents" binding:"required"`
+	TotalQuota  *int   `json:"total_quota"`
+}
+
+func (s *TicketCatalogService) UpdateTicketTier(
+	ctx context.Context,
+	userID, organizerID, tierID int64,
+	input UpdateTicketTierInput,
+) (*models.TicketTier, error) {
+	if err := s.requireOrganizerAccess(ctx, organizerID, userID); err != nil {
+		return nil, err
+	}
+	var tier models.TicketTier
+	if err := s.db.WithContext(ctx).First(&tier, tierID).Error; err != nil {
+		return nil, normalizeTicketNotFound(err)
+	}
+	session, err := s.repo.FindSessionByID(ctx, tier.SessionID)
+	if err != nil {
+		return nil, normalizeTicketNotFound(err)
+	}
+	event, err := s.repo.FindEventByID(ctx, session.EventID)
+	if err != nil {
+		return nil, normalizeTicketNotFound(err)
+	}
+	if event.OrganizerID != organizerID {
+		return nil, ErrOrganizerForbidden
+	}
+	if event.Status != models.EventStatusDraft && event.Status != models.EventStatusPublished {
+		return nil, fmt.Errorf("%w: 只有草稿或售票中的活动可以改票档", ErrInvalidTicketCatalog)
+	}
+	input.Name = strings.TrimSpace(input.Name)
+	if input.Name == "" || input.PriceCents <= 0 {
+		return nil, ErrInvalidTicketCatalog
+	}
+	quotaDelta := 0
+	if input.TotalQuota != nil {
+		if event.SaleMode.IsSeated() {
+			return nil, fmt.Errorf("%w: 选座票额由厅图决定，请改厅图", ErrInvalidTicketCatalog)
+		}
+		next := *input.TotalQuota
+		if next <= 0 {
+			return nil, ErrInvalidTicketCatalog
+		}
+		if event.Status == models.EventStatusPublished {
+			if next < tier.TotalQuota {
+				return nil, fmt.Errorf("%w: 售票中只能加票，不能减票额", ErrInvalidTicketCatalog)
+			}
+			quotaDelta = next - tier.TotalQuota
+			tier.RemainingQuota += quotaDelta
+			tier.TotalQuota = next
+			if tier.RemainingQuota > 0 {
+				tier.Status = models.TicketTierStatusOnSale
+			}
+		} else {
+			tier.TotalQuota = next
+			tier.RemainingQuota = next
+		}
+	}
+	tier.Name = input.Name
+	tier.Description = strings.TrimSpace(input.Description)
+	tier.PriceCents = input.PriceCents
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&tier).Error; err != nil {
+			return err
+		}
+		if quotaDelta > 0 {
+			return s.addPublishedQuota(tx, &tier, quotaDelta)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if quotaDelta > 0 {
+		if err := s.incrPublishedStock(ctx, &tier, quotaDelta); err != nil {
+			return nil, fmt.Errorf("更新票额缓存: %w", err)
+		}
+	}
+	s.invalidateCatalogCaches(ctx, event.ID)
+	return &tier, nil
+}
+
+func (s *TicketCatalogService) addPublishedQuota(tx *gorm.DB, tier *models.TicketTier, delta int) error {
+	if delta <= 0 || !s.inventory.Enabled {
+		return nil
+	}
+	result := tx.Model(&models.TicketTierBucket{}).
+		Where("tier_id = ? AND bucket_no = 0", tier.ID).
+		Update("remaining_quota", gorm.Expr("remaining_quota + ?", delta))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return EnsureTierBuckets(tx, tier, s.inventory)
+	}
+	return nil
+}
+
+func (s *TicketCatalogService) incrPublishedStock(ctx context.Context, tier *models.TicketTier, delta int) error {
+	if s.rdb == nil || delta <= 0 {
+		return nil
+	}
+	if s.inventory.Enabled {
+		return s.rdb.IncrBy(ctx, TicketStockBucketKey(tier.ID, 0), int64(delta)).Err()
+	}
+	return s.rdb.IncrBy(ctx, ticketStockKey(tier.ID), int64(delta)).Err()
 }
 
 func (s *TicketCatalogService) ListPublishedEvents(
@@ -826,7 +1131,7 @@ func (s *TicketCatalogService) SyncPublishedEvents(ctx context.Context) (EventSe
 }
 
 func (s *TicketCatalogService) upsertEventSearchIndex(ctx context.Context, event *models.Event) {
-	if !s.searcher.Enabled() || event == nil {
+	if s.searcher == nil || !s.searcher.Enabled() || event == nil {
 		return
 	}
 	if err := s.indexEventSearchIndex(ctx, event, true); err != nil {
@@ -861,7 +1166,7 @@ func (s *TicketCatalogService) indexEventSearchIndex(
 }
 
 func (s *TicketCatalogService) removeEventSearchIndex(ctx context.Context, eventID int64) {
-	if !s.searcher.Enabled() {
+	if s.searcher == nil || !s.searcher.Enabled() {
 		return
 	}
 	if err := s.searcher.DeleteEvent(ctx, eventID, true); err != nil {
@@ -1036,6 +1341,7 @@ func (s *TicketCatalogService) ListOrganizerOrders(
 	ctx context.Context,
 	userID, organizerID int64,
 	page, pageSize int,
+	filter OrderListFilter,
 ) ([]models.TicketOrder, int64, error) {
 	if err := s.requireOrganizerAccess(ctx, organizerID, userID); err != nil {
 		return nil, 0, err
@@ -1048,8 +1354,8 @@ func (s *TicketCatalogService) ListOrganizerOrders(
 	}
 	var orders []models.TicketOrder
 	var total int64
-	query := s.db.WithContext(ctx).Model(&models.TicketOrder{}).
-		Where("organizer_id = ?", organizerID)
+	query := filter.Apply(s.db.WithContext(ctx).Model(&models.TicketOrder{}).
+		Where("organizer_id = ?", organizerID))
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}

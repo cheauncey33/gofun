@@ -173,18 +173,26 @@ func (s *TicketOrderService) createOrderAndOutbox(
 	order *models.TicketOrder,
 	message TicketOrderMessage,
 ) error {
+	seated := len(message.SeatIDs) > 0
 	for attempt := 1; attempt <= ticketOrderTxMaxAttempts; attempt++ {
 		err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			// 恢复任务也会尝试插入同一个 order_id。唯一键冲突会等待对方事务结束，
-			// 从而保证“订单提交”和“Redis 回滚”只能有一方取得执行权。
-			if err := tx.Create(&models.TicketStockRecoveryFence{
-				OrderID: order.ID,
-				Owner:   models.TicketStockRecoveryFenceOrder,
-			}).Error; err != nil {
-				return err
+			if !seated {
+				// 恢复任务也会尝试插入同一个 order_id。唯一键冲突会等待对方事务结束，
+				// 从而保证“订单提交”和“Redis 回滚”只能有一方取得执行权。
+				if err := tx.Create(&models.TicketStockRecoveryFence{
+					OrderID: order.ID,
+					Owner:   models.TicketStockRecoveryFenceOrder,
+				}).Error; err != nil {
+					return err
+				}
 			}
 			if err := tx.Create(order).Error; err != nil {
 				return err
+			}
+			if seated {
+				if err := holdSessionSeats(tx, order, message.SeatIDs); err != nil {
+					return err
+				}
 			}
 			return s.enqueueOutboxInTx(ctx, tx, order.ID, message)
 		})

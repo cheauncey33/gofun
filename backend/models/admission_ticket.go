@@ -21,6 +21,7 @@ type AdmissionTicket struct {
 	EventID      int64                 `gorm:"not null;index" json:"event_id,string"`
 	SessionID    int64                 `gorm:"not null;index" json:"session_id,string"`
 	TicketTierID int64                 `gorm:"not null;index" json:"ticket_tier_id,string"`
+	PlaceLabel   string                `gorm:"size:64;not null;default:''" json:"place_label"`
 	Status       AdmissionTicketStatus `gorm:"size:16;not null;index" json:"status"`
 	IssuedAt     time.Time             `gorm:"not null;index" json:"issued_at"`
 	UsedAt       *time.Time            `json:"used_at,omitempty"`

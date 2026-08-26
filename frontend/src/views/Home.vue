@@ -1,18 +1,22 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../api'
-import heroImage from '../assets/fuchang-hero.png'
 import { useDiscovery } from '../stores/discovery'
+import FeaturedCarousel from '../components/home/FeaturedCarousel.vue'
 
 const router = useRouter()
 const loading = ref(true)
+const loadingMore = ref(false)
 const events = ref([])
 const eventTotal = ref(0)
+const eventPage = ref(1)
+const pageSize = 12
 const rushSales = ref([])
+const featuredEvents = ref([])
 const loadError = ref('')
-const heroProgress = ref(0)
-const flipTrack = ref(null)
+const featuredLimit = 8
+const featuredRushPriority = 3
 const {
   state,
   hasActiveFilters,
@@ -22,11 +26,7 @@ const {
   applyMeta,
 } = useDiscovery()
 
-/** 翻页只需滑过约 0.38 屏，动画就完成；进度与滚动线性同步，避免中间露白 */
-const FLIP_TRAVEL_VH = 38
-
-const featuredEvents = computed(() => events.value.slice(0, 12))
-const heroFolded = computed(() => heroProgress.value > 0.92)
+const canLoadMore = computed(() => events.value.length < eventTotal.value)
 const filterSummary = computed(() => {
   const parts = []
   if (state.city) parts.push(state.city)
@@ -35,47 +35,114 @@ const filterSummary = computed(() => {
   return parts.join(' · ')
 })
 
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value))
+function rushSlide(sale) {
+  const event = featuredEvents.value.find(item => String(item.id) === String(sale.event_id))
+    || events.value.find(item => String(item.id) === String(sale.event_id))
+  return {
+    kind: 'rush',
+    id: `rush-${sale.id}`,
+    title: sale.name,
+    subtitle: sale.event_title || '限时票档',
+    price: sale.rush_price_cents,
+    badge: '限时开售',
+    time: formatRushTime(sale.starts_at),
+    cover: sale.cover_url || event?.cover_url || '',
+    eventId: sale.event_id,
+    sale,
+  }
 }
 
-function updateHeroProgress() {
-  const track = flipTrack.value
-  if (!track) return
-  const rect = track.getBoundingClientRect()
-  const travel = Math.max(rect.height - window.innerHeight, 1)
-  const next = clamp(-rect.top / travel, 0, 1)
-  heroProgress.value = next
-  document.documentElement.classList.toggle('home-flipping', next > 0.04)
-  document.documentElement.style.setProperty('--home-hero-p', String(next))
+function eventSlide(event) {
+  return {
+    kind: 'event',
+    id: `event-${event.id}`,
+    title: event.title,
+    subtitle: [eventCity(event), event.sessions?.[0]?.venue?.name].filter(Boolean).join(' · ') || event.subtitle,
+    price: minPrice(event),
+    badge: event.category || '在售',
+    time: formatDate(event),
+    cover: event.cover_url || '',
+    eventId: event.id,
+  }
 }
 
-async function loadCatalog() {
-  loading.value = true
+const featuredSlides = computed(() => {
+  const slides = []
+  const seen = new Set()
+  const rushes = rushSales.value
+  for (const sale of rushes.slice(0, featuredRushPriority)) {
+    slides.push(rushSlide(sale))
+    if (sale.event_id) seen.add(String(sale.event_id))
+  }
+  const catalog = featuredEvents.value.length ? featuredEvents.value : events.value
+  for (const event of catalog) {
+    if (slides.length >= featuredLimit) break
+    if (seen.has(String(event.id))) continue
+    slides.push(eventSlide(event))
+    seen.add(String(event.id))
+  }
+  for (const sale of rushes.slice(featuredRushPriority)) {
+    if (slides.length >= featuredLimit) break
+    slides.push(rushSlide(sale))
+    if (sale.event_id) seen.add(String(sale.event_id))
+  }
+  return slides
+})
+
+async function loadCatalog({ append = false } = {}) {
+  if (append) loadingMore.value = true
+  else {
+    loading.value = true
+    eventPage.value = 1
+  }
   loadError.value = ''
   try {
-    const [eventRes, rushRes, metaRes] = await Promise.all([
-      api.getEvents(eventQuery()),
-      api.getRushSales(),
-      api.getCatalogMeta().catch(() => null),
-    ])
-    events.value = eventRes.data?.list || []
-    eventTotal.value = eventRes.data?.total ?? events.value.length
-    rushSales.value = rushRes.data || []
-    if (metaRes?.data) applyMeta(metaRes.data)
+    const page = append ? eventPage.value + 1 : 1
+    const tasks = [
+      api.getEvents(eventQuery({ page, page_size: pageSize })),
+    ]
+    if (!append) {
+      tasks.push(api.getRushSales())
+      tasks.push(api.getCatalogMeta().catch(() => null))
+      const featuredQuery = { page: 1, page_size: featuredLimit }
+      if (state.city) featuredQuery.city = state.city
+      tasks.push(api.getEvents(featuredQuery).catch(() => null))
+    }
+    const [eventRes, rushRes, metaRes, featuredRes] = await Promise.all(tasks)
+    const list = eventRes.data?.list || []
+    eventTotal.value = eventRes.data?.total ?? (append ? eventTotal.value : list.length)
+    events.value = append ? [...events.value, ...list] : list
+    eventPage.value = page
+    if (!append) {
+      rushSales.value = rushRes?.data || []
+      if (metaRes?.data) applyMeta(metaRes.data)
+      featuredEvents.value = featuredRes?.data?.list || list.slice(0, featuredLimit)
+    }
   } catch (error) {
     loadError.value = error.response?.data?.msg || '暂时无法连接票务服务'
   } finally {
     loading.value = false
+    loadingMore.value = false
   }
 }
 
-onMounted(async () => {
-  document.documentElement.classList.add('home-scroll')
-  window.addEventListener('scroll', updateHeroProgress, { passive: true })
-  window.addEventListener('resize', updateHeroProgress)
-  updateHeroProgress()
-  await loadCatalog()
+function loadMore() {
+  if (!canLoadMore.value || loadingMore.value) return
+  loadCatalog({ append: true })
+}
+
+function openRush(sale) {
+  if (sale?.event_id) router.push(`/events/${sale.event_id}`)
+  else router.push('/rush-sales')
+}
+
+function openSlide(slide) {
+  if (slide.kind === 'rush') openRush(slide.sale || slide)
+  else if (slide.eventId) router.push(`/events/${slide.eventId}`)
+}
+
+onMounted(() => {
+  loadCatalog()
 })
 
 watch(
@@ -84,13 +151,6 @@ watch(
     loadCatalog()
   },
 )
-
-onBeforeUnmount(() => {
-  document.documentElement.classList.remove('home-scroll', 'home-flipping')
-  document.documentElement.style.removeProperty('--home-hero-p')
-  window.removeEventListener('scroll', updateHeroProgress)
-  window.removeEventListener('resize', updateHeroProgress)
-})
 
 function minPrice(event) {
   const prices = (event.sessions || []).flatMap(item =>
@@ -116,13 +176,6 @@ function formatRushTime(value) {
   }).format(new Date(value))
 }
 
-function scrollToListings() {
-  const track = flipTrack.value
-  if (!track) return
-  const top = window.scrollY + track.getBoundingClientRect().top + (window.innerHeight * FLIP_TRAVEL_VH) / 100
-  window.scrollTo({ top, behavior: 'smooth' })
-}
-
 function eventCity(event) {
   return event.sessions?.[0]?.venue?.city || ''
 }
@@ -133,34 +186,10 @@ function onCoverError(event) {
 </script>
 
 <template>
-  <div
-    class="home-page"
-    :style="{ '--hero-p': heroProgress, '--flip-travel': `${FLIP_TRAVEL_VH}vh` }"
-    :class="{ folded: heroFolded }"
-  >
-    <!-- 轨道高度 = 一屏 + 短行程：滑过约 0.42 屏翻页完成，sticky 随即释放 -->
-    <div ref="flipTrack" class="flip-track">
-      <section class="hero-panel" aria-label="Gofun 封面">
-        <img class="hero-media" :src="heroImage" alt="暖色灯光下的现场演出" />
-        <div class="hero-veil" />
-        <div class="hero-copy">
-            <p class="brand-mark">Gofun</p>
-          <h1>赴热爱之场，见想见的人。</h1>
-          <p class="hero-lead">发现值得奔赴的现场</p>
-          <div class="hero-actions">
-            <button type="button" class="primary" @click="scrollToListings">浏览场次</button>
-            <router-link class="ghost" to="/rush-sales">限时开售</router-link>
-          </div>
-        </div>
-        <button class="scroll-cue" type="button" @click="scrollToListings" aria-label="向下浏览场次">
-          <span>下滑翻页</span>
-          <i />
-        </button>
-      </section>
-    </div>
-
-    <!-- 上拉一整屏：翻页过程中场次始终贴在封面下方，无空白带 -->
+  <div class="home-page">
     <div id="home-listings" class="listings">
+      <FeaturedCarousel :slides="featuredSlides" @select="openSlide" />
+
       <section class="listing-block rush-block">
         <header class="block-heading">
           <div>
@@ -171,7 +200,7 @@ function onCoverError(event) {
           <router-link to="/rush-sales">全部开售 →</router-link>
         </header>
 
-        <div v-if="loading" class="state-panel">正在同步开售信息…</div>
+        <div v-if="loading" class="state-panel">正在加载…</div>
         <div v-else-if="loadError" class="state-panel error">{{ loadError }}</div>
         <div v-else-if="!rushSales.length" class="state-panel empty">下一场开售正在准备中</div>
         <div v-else class="rush-list">
@@ -179,7 +208,7 @@ function onCoverError(event) {
             v-for="sale in rushSales.slice(0, 4)"
             :key="sale.id"
             class="rush-card"
-            @click="router.push('/rush-sales')"
+            @click="openRush(sale)"
           >
             <div class="rush-mark">赴<br />场</div>
             <div class="rush-copy">
@@ -232,13 +261,13 @@ function onCoverError(event) {
 
         <div v-if="loading" class="state-panel">正在收集值得奔赴的现场…</div>
         <div v-else-if="loadError" class="state-panel error">{{ loadError }}</div>
-        <div v-else-if="!featuredEvents.length" class="state-panel empty">
+        <div v-else-if="!events.length" class="state-panel empty">
           <strong>没有符合条件的场次</strong>
           <p>试试换个城市、分类，或清空搜索词。</p>
         </div>
         <div v-else class="event-grid">
           <article
-            v-for="(event, index) in featuredEvents"
+            v-for="(event, index) in events"
             :key="event.id"
             class="event-card"
             @click="router.push(`/events/${event.id}`)"
@@ -266,195 +295,31 @@ function onCoverError(event) {
             </div>
           </article>
         </div>
+        <button
+          v-if="canLoadMore"
+          class="load-more"
+          type="button"
+          :disabled="loadingMore"
+          @click="loadMore"
+        >{{ loadingMore ? '加载中…' : '加载更多场次' }}</button>
       </section>
     </div>
   </div>
 </template>
 
 <style scoped>
-.home-page {
-  --hero-p: 0;
-  --flip-travel: 38vh;
-  margin: 0;
-}
-
-.flip-track {
-  height: calc(100dvh + var(--flip-travel));
-  position: relative;
-}
-
-.hero-panel {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  height: 100dvh;
-  min-height: 560px;
-  overflow: hidden;
-  transform-origin: top center;
-  /* -100% 与场次上拉行程对齐：下滑多少，封面收多少 */
-  transform: translate3d(0, calc(var(--hero-p) * -100%), 0);
-  filter: brightness(calc(1 - var(--hero-p) * .2));
-  opacity: calc(1 - var(--hero-p) * 1.05);
-  will-change: transform, filter, opacity;
-  pointer-events: auto;
-}
-
-.home-page.folded .hero-panel {
-  pointer-events: none;
-  visibility: hidden;
-}
-
-.hero-media {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 118%;
-  object-fit: cover;
-  transform: scale(calc(1.04 + var(--hero-p) * .06));
-  animation: heroDrift 18s ease-in-out infinite alternate;
-}
-
-@keyframes heroDrift {
-  from { object-position: 50% 42%; }
-  to { object-position: 48% 50%; }
-}
-
-.hero-veil {
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(90deg, rgba(12, 8, 6, .78) 0%, rgba(12, 8, 6, .28) 48%, rgba(12, 8, 6, .55) 100%),
-    linear-gradient(180deg, rgba(12, 8, 6, .35), transparent 28%, rgba(12, 8, 6, .72) 100%);
-}
-
-.hero-copy {
-  position: relative;
-  z-index: 2;
-  max-width: 720px;
-  min-height: 100%;
-  padding: clamp(96px, 16vh, 150px) 5vw 120px;
-  color: #f6eee4;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  /* 很快淡出，避免与场次「RUSH / 限时开售」叠字 */
-  opacity: calc(1 - var(--hero-p) * 5);
-  transform: translateY(calc(var(--hero-p) * -36px));
-}
-
-.brand-mark {
-  margin: 0 0 18px;
-  color: #ef6d58;
-  font: 780 clamp(42px, 6vw, 72px)/1 var(--font-display);
-  letter-spacing: .12em;
-  animation: brandIn .9s cubic-bezier(.2, .8, .2, 1) both;
-}
-
-.hero-copy h1 {
-  margin: 0;
-  font: 760 clamp(34px, 4.4vw, 58px)/1.18 var(--font-display);
-  letter-spacing: -.02em;
-  animation: copyIn .95s .08s cubic-bezier(.2, .8, .2, 1) both;
-}
-
-.hero-lead {
-  margin: 18px 0 0;
-  color: rgba(246, 238, 228, .78);
-  letter-spacing: .16em;
-  font-size: 13px;
-  animation: copyIn 1s .16s cubic-bezier(.2, .8, .2, 1) both;
-}
-
-.hero-actions {
-  display: flex;
-  gap: 12px;
-  margin-top: 34px;
-  animation: copyIn 1.05s .22s cubic-bezier(.2, .8, .2, 1) both;
-}
-
-.hero-actions .primary,
-.hero-actions .ghost {
-  height: 46px;
-  min-width: 128px;
-  padding: 0 20px;
-  border: 0;
-  border-radius: var(--radius-pill);
-  display: inline-grid;
-  place-content: center;
-  text-decoration: none;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.hero-actions .primary {
-  background: var(--red);
-  color: white;
-}
-
-.hero-actions .ghost {
-  border: 1px solid rgba(246, 238, 228, .55);
-  color: #f6eee4;
-  background: transparent;
-}
-
-.scroll-cue {
-  position: absolute;
-  left: 50%;
-  bottom: 28px;
-  z-index: 3;
-  transform: translateX(-50%);
-  border: 0;
-  background: transparent;
-  color: rgba(246, 238, 228, .82);
-  display: grid;
-  justify-items: center;
-  gap: 8px;
-  cursor: pointer;
-  opacity: calc(1 - var(--hero-p) * 2.2);
-}
-
-.scroll-cue span {
-  font-size: 11px;
-  letter-spacing: .18em;
-}
-
-.scroll-cue i {
-  width: 1px;
-  height: 28px;
-  background: rgba(246, 238, 228, .75);
-  animation: cuePulse 1.4s ease-in-out infinite;
-}
-
+.home-page { margin: 0; }
 .listings {
-  position: relative;
-  z-index: 6;
-  /* 文档起点 = flip-travel；再用 translate 与封面底边同步上推，全程无空白带 */
-  margin-top: -100dvh;
-  min-height: 100dvh;
-  /* 顶出固定顶栏高度，避免 Gofun logo 压到 RUSH / 限时开售 */
-  padding: calc(68px + 20px) 3.2vw 48px;
-  background: var(--paper);
-  transform: translate3d(
-    0,
-    calc((1 - var(--hero-p)) * (100dvh - var(--flip-travel))),
-    0
-  );
-  box-shadow: 0 -18px 40px rgba(20, 14, 10, calc(var(--hero-p) * .16));
-  will-change: transform;
-  isolation: isolate;
+  padding: 22px 3.2vw 48px;
+  min-height: 70vh;
 }
-
-.listing-block + .listing-block {
-  margin-top: 48px;
-}
-
+.listing-block { margin-top: 36px; }
 .category-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin: -4px 0 18px;
 }
-
 .chip {
   height: 32px;
   padding: 0 14px;
@@ -465,29 +330,21 @@ function onCoverError(event) {
   font-size: 12px;
   cursor: pointer;
 }
-
 .chip.active {
   border-color: var(--red);
   background: rgba(181, 52, 41, .08);
   color: var(--red);
   font-weight: 700;
 }
-
 .chip.clear {
   width: 32px;
   padding: 0;
-  border-style: solid;
   border-radius: 50%;
   color: var(--muted);
   font-size: 18px;
   line-height: 1;
 }
-
-.chip.clear:hover {
-  border-color: var(--red);
-  color: var(--red);
-}
-
+.chip.clear:hover { border-color: var(--red); color: var(--red); }
 .block-heading {
   display: flex;
   justify-content: space-between;
@@ -495,35 +352,24 @@ function onCoverError(event) {
   gap: 18px;
   margin-bottom: 18px;
 }
-
 .block-heading p {
   margin: 0;
   color: var(--red);
   font-size: 11px;
   letter-spacing: .18em;
 }
-
 .block-heading h2 {
   margin: 6px 0 4px;
   font: 740 30px var(--font-display);
 }
-
 .block-heading span,
 .block-heading a {
   color: var(--muted);
   font-size: 12px;
   text-decoration: none;
 }
-
-.rush-block .block-heading h2 {
-  color: var(--red);
-}
-
-.rush-list {
-  display: grid;
-  gap: 12px;
-}
-
+.rush-block .block-heading h2 { color: var(--red); }
+.rush-list { display: grid; gap: 12px; }
 .rush-card {
   min-height: 112px;
   padding: 16px 18px;
@@ -537,12 +383,7 @@ function onCoverError(event) {
   background: rgba(255, 255, 255, .28);
   transition: transform .2s ease, box-shadow .2s ease;
 }
-
-.rush-card:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--shadow-soft);
-}
-
+.rush-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-soft); }
 .rush-mark {
   width: 52px;
   height: 68px;
@@ -554,36 +395,20 @@ function onCoverError(event) {
   text-align: center;
   font: 700 18px/1.1 var(--font-display);
 }
-
-.rush-copy small,
-.rush-copy p,
-.rush-stock {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.rush-copy h3 {
-  margin: 6px 0;
-  font: 700 22px var(--font-display);
-}
-
+.rush-copy small, .rush-copy p, .rush-stock { color: var(--muted); font-size: 12px; }
+.rush-copy h3 { margin: 6px 0; font: 700 22px var(--font-display); }
 .rush-card > strong {
   color: var(--red);
   font-size: 28px;
   grid-row: 1 / 3;
   grid-column: 3;
 }
-
-.rush-stock {
-  grid-column: 2;
-}
-
+.rush-stock { grid-column: 2; }
 .event-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
 }
-
 .event-card {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-md);
@@ -592,12 +417,7 @@ function onCoverError(event) {
   cursor: pointer;
   transition: transform .2s, box-shadow .2s;
 }
-
-.event-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-lift);
-}
-
+.event-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lift); }
 .event-poster {
   height: 180px;
   padding: 12px;
@@ -608,7 +428,6 @@ function onCoverError(event) {
   position: relative;
   overflow: hidden;
 }
-
 .event-poster img {
   position: absolute;
   inset: 0;
@@ -616,20 +435,13 @@ function onCoverError(event) {
   height: 100%;
   object-fit: cover;
 }
-
 .event-poster::after {
   content: '';
   position: absolute;
   inset: 0;
   background: linear-gradient(180deg, rgba(0, 0, 0, .08), rgba(0, 0, 0, .58));
 }
-
-.event-poster span,
-.event-poster strong {
-  position: relative;
-  z-index: 1;
-}
-
+.event-poster span, .event-poster strong { position: relative; z-index: 1; }
 .event-poster span {
   align-self: flex-start;
   padding: 4px 10px;
@@ -637,49 +449,24 @@ function onCoverError(event) {
   background: rgba(18, 18, 18, .7);
   font-size: 10px;
 }
-
-.event-poster strong {
-  font-family: var(--font-display);
-  font-size: 24px;
-}
-
+.event-poster strong { font-family: var(--font-display); font-size: 24px; }
 .poster-0 { background: linear-gradient(145deg, #1b1b1b 10%, #75402f 58%, #d63f2e); }
 .poster-1 { background: linear-gradient(145deg, #18324a, #287b86 64%, #b7d4c5); }
 .poster-2 { background: linear-gradient(145deg, #27223b, #315ba5 55%, #e5ad5f); }
 .poster-3 { background: linear-gradient(145deg, #1b1512, #674f34 55%, #a92e24); }
 .poster-4 { background: linear-gradient(145deg, #294b3f, #67a86c 62%, #f3ca61); }
-
 .event-info {
   min-height: 112px;
   padding: 12px;
   display: flex;
   flex-direction: column;
 }
-
-.event-info h3 {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.45;
-}
-
-.event-info p {
-  margin: 8px 0 14px;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.event-info > strong {
-  margin-top: auto;
-  color: var(--red);
-}
-
-.event-info small {
-  color: var(--muted);
-  font-weight: 400;
-}
-
+.event-info h3 { margin: 0; font-size: 14px; line-height: 1.45; }
+.event-info p { margin: 8px 0 14px; color: var(--muted); font-size: 11px; }
+.event-info > strong { margin-top: auto; color: var(--red); }
+.event-info small { color: var(--muted); font-weight: 400; }
 .state-panel {
-  min-height: 160px;
+  min-height: 120px;
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius-lg);
   display: grid;
@@ -688,37 +475,28 @@ function onCoverError(event) {
   color: var(--muted);
   gap: 8px;
 }
-
 .state-panel strong { color: var(--ink); font-size: 20px; }
 .state-panel.error { color: var(--red); }
-
-@keyframes brandIn {
-  from { opacity: 0; transform: translateY(18px); }
-  to { opacity: 1; transform: none; }
+.load-more {
+  width: 100%;
+  height: 44px;
+  margin-top: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink);
+  font-weight: 650;
+  cursor: pointer;
 }
-
-@keyframes copyIn {
-  from { opacity: 0; transform: translateY(22px); }
-  to { opacity: 1; transform: none; }
-}
-
-@keyframes cuePulse {
-  0%, 100% { transform: scaleY(.55); opacity: .4; }
-  50% { transform: scaleY(1); opacity: 1; }
-}
-
+.load-more:disabled { opacity: .6; cursor: wait; }
 @media (max-width: 1000px) {
   .event-grid { grid-template-columns: repeat(2, 1fr); }
   .rush-card { grid-template-columns: 52px 1fr; }
   .rush-card > strong { grid-row: auto; grid-column: 2; font-size: 24px; }
 }
-
 @media (max-width: 640px) {
-  .hero-copy { padding: 92px 20px 110px; }
-  .hero-actions { flex-direction: column; align-items: stretch; }
-  .listings { padding: 24px 16px 12px; }
+  .listings { padding: 16px 16px 12px; }
   .event-grid { grid-template-columns: 1fr; }
   .block-heading { align-items: start; flex-direction: column; }
-  .hero-panel { min-height: 100dvh; }
 }
 </style>

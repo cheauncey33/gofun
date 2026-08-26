@@ -208,6 +208,9 @@ func ticketingSchemaModels() []interface{} {
 		&models.AdmissionTicket{},
 		&models.TicketVerificationRecord{},
 		&models.EventComment{},
+		&models.SeatLayout{},
+		&models.Seat{},
+		&models.SessionSeat{},
 	}
 }
 

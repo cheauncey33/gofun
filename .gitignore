@@ -3,6 +3,12 @@
 .env.*
 !.env.example
 
+# Local image uploads
+backend/uploads/*
+!backend/uploads/.gitkeep
+uploads/*
+!uploads/.gitkeep
+
 # Backend build artifacts
 backend/gofun
 backend/gofun.exe

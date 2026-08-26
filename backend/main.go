@@ -105,6 +105,11 @@ func main() {
 	rushSaleCtrl := controller.NewRushSaleController(rushSaleSvc)
 	eventCommentSvc := service.NewEventCommentService(cont)
 	eventCommentCtrl := controller.NewEventCommentController(eventCommentSvc)
+	uploadStore, err := service.NewUploadStore(cfg.Server.UploadDir)
+	if err != nil {
+		panic(fmt.Errorf("初始化上传目录失败: %v", err))
+	}
+	uploadCtrl := controller.NewUploadController(uploadStore)
 	orderSocketHandler := ws.NewHandler(orderHub, cfg.Cors.AllowOrigins...)
 	ticketCompensationSvc := service.NewTicketCompensationService(cont, ticketOrderSvc)
 	ticketCompensationSvc.ConfigureInventory(cfg.Inventory)
@@ -194,15 +199,18 @@ func main() {
 		// 活动浏览无需登录；购票和主办方管理仍由各自的鉴权路由保护。
 		v1.GET("/events", ticketCatalogCtrl.ListPublishedEvents)
 		v1.GET("/events/:id", ticketCatalogCtrl.GetPublishedEvent)
+		v1.GET("/events/:id/sessions/:session_id/seats", ticketCatalogCtrl.ListSessionSeats)
 		v1.GET("/events/:id/comments", common.OptionalAuthMiddleware(), eventCommentCtrl.List)
 		v1.GET("/catalog/meta", ticketCatalogCtrl.GetCatalogMeta)
 		v1.GET("/rush-sales", rushSaleCtrl.ListCampaigns)
+		v1.GET("/uploads/:name", uploadCtrl.Get)
 
 		auth := v1.Group("/")
 		auth.Use(common.AuthMiddleware())
 		{
 			auth.POST("/orders", writeLimit, ticketOrderCtrl.CreateOrder)
 			auth.GET("/orders", ticketOrderCtrl.ListOrders)
+			auth.GET("/tickets", ticketOrderCtrl.ListTickets)
 			auth.GET("/orders/:id", ticketOrderCtrl.GetOrder)
 			auth.POST("/orders/:id/cancel", ticketOrderCtrl.CancelOrder)
 			auth.POST("/orders/:id/pay", ticketOrderCtrl.PayOrder)
@@ -214,7 +222,11 @@ func main() {
 			auth.GET("/user/info", userCtrl.GetUserInfo)
 			auth.PUT("/user/info", userCtrl.UpdateUserInfo)
 			auth.PUT("/user/password", userCtrl.ChangePassword)
+			auth.GET("/user/attendees", userCtrl.ListAttendees)
+			auth.POST("/user/attendees", userCtrl.CreateAttendee)
+			auth.DELETE("/user/attendees/:id", userCtrl.DeleteAttendee)
 			auth.GET("/organizers/mine", ticketCatalogCtrl.ListMyOrganizers)
+			auth.POST("/uploads", writeLimit, uploadCtrl.Create)
 		}
 
 		organizer := v1.Group("/organizers/:organizer_id")
@@ -223,6 +235,7 @@ func main() {
 			organizer.POST("/venues", ticketCatalogCtrl.CreateVenue)
 			organizer.GET("/venues", ticketCatalogCtrl.ListVenues)
 			organizer.POST("/events", ticketCatalogCtrl.CreateEvent)
+			organizer.PUT("/events/:event_id", ticketCatalogCtrl.UpdateEvent)
 			organizer.GET("/events", ticketCatalogCtrl.ListOrganizerEvents)
 			organizer.GET("/overview", ticketCatalogCtrl.GetOrganizerOverview)
 			organizer.GET("/orders", ticketCatalogCtrl.ListOrganizerOrders)
@@ -233,7 +246,11 @@ func main() {
 			organizer.POST("/events/:event_id/cancel", ticketCatalogCtrl.CancelEvent)
 			organizer.POST("/events/:event_id/refunds", ticketCatalogCtrl.BatchRefundEvent)
 			organizer.POST("/events/:event_id/sessions", ticketCatalogCtrl.CreateSession)
+			organizer.PUT("/sessions/:session_id", ticketCatalogCtrl.UpdateSession)
 			organizer.POST("/sessions/:session_id/ticket-tiers", ticketCatalogCtrl.CreateTicketTier)
+			organizer.GET("/events/:event_id/seat-layout", ticketCatalogCtrl.GetSeatLayout)
+			organizer.PUT("/events/:event_id/seat-layout", ticketCatalogCtrl.SaveSeatLayout)
+			organizer.PUT("/ticket-tiers/:tier_id", ticketCatalogCtrl.UpdateTicketTier)
 			organizer.POST("/ticket-tiers/:tier_id/disable", ticketCatalogCtrl.DisableTicketTier)
 			organizer.POST("/rush-sales", rushSaleCtrl.CreateCampaign)
 		}

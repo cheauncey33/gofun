@@ -1,10 +1,10 @@
 package controller
 
 import (
+	"errors"
 	"gofun/common"
 	"gofun/pkg/response"
 	"gofun/service"
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -159,6 +159,32 @@ func (ctrl *TicketCatalogController) CreateEvent(c *gin.Context) {
 	response.Success(c, event)
 }
 
+func (ctrl *TicketCatalogController) UpdateEvent(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	organizerID, ok := parseTicketID(c, "organizer_id")
+	if !ok {
+		return
+	}
+	eventID, ok := parseTicketID(c, "event_id")
+	if !ok {
+		return
+	}
+	var input service.CreateEventInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		return
+	}
+	event, err := ctrl.service.UpdateEvent(c.Request.Context(), userID, organizerID, eventID, input)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, event)
+}
+
 func (ctrl *TicketCatalogController) ListOrganizerEvents(c *gin.Context) {
 	userID, ok := ticketUserID(c)
 	if !ok {
@@ -210,8 +236,9 @@ func (ctrl *TicketCatalogController) ListOrganizerOrders(c *gin.Context) {
 		return
 	}
 	page, pageSize := parseTicketPage(c)
+	filter := service.ParseOrderListFilter(c.Query("status"), c.Query("keyword"), c.Query("q"))
 	orders, total, err := ctrl.service.ListOrganizerOrders(
-		c.Request.Context(), userID, organizerID, page, pageSize,
+		c.Request.Context(), userID, organizerID, page, pageSize, filter,
 	)
 	if err != nil {
 		writeTicketCatalogError(c, err)
@@ -276,8 +303,8 @@ func (ctrl *TicketCatalogController) CancelEvent(c *gin.Context) {
 		return
 	}
 	var input struct {
-		Reason       string `json:"reason"`
-		RefundPaid   *bool  `json:"refund_paid"`
+		Reason     string `json:"reason"`
+		RefundPaid *bool  `json:"refund_paid"`
 	}
 	_ = c.ShouldBindJSON(&input)
 	event, err := ctrl.service.CancelEvent(c.Request.Context(), userID, organizerID, eventID)
@@ -386,6 +413,34 @@ func (ctrl *TicketCatalogController) CreateSession(c *gin.Context) {
 	response.Success(c, session)
 }
 
+func (ctrl *TicketCatalogController) UpdateSession(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	organizerID, ok := parseTicketID(c, "organizer_id")
+	if !ok {
+		return
+	}
+	sessionID, ok := parseTicketID(c, "session_id")
+	if !ok {
+		return
+	}
+	var input service.CreateEventSessionInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		return
+	}
+	session, err := ctrl.service.UpdateSession(
+		c.Request.Context(), userID, organizerID, sessionID, input,
+	)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, session)
+}
+
 func (ctrl *TicketCatalogController) CreateTicketTier(c *gin.Context) {
 	userID, ok := ticketUserID(c)
 	if !ok {
@@ -412,6 +467,98 @@ func (ctrl *TicketCatalogController) CreateTicketTier(c *gin.Context) {
 		return
 	}
 	response.Success(c, tier)
+}
+
+func (ctrl *TicketCatalogController) UpdateTicketTier(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	organizerID, ok := parseTicketID(c, "organizer_id")
+	if !ok {
+		return
+	}
+	tierID, ok := parseTicketID(c, "tier_id")
+	if !ok {
+		return
+	}
+	var input service.UpdateTicketTierInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		return
+	}
+	tier, err := ctrl.service.UpdateTicketTier(
+		c.Request.Context(), userID, organizerID, tierID, input,
+	)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, tier)
+}
+
+func (ctrl *TicketCatalogController) GetSeatLayout(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	organizerID, ok := parseTicketID(c, "organizer_id")
+	if !ok {
+		return
+	}
+	eventID, ok := parseTicketID(c, "event_id")
+	if !ok {
+		return
+	}
+	layout, err := ctrl.service.GetSeatLayout(c.Request.Context(), userID, organizerID, eventID)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, layout)
+}
+
+func (ctrl *TicketCatalogController) SaveSeatLayout(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	organizerID, ok := parseTicketID(c, "organizer_id")
+	if !ok {
+		return
+	}
+	eventID, ok := parseTicketID(c, "event_id")
+	if !ok {
+		return
+	}
+	var input service.SeatLayoutInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		return
+	}
+	layout, err := ctrl.service.SaveSeatLayout(c.Request.Context(), userID, organizerID, eventID, input)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, layout)
+}
+
+func (ctrl *TicketCatalogController) ListSessionSeats(c *gin.Context) {
+	eventID, ok := parseTicketID(c, "id")
+	if !ok {
+		return
+	}
+	sessionID, ok := parseTicketID(c, "session_id")
+	if !ok {
+		return
+	}
+	seats, err := ctrl.service.ListSessionSeats(c.Request.Context(), eventID, sessionID)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, seats)
 }
 
 func parseTicketID(c *gin.Context, name string) (int64, bool) {

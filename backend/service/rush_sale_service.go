@@ -84,6 +84,9 @@ func (s *RushSaleService) CreateCampaign(
 	if event.OrganizerID != organizerID {
 		return nil, ErrOrganizerForbidden
 	}
+	if event.SaleMode.IsSeated() {
+		return nil, fmt.Errorf("%w: 选座活动不支持限时开售", ErrInvalidTicketCatalog)
+	}
 	if input.Name == "" || input.RushPriceCents <= 0 ||
 		input.RushPriceCents >= tier.PriceCents ||
 		input.TotalQuota <= 0 || input.TotalQuota > tier.RemainingQuota ||
@@ -143,6 +146,7 @@ type RushSaleCampaignView struct {
 	models.RushSaleCampaign
 	EventID          int64  `json:"event_id,string"`
 	EventTitle       string `json:"event_title"`
+	CoverURL         string `json:"cover_url"`
 	RealNameRequired bool   `json:"real_name_required"`
 }
 
@@ -191,6 +195,7 @@ func (s *RushSaleService) loadRushSalesListMeta(ctx context.Context) ([]RushSale
 				if eventErr == nil {
 					view.EventID = event.ID
 					view.EventTitle = event.Title
+					view.CoverURL = event.CoverURL
 					view.RealNameRequired = event.RealNameRequired
 				}
 			}
@@ -222,6 +227,11 @@ func (s *RushSaleService) Execute(
 	if quantity <= 0 || quantity > campaign.PerUserLimit {
 		return nil, fmt.Errorf("%w: 超过限购数量", ErrTicketOrderUnavailable)
 	}
+	if _, _, event, _, err := s.order.loadPurchasableTier(ctx, campaign.TicketTierID); err != nil {
+		return nil, err
+	} else if event.SaleMode.IsSeated() {
+		return nil, fmt.Errorf("%w: 选座购票尚未开放", ErrTicketOrderUnavailable)
+	}
 	if receipt, err := s.order.lookupIdempotentOrder(ctx, userID, idempotencyKey); err != nil {
 		return nil, err
 	} else if receipt != nil {
@@ -240,7 +250,7 @@ func (s *RushSaleService) Execute(
 	case -4:
 		return nil, fmt.Errorf("%w: 已达到限购数量", ErrTicketOrderUnavailable)
 	case -2:
-		return nil, fmt.Errorf("%w: 票额缓存尚未预热", ErrTicketOrderUnavailable)
+		return nil, fmt.Errorf("%w: 暂时无法购票，请稍后重试", ErrTicketOrderUnavailable)
 	case -1:
 		s.setRushStockLocal(campaignID, 0)
 		return nil, ErrTicketQuotaInsufficient
@@ -525,6 +535,9 @@ func (s *TicketOrderService) createRushOrderAfterReservation(
 	}
 	if quantity > tier.PurchaseLimit || quantity > event.MaxTicketsPerOrder {
 		return nil, fmt.Errorf("%w: 超过限购数量", ErrTicketOrderUnavailable)
+	}
+	if event.SaleMode.IsSeated() {
+		return nil, fmt.Errorf("%w: 选座购票尚未开放", ErrTicketOrderUnavailable)
 	}
 	if err := validatePurchaseInfo(purchase, quantity, event.RealNameRequired); err != nil {
 		return nil, err

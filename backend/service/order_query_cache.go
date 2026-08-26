@@ -59,16 +59,16 @@ func orderUserVersionKey(userID int64) string {
 	return fmt.Sprintf("%suser:%d:ver", orderQueryCachePrefix, userID)
 }
 
-func orderListCacheKey(userID int64, version string, page, pageSize int) string {
-	return fmt.Sprintf("%slist:u=%d:v=%s:p=%d:ps=%d", orderQueryCachePrefix, userID, version, page, pageSize)
+func orderListCacheKey(userID int64, version string, page, pageSize int, filter OrderListFilter) string {
+	return fmt.Sprintf("%slist:u=%d:v=%s:p=%d:ps=%d:f=%s", orderQueryCachePrefix, userID, version, page, pageSize, filter.CacheToken())
 }
 
 func orderDetailCacheKey(userID, orderID int64, version string) string {
 	return fmt.Sprintf("%sdetail:u=%d:o=%d:v=%s", orderQueryCachePrefix, userID, orderID, version)
 }
 
-func orderCountCacheKey(userID int64, version string) string {
-	return fmt.Sprintf("%scount:u=%d:v=%s", orderQueryCachePrefix, userID, version)
+func orderCountCacheKey(userID int64, version string, filter OrderListFilter) string {
+	return fmt.Sprintf("%scount:u=%d:v=%s:f=%s", orderQueryCachePrefix, userID, version, filter.CacheToken())
 }
 
 func (s *TicketOrderService) orderListVersion(ctx context.Context, userID int64) string {
@@ -99,11 +99,11 @@ func (s *TicketOrderService) invalidateUserOrderQueryCache(ctx context.Context, 
 	_ = s.rdb.Expire(ctx, orderUserVersionKey(userID), 24*time.Hour).Err()
 }
 
-func (s *TicketOrderService) cachedOrderCount(ctx context.Context, userID int64, version string) (int64, bool) {
+func (s *TicketOrderService) cachedOrderCount(ctx context.Context, userID int64, version string, filter OrderListFilter) (int64, bool) {
 	if s.rdb == nil {
 		return 0, false
 	}
-	raw, err := s.rdb.Get(ctx, orderCountCacheKey(userID, version)).Result()
+	raw, err := s.rdb.Get(ctx, orderCountCacheKey(userID, version, filter)).Result()
 	if err != nil {
 		return 0, false
 	}
@@ -114,11 +114,11 @@ func (s *TicketOrderService) cachedOrderCount(ctx context.Context, userID int64,
 	return n, true
 }
 
-func (s *TicketOrderService) storeOrderCount(ctx context.Context, userID int64, version string, total int64) {
+func (s *TicketOrderService) storeOrderCount(ctx context.Context, userID int64, version string, filter OrderListFilter, total int64) {
 	if s.rdb == nil {
 		return
 	}
-	if err := s.rdb.Set(ctx, orderCountCacheKey(userID, version), strconv.FormatInt(total, 10), jitterTTL(orderCountTTL)).Err(); err != nil {
+	if err := s.rdb.Set(ctx, orderCountCacheKey(userID, version, filter), strconv.FormatInt(total, 10), jitterTTL(orderCountTTL)).Err(); err != nil {
 		log.Printf("[order-query-cache] set count user=%d: %v", userID, err)
 	}
 }

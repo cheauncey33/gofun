@@ -31,6 +31,9 @@ services:
       ORDER_OUTBOX_PUBLISH_WORKERS: "4"
       INVENTORY_BUCKETS_ENABLED: "true"
       INVENTORY_BUCKET_COUNT: "32"
+      SERVER_UPLOAD_DIR: /app/uploads
+    volumes:
+      - upload_data:/app/uploads
     depends_on:
       mysql:
         condition: service_healthy
@@ -96,3 +99,4 @@ volumes:
   mysql_data:
   redis_data:
   rabbitmq_data:
+  upload_data:

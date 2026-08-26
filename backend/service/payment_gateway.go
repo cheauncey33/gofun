@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -204,7 +205,7 @@ func (g *SandboxPaymentGateway) emitCallback(paymentNo, scenario string) {
 	reason := ""
 	if scenario == "failed" {
 		status = "failed"
-		reason = "sandbox simulated payment failure"
+		reason = "支付未完成"
 	}
 	state.Status = status
 	g.byNo[paymentNo] = state
@@ -215,7 +216,9 @@ func (g *SandboxPaymentGateway) emitCallback(paymentNo, scenario string) {
 	}
 	notification.Signature = g.sign(notification)
 	g.mu.Unlock()
-	_ = callback(context.Background(), notification)
+	if err := callback(context.Background(), notification); err != nil {
+		log.Printf("sandbox payment callback %s: %v", paymentNo, err)
+	}
 }
 
 func (g *SandboxPaymentGateway) Refund(_ context.Context, paymentNo string, amountCents int64) error {

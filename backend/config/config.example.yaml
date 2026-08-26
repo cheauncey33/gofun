@@ -2,6 +2,8 @@ server:
   host: "127.0.0.1"
   port: 8080
   mode: "debug"  # debug | release | test
+  # 活动封面等本地上传目录；相对路径相对进程工作目录。
+  upload_dir: "uploads"
 
 mysql:
   dsn: "gofun:gofun123456@tcp(127.0.0.1:3306)/gofun?charset=utf8mb4&parseTime=True&loc=Local"

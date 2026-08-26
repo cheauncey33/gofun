@@ -100,8 +100,16 @@ button, input { font-family: inherit; }
 .auth-switch { text-align: center; color: var(--muted); font-size: 13px; }
 
 @media (max-width: 800px) {
-  .auth-brand { display: none; }
-  .auth-panel { width: 100%; }
+  .auth-container { flex-direction: column; }
+  .auth-brand {
+    display: flex;
+    min-height: 34vh;
+    padding: 28px 24px 36px;
+  }
+  .auth-headline { font-size: clamp(32px, 8vw, 48px); }
+  .auth-tagline { display: none; }
+  .auth-foot { display: none; }
+  .auth-panel { width: 100%; padding: 28px 24px 40px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }

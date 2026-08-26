@@ -1,16 +1,24 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
 import heroImage from '../assets/fuchang-hero.png'
+import SeatPickerDialog from '../components/ticket/SeatPickerDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
 const event = ref(null)
 const loading = ref(true)
+const selectedSessionId = ref('')
 const selectedTier = ref(null)
 const quantity = ref(1)
+const sessionSeats = ref([])
+const pickerOpen = ref(false)
+const buyOpen = ref(false)
+const commentPage = ref(1)
+const commentPageSize = 20
+const commentsLoadingMore = ref(false)
 
 const comments = ref([])
 const commentTotal = ref(0)
@@ -20,17 +28,72 @@ const commentSubmitting = ref(false)
 const likingId = ref(null)
 
 const token = computed(() => localStorage.getItem('access_token') || localStorage.getItem('token'))
+const isSeated = computed(() => event.value?.sale_mode === 'seated')
+const isExhibition = computed(() => event.value?.category === '展览')
 const selectedSession = computed(() =>
-  event.value?.sessions?.find(item =>
-    item.ticket_tiers?.some(tier => tier.id === selectedTier.value?.id)
-  )
+  event.value?.sessions?.find(item => String(item.id) === String(selectedSessionId.value))
+  || event.value?.sessions?.[0]
 )
+
+function sessionRemaining(session) {
+  return (session?.ticket_tiers || []).reduce((sum, tier) => sum + Number(tier.remaining_quota || 0), 0)
+}
+
+function sessionSaleState(session) {
+  if (!session) return 'unavailable'
+  const now = Date.now()
+  const start = session.sale_starts_at ? new Date(session.sale_starts_at).getTime() : 0
+  const end = session.sale_ends_at ? new Date(session.sale_ends_at).getTime() : Infinity
+  if (sessionRemaining(session) <= 0) return 'sold_out'
+  if (start && now < start) return 'not_started'
+  if (end && Number.isFinite(end) && now > end) return 'ended'
+  return 'on_sale'
+}
+
+const saleState = computed(() => sessionSaleState(selectedSession.value))
+const canBuy = computed(() => saleState.value === 'on_sale' && !!selectedTier.value)
+const buyLabel = computed(() => {
+  if (saleState.value === 'sold_out') return '已售罄'
+  if (saleState.value === 'not_started') return '尚未开售'
+  if (saleState.value === 'ended') return '已停售'
+  return isSeated.value ? '选座购票' : '立即购票'
+})
+const lowestPrice = computed(() => {
+  const prices = (selectedSession.value?.ticket_tiers || [])
+    .filter(tier => Number(tier.remaining_quota || 0) > 0)
+    .map(tier => tier.price_cents)
+  if (prices.length) return Math.min(...prices)
+  return selectedTier.value?.price_cents
+})
+
+function saleStateText(state) {
+  return { sold_out: '已售罄', not_started: '未开售', ended: '已停售', on_sale: '售票中' }[state] || ''
+}
+
+function selectSession(session) {
+  selectedSessionId.value = String(session.id)
+  const tiers = session.ticket_tiers || []
+  selectedTier.value = tiers.find(tier => Number(tier.remaining_quota || 0) > 0) || tiers[0] || null
+  quantity.value = 1
+}
+
+watch(selectedSession, async (session) => {
+  if (!isSeated.value || !session?.id || !event.value?.id) return
+  try {
+    const seatRes = await api.getSessionSeats(event.value.id, session.id)
+    sessionSeats.value = seatRes.data || []
+  } catch (error) {
+    sessionSeats.value = []
+    ElMessage.error(error.response?.data?.msg || '座位图加载失败')
+  }
+})
 
 onMounted(async () => {
   try {
     const res = await api.getEventDetail(route.params.id)
     event.value = res.data
-    selectedTier.value = event.value.sessions?.[0]?.ticket_tiers?.[0] || null
+    const first = event.value.sessions?.[0]
+    if (first) selectSession(first)
     await loadComments()
   } catch (error) {
     ElMessage.error(error.response?.data?.msg || '活动不存在或尚未发布')
@@ -39,16 +102,21 @@ onMounted(async () => {
   }
 })
 
-async function loadComments() {
-  commentsLoading.value = true
+async function loadComments({ append = false } = {}) {
+  if (append) commentsLoadingMore.value = true
+  else commentsLoading.value = true
   try {
-    const res = await api.getEventComments(route.params.id, { page: 1, page_size: 30 })
-    comments.value = res.data?.list || []
-    commentTotal.value = res.data?.total || 0
+    const page = append ? commentPage.value + 1 : 1
+    const res = await api.getEventComments(route.params.id, { page, page_size: commentPageSize })
+    const list = res.data?.list || []
+    comments.value = append ? [...comments.value, ...list] : list
+    commentTotal.value = res.data?.total || comments.value.length
+    commentPage.value = page
   } catch (error) {
     ElMessage.error(error.response?.data?.msg || '讨论区加载失败')
   } finally {
     commentsLoading.value = false
+    commentsLoadingMore.value = false
   }
 }
 
@@ -110,6 +178,7 @@ function money(cents) {
 }
 
 function dateTime(value) {
+  if (!value) return '时间待定'
   return new Intl.DateTimeFormat('zh-CN', {
     month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit',
   }).format(new Date(value))
@@ -121,17 +190,53 @@ function commentTime(value) {
   }).format(new Date(value))
 }
 
-function buy() {
+async function buy() {
   if (!token.value) {
     router.push(`/login?redirect=${encodeURIComponent(route.fullPath)}`)
     return
   }
-  if (!selectedTier.value) return
+  if (!canBuy.value) return
+  if (isSeated.value) {
+    if (!sessionSeats.value.length && selectedSession.value?.id) {
+      try {
+        const seatRes = await api.getSessionSeats(event.value.id, selectedSession.value.id)
+        sessionSeats.value = seatRes.data || []
+      } catch (error) {
+        ElMessage.error(error.response?.data?.msg || '座位图加载失败')
+        return
+      }
+    }
+    pickerOpen.value = true
+    return
+  }
+  buyOpen.value = true
+}
+
+function goCheckout({ tierId, quantity: qty, seatIds }) {
   router.push({
     name: 'Checkout',
     params: { eventId: event.value.id },
-    query: { tier: selectedTier.value.id, quantity: quantity.value },
+    query: seatIds?.length
+      ? { tier: tierId, seat_ids: seatIds.join(',') }
+      : { tier: tierId, quantity: qty },
   })
+}
+
+function confirmSeats(payload) {
+  pickerOpen.value = false
+  goCheckout({ tierId: payload.tierId, seatIds: payload.seatIds })
+}
+
+function confirmCounter() {
+  if (!selectedTier.value) return
+  buyOpen.value = false
+  goCheckout({ tierId: selectedTier.value.id, quantity: quantity.value })
+}
+
+function onCounterTierChange(event) {
+  const id = event.target.value
+  selectedTier.value = (selectedSession.value?.ticket_tiers || []).find(item => String(item.id) === String(id)) || null
+  quantity.value = 1
 }
 </script>
 
@@ -147,32 +252,27 @@ function buy() {
           <h1>{{ event.title }}</h1>
           <h2>{{ event.subtitle }}</h2>
           <dl v-if="event.sessions?.length">
-            <div><dt>时间</dt><dd>{{ dateTime(event.sessions[0].starts_at) }}</dd></div>
-            <div><dt>场馆</dt><dd>{{ event.sessions[0].venue?.name }} · {{ event.sessions[0].venue?.address }}</dd></div>
-            <div><dt>规则</dt><dd>单笔最多 {{ event.max_tickets_per_order }} 张<span v-if="event.real_name_required"> · 实名制</span></dd></div>
+            <div><dt>时间</dt><dd>{{ dateTime(selectedSession?.starts_at || event.sessions[0].starts_at) }}</dd></div>
+            <div><dt>场馆</dt><dd>{{ selectedSession?.venue?.name || event.sessions[0].venue?.name }} · {{ selectedSession?.venue?.address || event.sessions[0].venue?.address }}</dd></div>
+            <div><dt>规则</dt><dd>
+              每账号限购 {{ event.max_tickets_per_order }} 张
+              <span v-if="event.real_name_required"> · 实名制，购票时选择已绑定证件</span>
+              <span v-if="isSeated"> · 选座入场</span>
+              <span v-else-if="isExhibition"> · 门票入场</span>
+            </dd></div>
           </dl>
         </div>
       </section>
 
-      <section class="purchase-layout">
+      <section class="detail-body">
         <div class="session-panel">
-          <div class="section-title"><span>01</span><h2>选择场次与票档</h2></div>
-          <div v-for="session in event.sessions" :key="session.id" class="session-block">
+          <div class="section-title"><span>01</span><h2>场次</h2></div>
+          <div v-for="session in event.sessions" :key="session.id" class="session-block" :class="{ active: String(session.id) === String(selectedSession?.id), disabled: sessionSaleState(session) !== 'on_sale' }" @click="selectSession(session)">
             <h3>{{ dateTime(session.starts_at) }} · {{ session.venue?.name }}</h3>
-            <div class="tier-grid">
-              <button
-                v-for="tier in session.ticket_tiers"
-                :key="tier.id"
-                type="button"
-                :class="{ selected: selectedTier?.id === tier.id, soldout: tier.status === 'sold_out' }"
-                :disabled="tier.status === 'sold_out'"
-                @click="selectedTier = tier"
-              >
-                <span>{{ tier.name }}</span>
-                <strong>{{ money(tier.price_cents) }}</strong>
-                <small>余 {{ tier.remaining_quota }} 张 · 限 {{ tier.purchase_limit }} 张</small>
-              </button>
-            </div>
+            <p class="session-meta">
+              {{ saleStateText(sessionSaleState(session)) || (isSeated ? '选座入场' : (isExhibition ? '门票入场' : '按票档购买')) }}
+              · 余 {{ sessionRemaining(session) }} 张
+            </p>
           </div>
 
           <div class="section-title description-title"><span>02</span><h2>活动介绍</h2></div>
@@ -216,32 +316,60 @@ function buy() {
               </footer>
             </li>
           </ul>
-          <p v-if="commentTotal > comments.length" class="comment-more">共 {{ commentTotal }} 条 · 当前展示最新 {{ comments.length }} 条</p>
+          <p v-if="commentTotal > comments.length" class="comment-more">
+            共 {{ commentTotal }} 条 · 当前 {{ comments.length }} 条
+            <button type="button" :disabled="commentsLoadingMore" @click="loadComments({ append: true })">
+              {{ commentsLoadingMore ? '加载中…' : '查看更早评论' }}
+            </button>
+          </p>
         </div>
-
-        <aside class="checkout-card">
-          <p>已选票档</p>
-          <h3>{{ selectedTier?.name || '请选择票档' }}</h3>
-          <span>{{ selectedSession ? dateTime(selectedSession.starts_at) : '—' }}</span>
-          <div class="quantity-row">
-            <label for="quantity">数量</label>
-            <el-input-number
-              id="quantity"
-              v-model="quantity"
-              :min="1"
-              :max="Math.min(selectedTier?.purchase_limit || 1, selectedTier?.remaining_quota || 1)"
-            />
+        <aside class="buy-bar">
+          <div>
+            <p>{{ isSeated ? '选座购票' : (isExhibition ? '购买门票' : '购买门票') }}</p>
+            <strong>{{ lowestPrice != null ? money(lowestPrice) : '—' }} 起</strong>
           </div>
-          <div class="total-row">
-            <span>合计</span>
-            <strong>{{ selectedTier ? money(selectedTier.price_cents * quantity) : '—' }}</strong>
-          </div>
-          <button class="primary-action" type="button" :disabled="!selectedTier" @click="buy">
-            填写购票信息
+          <button class="primary-action" type="button" :disabled="!canBuy" @click="buy">
+            {{ buyLabel }}
           </button>
-          <small>下一步填写联系人；实名制活动还需为每张票填写观演人。</small>
         </aside>
       </section>
+
+      <SeatPickerDialog
+        v-if="isSeated"
+        v-model="pickerOpen"
+        :event="event"
+        :session="selectedSession"
+        :seats="sessionSeats"
+        @confirm="confirmSeats"
+      />
+      <el-dialog v-model="buyOpen" title="购买门票" width="460px" align-center>
+        <div class="buy-dialog">
+          <label>票档
+            <select :value="String(selectedTier?.id || '')" @change="onCounterTierChange">
+              <option
+                v-for="tier in selectedSession?.ticket_tiers || []"
+                :key="tier.id"
+                :value="String(tier.id)"
+                :disabled="Number(tier.remaining_quota || 0) <= 0"
+              >
+                {{ tier.name }} · {{ money(tier.price_cents) }}{{ Number(tier.remaining_quota || 0) <= 0 ? ' · 售罄' : '' }}
+              </option>
+            </select>
+          </label>
+          <label>数量
+            <el-input-number
+              v-model="quantity"
+              :min="1"
+              :max="Math.min(event.max_tickets_per_order || 1, selectedTier?.remaining_quota || 1)"
+            />
+          </label>
+          <p>每账号本场限购 {{ event.max_tickets_per_order }} 张{{ event.real_name_required ? '，下一步勾选已绑定证件' : '' }}。</p>
+          <p v-if="!isExhibition && selectedTier?.assign_place_no">出票后系统会写入区内编号，不是选座。</p>
+        </div>
+        <template #footer>
+          <button class="primary-action" type="button" :disabled="!selectedTier || Number(selectedTier.remaining_quota || 0) <= 0" @click="confirmCounter">去填写订单</button>
+        </template>
+      </el-dialog>
     </template>
   </div>
 </template>
@@ -267,31 +395,15 @@ dl { margin-top: 35px; border-top: 1px solid rgba(255,255,255,.16); }
 dl div { display: grid; grid-template-columns: 52px 1fr; padding: 11px 0; border-bottom: 1px solid rgba(255,255,255,.12); font-size: 13px; }
 dt { color: #9f978f; }
 dd { margin: 0; }
-.purchase-layout { display: grid; grid-template-columns: 1fr 330px; gap: 50px; padding-top: 44px; }
+.detail-body { display: grid; grid-template-columns: 1fr 280px; gap: 50px; padding-top: 44px; }
 .section-title { display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid var(--line); }
 .section-title span { color: var(--red); font-family: var(--font-display); }
 .section-title h2 { font-family: var(--font-display); font-size: 24px; }
-.session-block { padding: 22px 0; border-bottom: 1px solid var(--line); }
-.session-block h3 { margin: 0 0 13px; font-size: 14px; }
-.tier-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.tier-grid button {
-  padding: 14px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  background: transparent;
-  text-align: left;
-  display: grid;
-  gap: 7px;
-  cursor: pointer;
-}
-.tier-grid button.selected {
-  border-color: var(--red);
-  background: rgba(181,52,41,.06);
-  box-shadow: inset 0 0 0 1px var(--red);
-}
-.tier-grid button.soldout { opacity: .45; cursor: not-allowed; }
-.tier-grid strong { color: var(--red); font-size: 19px; }
-.tier-grid small { color: var(--muted); }
+.session-block { padding: 22px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.session-block.active { color: var(--red); }
+.session-block.disabled h3 { color: var(--muted); }
+.session-block h3 { margin: 0 0 8px; font-size: 14px; }
+.session-meta { margin: 0; color: var(--muted); font-size: 13px; }
 .description-title { margin-top: 30px; }
 .description { color: #4d4842; line-height: 1.9; white-space: pre-line; }
 .discuss-lead { color: var(--muted); font-size: 13px; }
@@ -330,26 +442,26 @@ dd { margin: 0; }
   border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; padding: 0;
 }
 .comment-list footer button.danger { color: var(--red); }
-.comment-more { color: var(--muted); font-size: 12px; }
-.checkout-card {
+.comment-more { color: var(--muted); font-size: 12px; display: flex; gap: 12px; align-items: center; }
+.comment-more button { border: 0; background: transparent; color: var(--red); cursor: pointer; font: inherit; }
+.buy-bar {
   align-self: start;
   position: sticky;
   top: 96px;
-  padding: 25px;
+  padding: 22px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
   background: #fbf7ef;
-  box-shadow: var(--shadow-soft);
+  display: grid;
+  gap: 16px;
 }
-.checkout-card > p { margin: 0; color: var(--muted); font-size: 12px; }
-.checkout-card h3 { margin: 8px 0; font-family: var(--font-display); font-size: 24px; }
-.checkout-card > span, .checkout-card > small { color: var(--muted); font-size: 11px; }
+.buy-bar p { margin: 0; color: var(--muted); font-size: 12px; }
+.buy-bar strong { color: var(--red); font-size: 24px; }
 .quantity-row, .total-row { margin-top: 24px; padding-top: 17px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
 .total-row strong { color: var(--red); font-size: 26px; }
 .primary-action {
   width: 100%;
   height: 48px;
-  margin: 22px 0 10px;
   border: 0;
   border-radius: var(--radius-pill);
   background: var(--red);
@@ -358,8 +470,30 @@ dd { margin: 0; }
   cursor: pointer;
 }
 .primary-action:disabled { opacity: .5; cursor: not-allowed; }
+.buy-dialog { display: grid; gap: 16px; }
+.buy-dialog label { display: grid; gap: 8px; font-size: 13px; }
+.buy-dialog select { height: 42px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 0 10px; }
+.buy-dialog p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 @media (max-width: 900px) {
-  .event-hero, .purchase-layout, .tier-grid { grid-template-columns: 1fr; }
-  .checkout-card { position: static; }
+  .event-hero, .detail-body { grid-template-columns: 1fr; }
+  .detail-page { padding-bottom: 96px; }
+  .buy-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 24;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    box-shadow: 0 -8px 24px rgba(43, 32, 24, .08);
+  }
+  .buy-bar .primary-action { width: auto; min-width: 148px; }
 }
 </style>

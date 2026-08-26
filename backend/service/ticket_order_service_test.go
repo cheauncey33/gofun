@@ -5,6 +5,7 @@ import (
 	"gofun/models"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bwmarrin/snowflake"
 )
@@ -102,5 +103,26 @@ func TestAttendeeSnapshotDoesNotExposeRawIdentityNumber(t *testing.T) {
 	}
 	if strings.Contains(string(body), "11010519491231002X") || strings.Contains(string(body), "id_number_hash") {
 		t.Fatalf("sensitive identity data leaked in JSON: %s", body)
+	}
+}
+
+func TestPaymentDeadlineIgnoresSkewedExpiresAt(t *testing.T) {
+	node, err := snowflake.NewNode(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := node.Generate().Int64()
+	s := &TicketOrderService{paymentTimeout: 15 * time.Minute}
+	order := &models.TicketOrder{
+		Base:      models.Base{ID: id, CreateTime: time.Now().Add(-8 * time.Hour)},
+		Status:    models.TicketOrderStatusPendingPayment,
+		ExpiresAt: time.Now().Add(-8 * time.Hour),
+	}
+	if !s.paymentWindowOpen(order) {
+		t.Fatal("payment window must stay open when snowflake id is recent")
+	}
+	s.stampOrderExpiry(order)
+	if order.ExpiresAtUnix < time.Now().Unix()+10*60 {
+		t.Fatalf("expires_at_unix = %d, want at least 10 minutes remaining", order.ExpiresAtUnix)
 	}
 }

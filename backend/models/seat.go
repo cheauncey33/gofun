@@ -1,0 +1,66 @@
+package models
+
+const (
+	MaxSeatLayoutRows = 16
+	MaxSeatLayoutCols = 24
+)
+
+type SessionSeatStatus string
+
+const (
+	SessionSeatAvailable SessionSeatStatus = "available"
+	SessionSeatHeld      SessionSeatStatus = "held"
+	SessionSeatSold      SessionSeatStatus = "sold"
+)
+
+func (s SessionSeatStatus) IsOccupied() bool {
+	return s == SessionSeatHeld || s == SessionSeatSold
+}
+
+func SeatLayoutBoundsOK(rowCount, colCount int) bool {
+	return rowCount >= 1 && rowCount <= MaxSeatLayoutRows &&
+		colCount >= 1 && colCount <= MaxSeatLayoutCols
+}
+
+// SeatLayout 是活动厅图模板。一场活动一张图，发布前可改。
+type SeatLayout struct {
+	Base
+	EventID  int64  `gorm:"not null;uniqueIndex" json:"event_id,string"`
+	Name     string `gorm:"size:64;not null;default:''" json:"name"`
+	RowCount int    `gorm:"not null" json:"row_count"`
+	ColCount int    `gorm:"not null" json:"col_count"`
+	Seats    []Seat `gorm:"foreignKey:LayoutID" json:"seats,omitempty"`
+}
+
+func (SeatLayout) TableName() string {
+	return "seat_layout"
+}
+
+// Seat 是厅图上的可售格。未画出的格子不建行。
+type Seat struct {
+	Base
+	LayoutID     int64  `gorm:"not null;uniqueIndex:uk_seat_layout_cell,priority:1" json:"layout_id,string"`
+	TicketTierID int64  `gorm:"not null;index" json:"ticket_tier_id,string"`
+	RowNo        int    `gorm:"not null;uniqueIndex:uk_seat_layout_cell,priority:2" json:"row_no"`
+	ColNo        int    `gorm:"not null;uniqueIndex:uk_seat_layout_cell,priority:3" json:"col_no"`
+	Label        string `gorm:"size:32;not null" json:"label"`
+}
+
+func (Seat) TableName() string {
+	return "seat"
+}
+
+// SessionSeat 是场次库存真相：一座一行。剩余张数只是展示字段。
+type SessionSeat struct {
+	Base
+	SessionID    int64             `gorm:"not null;uniqueIndex:uk_session_seat,priority:1" json:"session_id,string"`
+	SeatID       int64             `gorm:"not null;uniqueIndex:uk_session_seat,priority:2" json:"seat_id,string"`
+	TicketTierID int64             `gorm:"not null;index" json:"ticket_tier_id,string"`
+	OrderID      *int64            `gorm:"index" json:"order_id,omitempty,string"`
+	Status       SessionSeatStatus `gorm:"size:16;not null;default:'available';index" json:"status"`
+	Seat         Seat              `gorm:"foreignKey:SeatID" json:"seat,omitempty"`
+}
+
+func (SessionSeat) TableName() string {
+	return "session_seat"
+}

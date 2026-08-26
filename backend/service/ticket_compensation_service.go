@@ -151,9 +151,16 @@ func (s *TicketCompensationService) runStandardCompensation(
 		return 0, err
 	}
 	queuedByTier := occ.byTier
+	seatedTiers, err := seatedTicketTierIDs(s.db.WithContext(ctx))
+	if err != nil {
+		return 0, err
+	}
 
 	anomalies := 0
 	for _, tier := range tiers {
+		if _, skip := seatedTiers[tier.ID]; skip {
+			continue
+		}
 		available := tier.RemainingQuota - queuedByTier[tier.ID]
 		if available < 0 {
 			available = 0
@@ -192,10 +199,17 @@ func (s *TicketCompensationService) runBucketCompensation(
 		return 0, err
 	}
 	queuedByBucket := occ.byTierBucket
+	seatedTiers, err := seatedTicketTierIDs(s.db.WithContext(ctx))
+	if err != nil {
+		return 0, err
+	}
 
 	anomalies := 0
 	parentTierSum := make(map[int64]int)
 	for _, bucket := range buckets {
+		if _, skip := seatedTiers[bucket.TierID]; skip {
+			continue
+		}
 		available := bucket.RemainingQuota - queuedByBucket[fmt.Sprintf("%d:%d", bucket.TierID, bucket.BucketNo)]
 		if available < 0 {
 			available = 0

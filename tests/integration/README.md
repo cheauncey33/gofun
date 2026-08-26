@@ -17,8 +17,11 @@ node tests/integration/payment_verification_e2e.mjs
 
 1. 下单后进入 `pending_payment`，支付沙箱只返回 `pending`，异步回调成功后才出票；
 2. `failed` 回调不会出票，订单标记 `payment_status=failed`；
-3. 电子票凭证能被主办方核销，重复核销返回 `already_used`；
-4. 无效签名的支付回调被拒绝。
+3. 支付重试复用同一支付单，超时回调关闭订单并释放票额；
+4. 未核销退款将订单标记为 `refunded` 并将电子票标记为 `revoked`；
+5. 多票订单逐张出票，同一票码并发核验只有一次 `success`；
+6. 退款与核验并发时，最终只会收敛到“退款成功且拒绝核验”或“核验成功且拒绝退款”之一；
+7. 无效签名的支付回调被拒绝。
 
 ## 其他并发测试
 

@@ -292,7 +292,7 @@ func (s *TicketOrderService) ProcessPaymentTimeout(ctx context.Context, orderID,
 	if order.Status != models.TicketOrderStatusPendingPayment {
 		return nil
 	}
-	if time.Now().Before(order.ExpiresAt) {
+	if s.paymentWindowOpen(&order) {
 		// 时钟回拨或 TTL 略早于 expires_at：交给扫描器兜底，本消息直接丢弃。
 		return nil
 	}

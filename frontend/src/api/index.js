@@ -37,6 +37,8 @@ api.interceptors.response.use(
               localStorage.setItem('access_token', data.access_token)
               localStorage.setItem('refresh_token', data.refresh_token)
               localStorage.setItem('token', data.access_token)
+              if (data.username) localStorage.setItem('username', data.username)
+              if (data.role) localStorage.setItem('role', data.role)
               return data.access_token
             })
             .finally(() => {
@@ -84,10 +86,16 @@ export default {
 
   // Orders
   createOrder: (ticketTierId, quantity, purchaseInfo = {}, idempotencyKey = newIdempotencyKey()) =>
-    post('/orders', { ticket_tier_id: String(ticketTierId), quantity, ...purchaseInfo }, {
+    post('/orders', {
+      ticket_tier_id: String(ticketTierId),
+      quantity,
+      ...purchaseInfo,
+    }, {
       headers: { 'X-Idempotency-Key': idempotencyKey },
     }),
+  getSessionSeats: (eventId, sessionId) => get(`/events/${eventId}/sessions/${sessionId}/seats`),
   getOrders: (params) => get('/orders', params),
+  getMyTickets: (params) => get('/tickets', params),
   getOrderDetail: (id) => get(`/orders/${id}`),
   payOrder: (id, scenario = 'success') => post(`/orders/${id}/pay`, { scenario }),
   cancelOrder: (id, reason) => post(`/orders/${id}/cancel`, { reason }),
@@ -96,6 +104,9 @@ export default {
   getUserInfo: () => get('/user/info'),
   updateUserInfo: (data) => put('/user/info', data),
   changePassword: (old_password, new_password) => put('/user/password', { old_password, new_password }),
+  getUserAttendees: () => get('/user/attendees'),
+  createUserAttendee: (data) => post('/user/attendees', data),
+  deleteUserAttendee: (id) => del(`/user/attendees/${id}`),
 
   // Rush sale — 到点直抢，一次 execute（无需前置 token）
   executeRushSale: (id, quantity, purchaseInfo = {}, idempotencyKey = newIdempotencyKey()) =>
@@ -112,10 +123,20 @@ export default {
   organizerCreateVenue: (organizerId, data) => post(`/organizers/${organizerId}/venues`, data),
   organizerGetEvents: (organizerId, params) => get(`/organizers/${organizerId}/events`, params),
   organizerCreateEvent: (organizerId, data) => post(`/organizers/${organizerId}/events`, data),
+  organizerUpdateEvent: (organizerId, eventId, data) =>
+    put(`/organizers/${organizerId}/events/${eventId}`, data),
   organizerCreateSession: (organizerId, eventId, data) =>
     post(`/organizers/${organizerId}/events/${eventId}/sessions`, data),
+  organizerUpdateSession: (organizerId, sessionId, data) =>
+    put(`/organizers/${organizerId}/sessions/${sessionId}`, data),
   organizerCreateTicketTier: (organizerId, sessionId, data) =>
     post(`/organizers/${organizerId}/sessions/${sessionId}/ticket-tiers`, data),
+  organizerUpdateTicketTier: (organizerId, tierId, data) =>
+    put(`/organizers/${organizerId}/ticket-tiers/${tierId}`, data),
+  organizerGetSeatLayout: (organizerId, eventId) =>
+    get(`/organizers/${organizerId}/events/${eventId}/seat-layout`),
+  organizerSaveSeatLayout: (organizerId, eventId, data) =>
+    put(`/organizers/${organizerId}/events/${eventId}/seat-layout`, data),
   organizerPublishEvent: (organizerId, eventId) =>
     post(`/organizers/${organizerId}/events/${eventId}/publish`),
   organizerUnpublishEvent: (organizerId, eventId) =>
@@ -135,4 +156,11 @@ export default {
     }),
   organizerGetVerifications: (organizerId, params) =>
     get(`/organizers/${organizerId}/verifications`, params),
+  organizerCreateRushSale: (organizerId, data) =>
+    post(`/organizers/${organizerId}/rush-sales`, data),
+  uploadImage: (file) => {
+    const data = new FormData()
+    data.append('file', file)
+    return api.post('/uploads', data).then(r => r.data)
+  },
 }

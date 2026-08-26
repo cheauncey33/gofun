@@ -1,10 +1,11 @@
 package service
 
 import (
-	"gofun/container"
-	"gofun/models"
 	"context"
 	"fmt"
+	"gofun/container"
+	"gofun/models"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -17,6 +18,8 @@ type TokenPair struct {
 	AccessToken            string `json:"access_token"`
 	RefreshToken           string `json:"refresh_token"`
 	Token                  string `json:"token"`
+	Role                   string `json:"role"`
+	Username               string `json:"username"`
 	AccessTokenExpireSecs  int    `json:"access_token_expire_secs"`
 	RefreshTokenExpireSecs int    `json:"refresh_token_expire_secs"`
 }
@@ -44,6 +47,7 @@ type UserService struct {
 	jwtSecret         []byte
 	jwtExpire         int
 	refreshExpireSecs int
+	identityKey       []byte
 }
 
 func NewUserService(c *container.Container, jwtExpireSecs, refreshExpireSecs int) *UserService {
@@ -53,6 +57,7 @@ func NewUserService(c *container.Container, jwtExpireSecs, refreshExpireSecs int
 		jwtSecret:         c.JWTSecret,
 		jwtExpire:         jwtExpireSecs,
 		refreshExpireSecs: refreshExpireSecs,
+		identityKey:       append([]byte(nil), c.TicketQRSecret...),
 	}
 }
 
@@ -146,10 +151,21 @@ func (s *UserService) issueTokenPair(userID int64) (*TokenPair, error) {
 		return nil, fmt.Errorf("保存refresh token失败")
 	}
 
+	var identity models.User
+	role, username := "user", ""
+	if err := s.db.Select("role", "username").Where("id = ?", userID).First(&identity).Error; err == nil {
+		if identity.Role != "" {
+			role = identity.Role
+		}
+		username = identity.Username
+	}
+
 	return &TokenPair{
 		AccessToken:            accessToken,
 		RefreshToken:           refreshToken,
 		Token:                  accessToken,
+		Role:                   role,
+		Username:               username,
 		AccessTokenExpireSecs:  s.jwtExpire,
 		RefreshTokenExpireSecs: s.refreshExpireSecs,
 	}, nil
@@ -187,7 +203,7 @@ func parseServiceToken(secret []byte, tokenString string) (*struct {
 
 func (s *UserService) GetUserInfo(userID int64) (models.User, error) {
 	var user models.User
-	err := s.db.Select("id", "username", "balance", "balance_cents", "phone", "avatar_url", "role", "last_login_at", "create_time").
+	err := s.db.Select("id", "username", "phone", "avatar_url", "role", "last_login_at", "create_time").
 		Where("id = ?", userID).First(&user).Error
 	return user, err
 }
@@ -206,9 +222,7 @@ func (s *UserService) UpdateUserInfo(userID int64, req UpdateUserInfoReq) error 
 		}
 		updates["phone"] = req.Phone
 	}
-	if req.AvatarURL != "" {
-		updates["avatar_url"] = req.AvatarURL
-	}
+	updates["avatar_url"] = strings.TrimSpace(req.AvatarURL)
 	if len(updates) == 0 {
 		return nil
 	}

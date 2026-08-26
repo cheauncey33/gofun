@@ -8,10 +8,13 @@ import {
   Document,
   Plus,
   Tickets,
+  Timer,
 } from '@element-plus/icons-vue'
 import api from '../api'
 import EventCreationDrawer from '../components/organizer/EventCreationDrawer.vue'
+import EventEditDialog from '../components/organizer/EventEditDialog.vue'
 import TicketVerificationPanel from '../components/organizer/TicketVerificationPanel.vue'
+import RushSaleCreateDialog from '../components/organizer/RushSaleCreateDialog.vue'
 
 const router = useRouter()
 const loading = ref(true)
@@ -28,9 +31,16 @@ const events = ref([])
 const venues = ref([])
 const orders = ref([])
 const orderTotal = ref(0)
+const orderPage = ref(1)
+const orderKeyword = ref('')
+const orderStatusFilter = ref('all')
+const rushSales = ref([])
+const rushVisible = ref(false)
 const activeSection = ref('overview')
 const creationVisible = ref(false)
 const selectedDraft = ref(null)
+const editVisible = ref(false)
+const editingEvent = ref(null)
 const venueDialogVisible = ref(false)
 const venueSubmitting = ref(false)
 const isMobile = ref(window.matchMedia('(max-width: 600px)').matches)
@@ -55,8 +65,36 @@ onMounted(() => {
   loadMemberships()
 })
 onBeforeUnmount(() => mobileMedia.removeEventListener('change', updateMobile))
+function organizerOrderQuery() {
+  const params = { page: orderPage.value, page_size: 10 }
+  if (orderStatusFilter.value !== 'all') params.status = orderStatusFilter.value
+  if (orderKeyword.value.trim()) params.q = orderKeyword.value.trim()
+  return params
+}
+
+async function loadOrders() {
+  if (!organizerId.value) return
+  try {
+    const orderRes = await api.organizerGetOrders(organizerId.value, organizerOrderQuery())
+    orders.value = orderRes.data?.list || []
+    orderTotal.value = orderRes.data?.total || 0
+  } catch (error) {
+    ElMessage.error(error.response?.data?.msg || '订单加载失败')
+  }
+}
+
+function searchOrders() {
+  orderPage.value = 1
+  loadOrders()
+}
+
 watch(organizerId, (value, oldValue) => {
-  if (value && value !== oldValue) loadWorkspace()
+  if (value && value !== oldValue) {
+    orderPage.value = 1
+    orderKeyword.value = ''
+    orderStatusFilter.value = 'all'
+    loadWorkspace()
+  }
 })
 
 async function loadMemberships() {
@@ -77,17 +115,24 @@ async function loadWorkspace() {
   if (!organizerId.value) return
   workspaceLoading.value = true
   try {
-    const [overviewRes, venueRes, eventRes, orderRes] = await Promise.all([
+    const [overviewRes, venueRes, eventRes, orderRes, rushRes] = await Promise.all([
       api.organizerGetOverview(organizerId.value),
       api.organizerGetVenues(organizerId.value),
       api.organizerGetEvents(organizerId.value, { page: 1, page_size: 50 }),
-      api.organizerGetOrders(organizerId.value, { page: 1, page_size: 10 }),
+      api.organizerGetOrders(organizerId.value, organizerOrderQuery()),
+      api.getRushSales().catch(() => ({ data: [] })),
     ])
     overview.value = overviewRes.data
     venues.value = venueRes.data || []
     events.value = eventRes.data?.list || []
+    if (editingEvent.value?.id) {
+      editingEvent.value = events.value.find(item => String(item.id) === String(editingEvent.value.id)) || editingEvent.value
+    }
     orders.value = orderRes.data?.list || []
     orderTotal.value = orderRes.data?.total || 0
+    rushSales.value = (rushRes.data || []).filter(item =>
+      String(item.organizer_id) === String(organizerId.value),
+    )
   } catch (error) {
     ElMessage.error(error.response?.data?.msg || '工作台数据加载失败')
   } finally {
@@ -108,6 +153,11 @@ function openCreate() {
 function resumeDraft(event) {
   selectedDraft.value = event
   creationVisible.value = true
+}
+
+function openEdit(event) {
+  editingEvent.value = event
+  editVisible.value = true
 }
 
 async function unpublishEvent(event) {
@@ -186,18 +236,33 @@ function eventStatus(status) {
   }[status] || { label: status, type: 'info' }
 }
 
-function orderStatus(status) {
+function saleModeLabel(mode) {
+  return mode === 'seated' ? '选座' : '计数'
+}
+
+function orderStatus(order) {
+  if (order?.payment_status === 'refunded') return { label: '已退款', type: 'info' }
+  if (order?.payment_status === 'refunding') return { label: '退款中', type: 'warning' }
   return {
     queued: { label: '排队中', type: 'info' },
     pending_payment: { label: '待支付', type: 'warning' },
     paid: { label: '已支付', type: 'success' },
     cancelled: { label: '已取消', type: 'info' },
     failed: { label: '失败', type: 'danger' },
-  }[status] || { label: status, type: 'info' }
+  }[order?.status] || { label: order?.status, type: 'info' }
 }
 
 function firstSession(event) {
   return event.sessions?.[0]
+}
+
+function sessionSummary(event) {
+  const sessions = event.sessions || []
+  if (!sessions.length) return '尚未配置'
+  const first = firstSession(event)
+  const place = first?.venue?.name || '场馆待定'
+  if (sessions.length === 1) return `${formatDate(first?.starts_at)} · ${place}`
+  return `${sessions.length} 场 · ${formatDate(first?.starts_at)} 起`
 }
 
 function quota(event, field) {
@@ -256,6 +321,7 @@ function formatDate(value) {
       <aside class="console-sidebar">
         <button :class="{ active: activeSection === 'overview' }" type="button" @click="scrollTo('overview')"><el-icon><DataAnalysis /></el-icon>运营概览</button>
         <button :class="{ active: activeSection === 'events' }" type="button" @click="scrollTo('events')"><el-icon><Calendar /></el-icon>活动管理</button>
+        <button :class="{ active: activeSection === 'rush' }" type="button" @click="scrollTo('rush')"><el-icon><Timer /></el-icon>限时开售</button>
         <button :class="{ active: activeSection === 'orders' }" type="button" @click="scrollTo('orders')"><el-icon><Document /></el-icon>订单</button>
         <button :class="{ active: activeSection === 'verification' }" type="button" @click="scrollTo('verification')"><el-icon><Tickets /></el-icon>现场核销</button>
       </aside>
@@ -268,6 +334,7 @@ function formatDate(value) {
           </div>
           <div class="heading-actions">
             <el-button @click="venueDialogVisible = true">新增场馆</el-button>
+            <el-button @click="rushVisible = true">配置开售</el-button>
             <el-button type="primary" :icon="Plus" @click="openCreate">创建活动</el-button>
           </div>
         </section>
@@ -281,7 +348,7 @@ function formatDate(value) {
 
         <section id="events" class="console-section">
           <header>
-            <div><h2>活动管理</h2><p>草稿可继续补齐场次和票档，发布后进入购票站。</p></div>
+            <div><h2>活动管理</h2><p>草稿可继续补齐多场次、票档和厅图；售票中也能改时间、票价和加票。</p></div>
             <span>共 {{ events.length }} 场</span>
           </header>
           <div class="table-frame">
@@ -290,17 +357,23 @@ function formatDate(value) {
                 <template #default="{ row }"><el-tag :type="eventStatus(row.status).type" effect="plain">{{ eventStatus(row.status).label }}</el-tag></template>
               </el-table-column>
               <el-table-column prop="title" label="活动名称" :min-width="isMobile ? 150 : 220" />
-              <el-table-column v-if="!isMobile" label="场次时间" width="150">
-                <template #default="{ row }">{{ formatDate(firstSession(row)?.starts_at) }}</template>
+              <el-table-column v-if="!isMobile" label="卖法" width="72">
+                <template #default="{ row }">{{ saleModeLabel(row.sale_mode) }}</template>
               </el-table-column>
-              <el-table-column v-if="!isMobile" label="场馆" min-width="170">
-                <template #default="{ row }">{{ firstSession(row)?.venue?.name || '尚未配置' }}</template>
+              <el-table-column v-if="!isMobile" label="场次" min-width="220">
+                <template #default="{ row }">{{ sessionSummary(row) }}</template>
               </el-table-column>
               <el-table-column v-if="!isMobile" label="占用 / 剩余" width="120">
                 <template #default="{ row }">{{ quota(row, 'sold_count') }} / {{ quota(row, 'remaining_quota') }}</template>
               </el-table-column>
-              <el-table-column label="操作" :width="isMobile ? 120 : 260" align="right">
+              <el-table-column label="操作" :width="isMobile ? 132 : 300" align="right">
                 <template #default="{ row }">
+                  <button
+                    v-if="row.status === 'draft' || row.status === 'published'"
+                    class="table-action"
+                    type="button"
+                    @click="openEdit(row)"
+                  >编辑</button>
                   <button v-if="row.status === 'draft'" class="table-action" type="button" @click="resumeDraft(row)">继续配置</button>
                   <button v-if="row.status === 'published'" class="table-action" type="button" @click="unpublishEvent(row)">下架</button>
                   <button v-if="row.status === 'published'" class="table-action danger" type="button" @click="cancelEvent(row)">取消并退款</button>
@@ -311,11 +384,52 @@ function formatDate(value) {
           </div>
         </section>
 
+        <section id="rush" class="console-section">
+          <header>
+            <div><h2>限时开售</h2><p>仅计数售卖的已发布票档可配置；选座活动不支持抢票。</p></div>
+            <el-button type="primary" size="small" @click="rushVisible = true">配置开售</el-button>
+          </header>
+          <div class="table-frame">
+            <el-table :data="rushSales" empty-text="还没有进行中的限时开售">
+              <el-table-column prop="name" label="开售名称" min-width="160" />
+              <el-table-column v-if="!isMobile" label="活动" min-width="160">
+                <template #default="{ row }">{{ row.event_title || '—' }}</template>
+              </el-table-column>
+              <el-table-column label="价格" width="90">
+                <template #default="{ row }">{{ formatMoney(row.rush_price_cents) }}</template>
+              </el-table-column>
+              <el-table-column v-if="!isMobile" label="剩余" width="110">
+                <template #default="{ row }">{{ row.remaining_quota }} / {{ row.total_quota }}</template>
+              </el-table-column>
+              <el-table-column label="开售时间" min-width="140">
+                <template #default="{ row }">{{ formatDate(row.starts_at) }}</template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </section>
+
         <section id="orders" class="console-section">
           <header>
-            <div><h2>近期订单</h2><p>显示最近 10 笔订单；金额以订单快照为准。</p></div>
+            <div><h2>订单</h2><p>按活动名、场馆或订单号检索；金额以订单快照为准。</p></div>
             <span>共 {{ orderTotal }} 笔</span>
           </header>
+          <div class="order-toolbar">
+            <el-input
+              v-model="orderKeyword"
+              placeholder="搜索活动、场馆或订单号"
+              clearable
+              @keyup.enter="searchOrders"
+              @clear="searchOrders"
+            />
+            <el-select v-model="orderStatusFilter" style="width: 140px" @change="searchOrders">
+              <el-option label="全部状态" value="all" />
+              <el-option label="待支付" value="pending" />
+              <el-option label="已支付" value="paid" />
+              <el-option label="已取消" value="cancelled" />
+              <el-option label="已退款" value="refunded" />
+            </el-select>
+            <el-button @click="searchOrders">搜索</el-button>
+          </div>
           <div class="table-frame">
             <el-table :data="orders" empty-text="暂时还没有购票订单">
               <el-table-column v-if="!isMobile" prop="order_no" label="订单号" min-width="190" />
@@ -329,12 +443,22 @@ function formatDate(value) {
                 <template #default="{ row }">{{ formatMoney(row.total_amount_cents) }}</template>
               </el-table-column>
               <el-table-column label="状态" :width="isMobile ? 85 : 100">
-                <template #default="{ row }"><el-tag :type="orderStatus(row.status).type" effect="plain">{{ orderStatus(row.status).label }}</el-tag></template>
+                <template #default="{ row }"><el-tag :type="orderStatus(row).type" effect="plain">{{ orderStatus(row).label }}</el-tag></template>
               </el-table-column>
               <el-table-column v-if="!isMobile" label="创建时间" width="150">
-                <template #default="{ row }">{{ formatDate(row.CreateTime) }}</template>
+                <template #default="{ row }">{{ formatDate(row.create_time || row.CreateTime) }}</template>
               </el-table-column>
             </el-table>
+          </div>
+          <div v-if="orderTotal > 10" class="order-pager">
+            <el-pagination
+              background
+              layout="prev, pager, next"
+              :page-size="10"
+              :current-page="orderPage"
+              :total="orderTotal"
+              @current-change="(page) => { orderPage = page; loadOrders() }"
+            />
           </div>
         </section>
 
@@ -368,6 +492,19 @@ function formatDate(value) {
       :venues="venues"
       :draft-event="selectedDraft"
       @completed="loadWorkspace"
+    />
+    <EventEditDialog
+      v-model="editVisible"
+      :organizer-id="organizerId"
+      :event="editingEvent"
+      :venues="venues"
+      @saved="loadWorkspace"
+    />
+    <RushSaleCreateDialog
+      v-model="rushVisible"
+      :organizer-id="organizerId"
+      :events="events"
+      @created="loadWorkspace"
     />
   </div>
 </template>
@@ -433,6 +570,9 @@ function formatDate(value) {
 .table-frame :deep(.el-table td.el-table__cell) { padding: 12px 0; }
 .table-action { margin-left: 10px; padding: 4px 0; border: 0; background: transparent; color: var(--red); font-size: 12px; font-weight: 650; cursor: pointer; }
 .table-action.danger { color: #8b1e16; }
+.order-toolbar { margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 10px; }
+.order-toolbar :deep(.el-input) { width: min(280px, 100%); }
+.order-pager { margin-top: 14px; display: flex; justify-content: flex-end; }
 .console-state { min-height: calc(100vh - 60px); display: grid; place-content: center; text-align: center; color: var(--muted); }
 .console-state.empty strong { color: var(--ink); font: 700 26px var(--font-display); }
 .console-state.empty p { max-width: 480px; line-height: 1.8; }

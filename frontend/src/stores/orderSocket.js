@@ -11,12 +11,13 @@ const MAX_RETRY_DELAY = 15000
 
 // 不同事件对应的通知类型与默认标题
 const EVENT_META = {
-  pending_payment: { type: 'success', title: '票额确认成功' },
+  pending_payment: { type: 'success', title: '订单已确认' },
   paid: { type: 'success', title: '支付成功' },
   cancelled: { type: 'info', title: '订单已取消' },
   timeout_cancelled: { type: 'warning', title: '订单超时' },
   failed: { type: 'error', title: '下单失败' },
-  ticket_used: { type: 'success', title: '电子票已核销' },
+  payment_failed: { type: 'error', title: '支付未完成' },
+  ticket_used: { type: 'success', title: '电子票已使用' },
 }
 
 function buildWsUrl(token) {

@@ -5,6 +5,7 @@
 //	go run ./cmd/seed_ticketing -config ./config/config.yaml
 //
 // 幂等：按活动标题判断，已存在则跳过。
+// 脱口秀按产品约定走 seated（必须选座）；若旧种子仍是 counter，会补厅图并改卖法。
 package main
 
 import (
@@ -166,11 +167,19 @@ func main() {
 		log.Fatalf("准备主办方失败: %v", err)
 	}
 
-	created, skipped := 0, 0
+	created, converted, skipped := 0, 0, 0
 	for _, item := range demoEvents {
 		var existing models.Event
 		err := db.Where("title = ?", item.Title).First(&existing).Error
 		if err == nil {
+			if isSeatedCategory(item.Category) && !existing.SaleMode.IsSeated() {
+				if err := convertPublishedToSeated(db, &existing); err != nil {
+					log.Fatalf("补选座失败 (%s): %v", item.Title, err)
+				}
+				converted++
+				fmt.Printf("converted to seated: [%s] %s @ %s\n", item.Category, item.Title, item.City)
+				continue
+			}
 			skipped++
 			continue
 		}
@@ -183,7 +192,11 @@ func main() {
 		created++
 		fmt.Printf("created: [%s] %s @ %s\n", item.Category, item.Title, item.City)
 	}
-	fmt.Printf("done. created=%d skipped=%d\n", created, skipped)
+	fmt.Printf("done. created=%d converted=%d skipped=%d\n", created, converted, skipped)
+}
+
+func isSeatedCategory(category string) bool {
+	return category == "脱口秀" || category == "电影"
 }
 
 func ensureOwnerUser(db *gorm.DB) (*models.User, error) {
@@ -238,6 +251,10 @@ func createPublishedEvent(db *gorm.DB, organizerID int64, item seedEvent) error 
 	saleStart := now.Add(-24 * time.Hour)
 	saleEnd := starts.Add(-2 * time.Hour)
 	published := now
+	saleMode := models.EventSaleModeCounter
+	if isSeatedCategory(item.Category) {
+		saleMode = models.EventSaleModeSeated
+	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
 		venue := models.Venue{
@@ -263,6 +280,7 @@ func createPublishedEvent(db *gorm.DB, organizerID int64, item seedEvent) error 
 			Status:             models.EventStatusPublished,
 			RealNameRequired:   item.Category == "演唱会" || item.Category == "音乐节",
 			MaxTicketsPerOrder: 6,
+			SaleMode:           saleMode,
 			PublishedAt:        &published,
 		}
 		if err := tx.Create(&event).Error; err != nil {
@@ -282,7 +300,40 @@ func createPublishedEvent(db *gorm.DB, organizerID int64, item seedEvent) error 
 			return err
 		}
 
+		if saleMode.IsSeated() {
+			frontOrig := item.PriceCents + 7000
+			regularOrig := item.PriceCents + 4000
+			front := models.TicketTier{
+				SessionID:          session.ID,
+				Name:               "前排",
+				Description:        "靠近舞台前两排",
+				PriceCents:         item.PriceCents + 3000,
+				OriginalPriceCents: &frontOrig,
+				PurchaseLimit:      4,
+				AssignPlaceNo:      false,
+				Status:             models.TicketTierStatusOnSale,
+			}
+			regular := models.TicketTier{
+				SessionID:          session.ID,
+				Name:               "普通座",
+				Description:        "小剧场选座",
+				PriceCents:         item.PriceCents,
+				OriginalPriceCents: &regularOrig,
+				PurchaseLimit:      4,
+				AssignPlaceNo:      false,
+				Status:             models.TicketTierStatusOnSale,
+			}
+			if err := tx.Create(&front).Error; err != nil {
+				return err
+			}
+			if err := tx.Create(&regular).Error; err != nil {
+				return err
+			}
+			return attachSmallTheaterLayout(tx, event.ID, session.ID, front.ID, regular.ID)
+		}
+
 		orig := item.PriceCents + 4000
+		assignPlaceNo := item.Category != "展览"
 		tier := models.TicketTier{
 			SessionID:          session.ID,
 			Name:               "普通票",
@@ -292,8 +343,125 @@ func createPublishedEvent(db *gorm.DB, organizerID int64, item seedEvent) error 
 			TotalQuota:         200,
 			RemainingQuota:     200,
 			PurchaseLimit:      4,
+			AssignPlaceNo:      assignPlaceNo,
 			Status:             models.TicketTierStatusOnSale,
 		}
 		return tx.Create(&tier).Error
 	})
+}
+
+func convertPublishedToSeated(db *gorm.DB, event *models.Event) error {
+	var layoutCount int64
+	if err := db.Model(&models.SeatLayout{}).Where("event_id = ?", event.ID).Count(&layoutCount).Error; err != nil {
+		return err
+	}
+	if layoutCount > 0 {
+		return db.Model(event).Update("sale_mode", models.EventSaleModeSeated).Error
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(event).Update("sale_mode", models.EventSaleModeSeated).Error; err != nil {
+			return err
+		}
+		var session models.EventSession
+		if err := tx.Where("event_id = ?", event.ID).First(&session).Error; err != nil {
+			return err
+		}
+		var tiers []models.TicketTier
+		if err := tx.Where("session_id = ?", session.ID).Order("id ASC").Find(&tiers).Error; err != nil {
+			return err
+		}
+		if len(tiers) == 0 {
+			return fmt.Errorf("活动没有票档")
+		}
+		regular := tiers[0]
+		if err := tx.Model(&regular).Updates(map[string]interface{}{
+			"name":            "普通座",
+			"description":     "小剧场选座",
+			"assign_place_no": false,
+		}).Error; err != nil {
+			return err
+		}
+		frontOrig := regular.PriceCents + 7000
+		front := models.TicketTier{
+			SessionID:          session.ID,
+			Name:               "前排",
+			Description:        "靠近舞台前两排",
+			PriceCents:         regular.PriceCents + 3000,
+			OriginalPriceCents: &frontOrig,
+			PurchaseLimit:      4,
+			AssignPlaceNo:      false,
+			Status:             models.TicketTierStatusOnSale,
+		}
+		if err := tx.Create(&front).Error; err != nil {
+			return err
+		}
+		return attachSmallTheaterLayout(tx, event.ID, session.ID, front.ID, regular.ID)
+	})
+}
+
+const (
+	theaterRows = 6
+	theaterCols = 10
+	aisleCol    = 6
+	frontRows   = 2
+)
+
+func attachSmallTheaterLayout(tx *gorm.DB, eventID, sessionID, frontTierID, regularTierID int64) error {
+	layout := models.SeatLayout{
+		EventID:  eventID,
+		Name:     "小剧场",
+		RowCount: theaterRows,
+		ColCount: theaterCols,
+	}
+	if err := tx.Create(&layout).Error; err != nil {
+		return err
+	}
+	seats := make([]models.Seat, 0, theaterRows*(theaterCols-1))
+	for row := 1; row <= theaterRows; row++ {
+		for col := 1; col <= theaterCols; col++ {
+			if col == aisleCol {
+				continue
+			}
+			tierID := regularTierID
+			if row <= frontRows {
+				tierID = frontTierID
+			}
+			seats = append(seats, models.Seat{
+				LayoutID:     layout.ID,
+				TicketTierID: tierID,
+				RowNo:        row,
+				ColNo:        col,
+				Label:        fmt.Sprintf("%c%d", 'A'+row-1, col),
+			})
+		}
+	}
+	if err := tx.Create(&seats).Error; err != nil {
+		return err
+	}
+	sessionSeats := make([]models.SessionSeat, 0, len(seats))
+	quota := map[int64]int{}
+	for _, seat := range seats {
+		quota[seat.TicketTierID]++
+		sessionSeats = append(sessionSeats, models.SessionSeat{
+			SessionID:    sessionID,
+			SeatID:       seat.ID,
+			TicketTierID: seat.TicketTierID,
+			Status:       models.SessionSeatAvailable,
+		})
+	}
+	if err := tx.Create(&sessionSeats).Error; err != nil {
+		return err
+	}
+	for tierID, n := range quota {
+		if err := tx.Model(&models.TicketTier{}).Where("id = ?", tierID).Updates(map[string]interface{}{
+			"total_quota":     n,
+			"remaining_quota": n,
+			"sold_count":      0,
+			"assign_place_no": false,
+			"status":          models.TicketTierStatusOnSale,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }

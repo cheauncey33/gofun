@@ -63,6 +63,9 @@ var ticketIntegrationModels = []interface{}{
 	&models.AdmissionTicket{},
 	&models.TicketVerificationRecord{},
 	&models.EventComment{},
+	&models.SeatLayout{},
+	&models.Seat{},
+	&models.SessionSeat{},
 }
 
 type orderIntegrationEnv struct {

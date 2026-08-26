@@ -10,14 +10,23 @@ const loading = ref(true)
 const submitting = ref(false)
 const step = ref(1)
 const event = ref(null)
+const profiles = ref([])
+const selectedProfileIds = ref([])
+const addingProfile = ref(false)
+const newProfile = reactive({ name: '', id_number: '' })
+const sessionSeats = ref([])
 const form = reactive({
   contactName: '',
   contactPhone: '',
   termsAccepted: false,
-  attendees: [],
 })
 
-const quantity = computed(() => Math.max(1, Number(route.query.quantity) || 1))
+const quantity = computed(() => {
+  const seats = String(route.query.seat_ids || '').split(',').filter(Boolean)
+  if (seats.length) return seats.length
+  return Math.max(1, Number(route.query.quantity) || 1)
+})
+const seatIds = computed(() => String(route.query.seat_ids || '').split(',').filter(Boolean))
 const selected = computed(() => {
   const tierID = String(route.query.tier || '')
   for (const session of event.value?.sessions || []) {
@@ -26,25 +35,46 @@ const selected = computed(() => {
   }
   return null
 })
-const totalCents = computed(() => (selected.value?.tier.price_cents || 0) * quantity.value)
+const pickedSeats = computed(() =>
+  seatIds.value.map(id => sessionSeats.value.find(item => String(item.id) === String(id))).filter(Boolean),
+)
+const lineItems = computed(() => {
+  if (!pickedSeats.value.length) {
+    return selected.value ? [{ name: selected.value.tier.name, qty: quantity.value, cents: selected.value.tier.price_cents * quantity.value }] : []
+  }
+  const map = {}
+  for (const seat of pickedSeats.value) {
+    const tier = (selected.value?.session.ticket_tiers || []).find(item => String(item.id) === String(seat.ticket_tier_id))
+    if (!tier) continue
+    if (!map[tier.id]) map[tier.id] = { name: tier.name, qty: 0, cents: 0, price: tier.price_cents }
+    map[tier.id].qty += 1
+    map[tier.id].cents += tier.price_cents
+  }
+  return Object.values(map)
+})
+const totalCents = computed(() => lineItems.value.reduce((sum, item) => sum + item.cents, 0))
 
 onMounted(async () => {
   try {
-    const [eventRes, userRes] = await Promise.all([
+    const [eventRes, userRes, profileRes] = await Promise.all([
       api.getEventDetail(route.params.eventId),
       api.getUserInfo(),
+      api.getUserAttendees().catch(() => ({ data: [] })),
     ])
     event.value = eventRes.data
+    profiles.value = profileRes.data || []
     form.contactName = userRes.data?.username || ''
     form.contactPhone = userRes.data?.phone || ''
     if (!selected.value) throw new Error('所选票档不属于当前活动')
-    if (quantity.value > Math.min(selected.value.tier.purchase_limit, event.value.max_tickets_per_order)) {
-      throw new Error('购票数量超过当前限购')
+    if (event.value.sale_mode === 'seated' && !seatIds.value.length) {
+      throw new Error('选座活动必须先选择座位')
     }
-    if (event.value.real_name_required) {
-      form.attendees = Array.from({ length: quantity.value }, () => ({
-        name: '', id_type: 'id_card', id_number: '',
-      }))
+    if (seatIds.value.length && selected.value.session?.id) {
+      const seatRes = await api.getSessionSeats(event.value.id, selected.value.session.id)
+      sessionSeats.value = seatRes.data || []
+    }
+    if (event.value.real_name_required && profiles.value.length) {
+      selectedProfileIds.value = profiles.value.slice(0, quantity.value).map(item => String(item.id))
     }
   } catch (error) {
     ElMessage.error(error.response?.data?.msg || error.message || '购票信息加载失败')
@@ -59,19 +89,47 @@ const dateTime = value => value ? new Intl.DateTimeFormat('zh-CN', {
   hour: '2-digit', minute: '2-digit',
 }).format(new Date(value)) : '—'
 const maskPhone = value => /^1\d{10}$/.test(value) ? `${value.slice(0, 3)}****${value.slice(-4)}` : value
-const maskID = value => value?.length >= 7 ? `${value.slice(0, 3)}***********${value.slice(-4)}` : value
+
+function toggleProfile(id) {
+  const key = String(id)
+  if (selectedProfileIds.value.includes(key)) {
+    selectedProfileIds.value = selectedProfileIds.value.filter(item => item !== key)
+    return
+  }
+  const limit = seatIds.value.length || event.value.max_tickets_per_order
+  if (selectedProfileIds.value.length >= limit) {
+    ElMessage.warning(`本场最多选择 ${limit} 位观演人`)
+    return
+  }
+  selectedProfileIds.value = [...selectedProfileIds.value, key]
+}
+
+async function bindProfile() {
+  addingProfile.value = true
+  try {
+    const res = await api.createUserAttendee({
+      name: newProfile.name,
+      id_type: 'id_card',
+      id_number: newProfile.id_number,
+    })
+    profiles.value = [...profiles.value, res.data]
+    newProfile.name = ''
+    newProfile.id_number = ''
+    toggleProfile(res.data.id)
+  } catch (error) {
+    ElMessage.error(error.response?.data?.msg || '绑定失败')
+  } finally {
+    addingProfile.value = false
+  }
+}
 
 function validate() {
   if (form.contactName.trim().length < 2) return '请填写至少 2 个字符的联系人姓名'
   if (!/^1[3-9]\d{9}$/.test(form.contactPhone.trim())) return '请填写正确的 11 位手机号'
   if (event.value.real_name_required) {
-    for (let index = 0; index < form.attendees.length; index += 1) {
-      const attendee = form.attendees[index]
-      if (attendee.name.trim().length < 2) return `请填写观演人 ${index + 1} 的姓名`
-      if (!/^\d{17}[\dXx]$/.test(attendee.id_number.trim())) return `观演人 ${index + 1} 的身份证格式不正确`
+    if (selectedProfileIds.value.length !== quantity.value) {
+      return `请选择 ${quantity.value} 位观演人`
     }
-    const ids = form.attendees.map(item => item.id_number.trim().toUpperCase())
-    if (new Set(ids).size !== ids.length) return '同一证件不能重复绑定多张票'
   }
   if (!form.termsAccepted) return '请先阅读并同意购票须知'
   return ''
@@ -101,11 +159,9 @@ async function submitOrder() {
       contact_name: form.contactName.trim(),
       contact_phone: form.contactPhone.trim(),
       terms_accepted: form.termsAccepted,
-      attendees: event.value.real_name_required
-        ? form.attendees.map(item => ({
-          name: item.name.trim(), id_type: 'id_card', id_number: item.id_number.trim(),
-        }))
-        : [],
+      attendees: [],
+      attendee_profile_ids: event.value.real_name_required ? selectedProfileIds.value : [],
+      ...(seatIds.value.length ? { seat_ids: seatIds.value } : {}),
     })
     router.replace(`/cashier/${result.data.order_id}`)
   } catch (error) {
@@ -135,7 +191,7 @@ async function submitOrder() {
         <section class="form-panel">
           <template v-if="step === 1">
             <header class="section-heading">
-              <div><small>BUYER INFORMATION</small><h1>购票人信息</h1></div>
+              <div><h1>购票人信息</h1></div>
               <span>带 * 为必填项</span>
             </header>
 
@@ -147,16 +203,25 @@ async function submitOrder() {
             <section v-if="event.real_name_required" class="real-name-block">
               <div class="real-name-note">
                 <strong>本场实名制</strong>
-                <span>每张票对应一位观演人，入场时须持本人有效证件。</span>
+                <span>请勾选 {{ quantity }} 位已绑定观演人；一证一场一张。</span>
               </div>
-              <article v-for="(attendee, index) in form.attendees" :key="index" class="attendee-row">
-                <div class="attendee-number"><span>观演人</span><b>{{ String(index + 1).padStart(2, '0') }}</b></div>
-                <div class="attendee-fields">
-                  <label>姓名 *<input v-model.trim="attendee.name" maxlength="64" placeholder="请输入观演人姓名" /></label>
-                  <label>证件类型<select v-model="attendee.id_type"><option value="id_card">居民身份证</option></select></label>
-                  <label class="id-field">证件号码 *<input v-model.trim="attendee.id_number" maxlength="18" placeholder="仅用于实名校验，订单中只显示掩码" /></label>
-                </div>
-              </article>
+              <button
+                v-for="item in profiles"
+                :key="item.id"
+                type="button"
+                class="profile-chip"
+                :class="{ selected: selectedProfileIds.includes(String(item.id)) }"
+                @click="toggleProfile(item.id)"
+              >
+                <b>{{ item.name }}</b>
+                <span>{{ item.id_number_masked }}</span>
+              </button>
+              <p v-if="!profiles.length" class="profile-empty">还没有绑定证件，先在下方添加，或去个人中心管理。</p>
+              <div class="bind-row">
+                <input v-model.trim="newProfile.name" maxlength="64" placeholder="姓名" />
+                <input v-model.trim="newProfile.id_number" maxlength="18" placeholder="身份证号" />
+                <button type="button" :disabled="addingProfile" @click="bindProfile">绑定并选中</button>
+              </div>
             </section>
             <section v-else class="non-real-name-note">
               <b>非实名制活动</b>
@@ -167,8 +232,8 @@ async function submitOrder() {
               <h2>购票须知</h2>
               <dl>
                 <div><dt>实名规则</dt><dd>{{ event.real_name_required ? '一票一证；观演人与证件信息不一致时可能无法入场。' : '本场不要求实名信息，请妥善保管电子票。' }}</dd></div>
-                <div><dt>退票规则</dt><dd>当前演示系统支持未核销订单退款；实际退票期限与手续费以后续接入的主办方规则为准。</dd></div>
-                <div><dt>入场规则</dt><dd>请提前到场并出示有效电子票；同一张票成功核销后不能再次入场。</dd></div>
+                <div><dt>退票规则</dt><dd>未使用的电子票可申请退款，具体规则以主办方说明为准。</dd></div>
+                <div><dt>入场规则</dt><dd>请提前到场并出示有效电子票；同一张票入场后不能再次使用。</dd></div>
               </dl>
               <label class="agreement"><input v-model="form.termsAccepted" type="checkbox" />我已阅读并同意《购票须知》</label>
             </section>
@@ -181,7 +246,7 @@ async function submitOrder() {
 
           <template v-else>
             <header class="section-heading">
-              <div><small>ORDER REVIEW</small><h1>核对订单</h1></div>
+              <div><h1>核对订单</h1></div>
               <button class="edit-button" type="button" @click="step = 1">修改信息</button>
             </header>
             <div class="review-section">
@@ -189,14 +254,15 @@ async function submitOrder() {
               <p><b>{{ form.contactName }}</b><span>{{ maskPhone(form.contactPhone) }}</span></p>
             </div>
             <div v-if="event.real_name_required" class="review-section">
-              <h2>实名观演人 · {{ form.attendees.length }} 位</h2>
-              <p v-for="(attendee, index) in form.attendees" :key="index">
-                <i>{{ String(index + 1).padStart(2, '0') }}</i><b>{{ attendee.name }}</b><span>居民身份证 {{ maskID(attendee.id_number) }}</span>
+              <h2>实名观演人 · {{ selectedProfileIds.length }} 位</h2>
+              <p v-for="id in selectedProfileIds" :key="id">
+                <b>{{ profiles.find(item => String(item.id) === String(id))?.name }}</b>
+                <span>居民身份证 {{ profiles.find(item => String(item.id) === String(id))?.id_number_masked }}</span>
               </p>
             </div>
             <div class="review-warning">
               <b>提交前请再次确认</b>
-              <p>订单创建后会先异步确认票额。实名信息在当前版本不可自行修改，证件号只保存掩码和不可逆摘要。</p>
+              <p>提交后进入支付。实名信息确认后不可自行修改。</p>
             </div>
             <footer class="form-actions review-actions">
               <button class="text-button" type="button" @click="step = 1">上一步</button>
@@ -209,15 +275,14 @@ async function submitOrder() {
 
         <aside class="ticket-summary">
           <span v-if="event.real_name_required" class="real-seal">实名制</span>
-          <small>ORDER SUMMARY</small>
           <h2>{{ event.title }}</h2>
           <p>{{ dateTime(selected.session.starts_at) }}</p>
           <p>{{ selected.session.venue?.name }} · {{ selected.session.venue?.address }}</p>
           <div class="tear-line"></div>
           <dl>
-            <div><dt>票档</dt><dd>{{ selected.tier.name }}</dd></div>
+            <div><dt>票档</dt><dd>{{ lineItems.map(item => `${item.name}×${item.qty}`).join('、') }}</dd></div>
             <div><dt>数量</dt><dd>{{ quantity }} 张</dd></div>
-            <div><dt>单价</dt><dd>{{ money(selected.tier.price_cents) }}</dd></div>
+            <div v-if="pickedSeats.length"><dt>座位</dt><dd>{{ pickedSeats.map(item => item.label).join('、') }}</dd></div>
           </dl>
           <div class="summary-total"><span>应付</span><strong>{{ money(totalCents) }}</strong></div>
           <footer>{{ event.real_name_required ? '入场时须持本人有效身份证件' : '请妥善保管电子票凭证' }}</footer>
@@ -269,12 +334,23 @@ input:focus, select:focus { border-color: var(--red); box-shadow: 0 0 0 3px rgba
 .real-name-note { min-height: 45px; padding: 10px 13px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line-strong); }
 .real-name-note strong { padding: 5px 10px; border-radius: var(--radius-pill); background: var(--red); color: white; font-size: 11px; }
 .real-name-note span { color: var(--muted); font-size: 12px; }
-.attendee-row { margin: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); display: grid; grid-template-columns: 92px 1fr; overflow: hidden; }
-.attendee-number { display: grid; place-content: center; border-right: 1px solid var(--line); text-align: center; }
-.attendee-number span { color: var(--muted); font: 13px var(--font-display); }
-.attendee-number b { color: var(--red); font: 34px var(--font-display); }
-.attendee-fields { padding: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.attendee-fields .id-field { grid-column: 1 / -1; }
+.profile-chip {
+  width: calc(100% - 24px);
+  margin: 10px 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  cursor: pointer;
+}
+.profile-chip.selected { border-color: var(--red); background: rgba(181,52,41,.06); }
+.profile-chip span { color: var(--muted); font-size: 12px; }
+.profile-empty { margin: 12px; color: var(--muted); font-size: 13px; }
+.bind-row { margin: 12px; display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 8px; }
+.bind-row button { height: 43px; padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: var(--red); color: #fff; cursor: pointer; }
 .non-real-name-note { margin-top: 28px; padding: 18px; border-left: 3px solid var(--red); border-radius: 0 var(--radius-md) var(--radius-md) 0; background: var(--paper-deep); display: grid; gap: 5px; }
 .non-real-name-note span { color: var(--muted); font-size: 12px; }
 .notice { margin-top: 28px; padding-top: 20px; border-top: 1px dashed var(--line-strong); }

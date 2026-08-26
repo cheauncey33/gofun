@@ -47,7 +47,7 @@ export function useDiscovery() {
   }
 
   function eventQuery(extra = {}) {
-    const params = { page: 1, page_size: 24, ...extra }
+    const params = { page: 1, page_size: 12, ...extra }
     if (state.city) params.city = state.city
     if (state.selectedCategory) {
       params.category = state.selectedCategory

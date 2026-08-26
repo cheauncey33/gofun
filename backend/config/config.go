@@ -34,20 +34,21 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Host string `mapstructure:"host"`
-	Port int    `mapstructure:"port"`
-	Mode string `mapstructure:"mode"`
+	Host      string `mapstructure:"host"`
+	Port      int    `mapstructure:"port"`
+	Mode      string `mapstructure:"mode"`
+	UploadDir string `mapstructure:"upload_dir"`
 }
 
 type MySQLConfig struct {
-	DSN             string `mapstructure:"dsn"`
-	MaxIdleConns    int    `mapstructure:"max_idle_conns"`
-	MaxOpenConns    int    `mapstructure:"max_open_conns"`
+	DSN          string `mapstructure:"dsn"`
+	MaxIdleConns int    `mapstructure:"max_idle_conns"`
+	MaxOpenConns int    `mapstructure:"max_open_conns"`
 	// WorkerMaxOpenConns > 0 时为 Consumer/Outbox/Timeout 等后台路径单独开池（bulkhead）。
 	// 0 表示与 HTTP 共用 MaxOpenConns，保持历史行为。
 	WorkerMaxOpenConns int `mapstructure:"worker_max_open_conns"`
 	WorkerMaxIdleConns int `mapstructure:"worker_max_idle_conns"`
-	ConnMaxLifetime     int `mapstructure:"conn_max_lifetime"`
+	ConnMaxLifetime    int `mapstructure:"conn_max_lifetime"`
 }
 
 type RedisConfig struct {
@@ -191,6 +192,7 @@ func Load(configPath string) (*Config, error) {
 		"server.host",
 		"server.port",
 		"server.mode",
+		"server.upload_dir",
 		"mysql.dsn",
 		"mysql.max_idle_conns",
 		"mysql.max_open_conns",
@@ -310,6 +312,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.host", "127.0.0.1")
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("server.mode", "debug")
+	v.SetDefault("server.upload_dir", "uploads")
 
 	v.SetDefault("mysql.max_idle_conns", 10)
 	v.SetDefault("mysql.max_open_conns", 100)
@@ -419,6 +422,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port 必须在 1-65535 之间")
+	}
+	if strings.TrimSpace(c.Server.UploadDir) == "" {
+		c.Server.UploadDir = "uploads"
 	}
 	if c.Pprof.Enabled {
 		ip := net.ParseIP(c.Pprof.Host)

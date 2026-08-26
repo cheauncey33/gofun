@@ -70,6 +70,7 @@ type TicketOrder struct {
 	StockBucketNo         *int                  `json:"stock_bucket_no,omitempty"`
 	RushBucketNo          *int                  `json:"rush_bucket_no,omitempty"`
 	ExpiresAt             time.Time             `gorm:"not null;index" json:"expires_at"`
+	ExpiresAtUnix         int64                 `gorm:"-" json:"expires_at_unix,omitempty"`
 	PaidAt                *time.Time            `json:"paid_at,omitempty"`
 	CancelledAt           *time.Time            `json:"cancelled_at,omitempty"`
 	CancelReason          string                `gorm:"size:256" json:"cancel_reason"`
@@ -77,6 +78,7 @@ type TicketOrder struct {
 	Attendees             []TicketOrderAttendee `gorm:"foreignKey:OrderID" json:"attendees,omitempty"`
 	Tickets               []AdmissionTicket     `gorm:"foreignKey:OrderID" json:"tickets,omitempty"`
 	Payments              []PaymentTransaction  `gorm:"foreignKey:OrderID" json:"payments,omitempty"`
+	SessionSeats          []SessionSeat         `gorm:"foreignKey:OrderID" json:"session_seats,omitempty"`
 }
 
 // IdempotencyKey 只在同一用户内唯一，允许不同用户使用相同的客户端请求键。
@@ -159,6 +161,7 @@ type TicketOrderAttendee struct {
 	IDType         string `gorm:"size:16;not null" json:"id_type"`
 	IDNumberMasked string `gorm:"size:32;not null" json:"id_number_masked"`
 	IDNumberHash   string `gorm:"size:64;not null;index" json:"-"`
+	IdentityKey    string `gorm:"size:64;not null;index;default:''" json:"-"`
 }
 
 func (TicketOrderAttendee) TableName() string {

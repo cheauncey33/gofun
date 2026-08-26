@@ -68,12 +68,27 @@ func (ctrl *TicketOrderController) ListOrders(c *gin.Context) {
 		return
 	}
 	page, pageSize := parseTicketPage(c)
-	orders, total, err := ctrl.service.ListOrders(c.Request.Context(), userID, page, pageSize)
+	filter := service.ParseOrderListFilter(c.Query("status"), c.Query("keyword"), c.Query("q"))
+	orders, total, err := ctrl.service.ListOrders(c.Request.Context(), userID, page, pageSize, filter)
 	if err != nil {
 		writeTicketOrderError(c, err)
 		return
 	}
 	response.SuccessWithPage(c, orders, total, page, pageSize)
+}
+
+func (ctrl *TicketOrderController) ListTickets(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	page, pageSize := parseTicketPage(c)
+	tickets, total, err := ctrl.service.ListUserTickets(c.Request.Context(), userID, page, pageSize)
+	if err != nil {
+		writeTicketOrderError(c, err)
+		return
+	}
+	response.SuccessWithPage(c, tickets, total, page, pageSize)
 }
 
 func (ctrl *TicketOrderController) PayOrder(c *gin.Context) {

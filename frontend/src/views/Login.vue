@@ -3,10 +3,9 @@
     <aside class="auth-brand">
       <div class="auth-brand-mark"><i>G</i> Gofun</div>
       <div>
-        <h1 class="auth-headline">欢迎回来，<br />继续奔赴<em>热爱</em>。</h1>
+        <h1 class="auth-headline">欢迎回来，<br />赴热爱之场。</h1>
         <p class="auth-tagline">
-          多主办方活动票务平台 —— 发现、购票、限时开售，一处完成。
-          你想见的人和现场，正在前方等你。
+          见想见的人。发现、购票、限时开售，一处完成。
         </p>
       </div>
       <div class="auth-foot">© Gofun · 多主办方活动票务平台</div>
@@ -68,7 +67,8 @@ async function handleLogin() {
     localStorage.setItem('access_token', res.data.access_token)
     localStorage.setItem('refresh_token', res.data.refresh_token)
     localStorage.setItem('token', res.data.access_token)
-    localStorage.setItem('username', form.username)
+    localStorage.setItem('username', res.data.username || form.username)
+    if (res.data.role) localStorage.setItem('role', res.data.role)
     ElMessage.success('登录成功')
     router.push(typeof route.query.redirect === 'string' ? route.query.redirect : '/')
   } catch (e) {

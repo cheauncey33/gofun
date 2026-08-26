@@ -5,6 +5,7 @@ import (
 	"gofun/pkg/response"
 	"gofun/service"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -130,6 +131,57 @@ func (ctrl *UserController) ChangePassword(c *gin.Context) {
 		return
 	}
 	if err := ctrl.userSvc.ChangePassword(userID, req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, err.Error())
+		return
+	}
+	response.Success(c, nil)
+}
+
+func (ctrl *UserController) ListAttendees(c *gin.Context) {
+	userID, ok := common.GetUserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "用户信息获取失败")
+		return
+	}
+	rows, err := ctrl.userSvc.ListAttendees(userID)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, response.CodeInternalError, "加载观演人失败")
+		return
+	}
+	response.Success(c, rows)
+}
+
+func (ctrl *UserController) CreateAttendee(c *gin.Context) {
+	userID, ok := common.GetUserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "用户信息获取失败")
+		return
+	}
+	var req service.SaveAttendeeReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误")
+		return
+	}
+	row, err := ctrl.userSvc.CreateAttendee(userID, req)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, err.Error())
+		return
+	}
+	response.Success(c, row)
+}
+
+func (ctrl *UserController) DeleteAttendee(c *gin.Context) {
+	userID, ok := common.GetUserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "用户信息获取失败")
+		return
+	}
+	attendeeID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || attendeeID <= 0 {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误")
+		return
+	}
+	if err := ctrl.userSvc.DeleteAttendee(userID, attendeeID); err != nil {
 		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, err.Error())
 		return
 	}

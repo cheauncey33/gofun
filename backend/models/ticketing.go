@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 // TicketingStatus 使用字符串而不是无语义的数字，便于管理端、日志和数据库排查。
 // 这些状态只覆盖第一阶段，不提前加入核销、结算等尚未实现的流程。
@@ -25,6 +29,28 @@ const (
 	OrganizerRoleOwner    OrganizerRole = "owner"
 	OrganizerRoleOperator OrganizerRole = "operator"
 )
+
+type EventSaleMode string
+
+const (
+	EventSaleModeCounter EventSaleMode = "counter"
+	EventSaleModeSeated  EventSaleMode = "seated"
+)
+
+func ParseEventSaleMode(raw string) (EventSaleMode, error) {
+	switch strings.TrimSpace(raw) {
+	case "", string(EventSaleModeCounter):
+		return EventSaleModeCounter, nil
+	case string(EventSaleModeSeated):
+		return EventSaleModeSeated, nil
+	default:
+		return "", fmt.Errorf("无效卖法")
+	}
+}
+
+func (m EventSaleMode) IsSeated() bool {
+	return m == EventSaleModeSeated
+}
 
 type EventStatus string
 
@@ -100,6 +126,7 @@ type Event struct {
 	Status             EventStatus    `gorm:"size:24;not null;default:'draft';index" json:"status"`
 	RealNameRequired   bool           `gorm:"not null;default:false" json:"real_name_required"`
 	MaxTicketsPerOrder int            `gorm:"not null;default:6" json:"max_tickets_per_order"`
+	SaleMode           EventSaleMode  `gorm:"size:16;not null;default:'counter';index" json:"sale_mode"`
 	PublishedAt        *time.Time     `gorm:"index" json:"published_at,omitempty"`
 	Sessions           []EventSession `gorm:"foreignKey:EventID" json:"sessions,omitempty"`
 }
@@ -129,6 +156,8 @@ type TicketTier struct {
 	RemainingQuota     int              `gorm:"not null;index" json:"remaining_quota"`
 	SoldCount          int64            `gorm:"not null;default:0" json:"sold_count"`
 	PurchaseLimit      int              `gorm:"not null;default:6" json:"purchase_limit"`
+	AssignPlaceNo      bool             `gorm:"not null;default:true" json:"assign_place_no"`
+	PlaceSeq           int              `gorm:"not null;default:0" json:"-"`
 	Status             TicketTierStatus `gorm:"size:16;not null;default:'disabled';index" json:"status"`
 	Version            int64            `gorm:"not null;default:0" json:"version"`
 }

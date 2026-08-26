@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"gofun/models"
 	"gofun/repository"
 	"gofun/search"
+
+	"gorm.io/gorm"
 )
 
 type catalogListRepoStub struct {
@@ -269,5 +272,190 @@ func TestSyncPublishedEventsRepairsMissingAndDeletesOrphans(t *testing.T) {
 	}
 	if searcher.refreshCount != 1 {
 		t.Fatalf("refresh count = %d, want 1", searcher.refreshCount)
+	}
+}
+
+type catalogUpdateRepoStub struct {
+	repository.TicketCatalogRepository
+	event *models.Event
+	saved *models.Event
+}
+
+func (r *catalogUpdateRepoStub) FindActiveMembership(context.Context, int64, int64) (*models.OrganizerMember, error) {
+	return &models.OrganizerMember{Role: models.OrganizerRoleOwner, Status: models.OrganizerStatusActive}, nil
+}
+
+func (r *catalogUpdateRepoStub) FindOrganizerByID(context.Context, int64) (*models.Organizer, error) {
+	return &models.Organizer{Status: models.OrganizerStatusActive, AuditStatus: models.AuditStatusApproved}, nil
+}
+
+func (r *catalogUpdateRepoStub) FindEventByID(_ context.Context, id int64) (*models.Event, error) {
+	if r.event == nil || r.event.ID != id {
+		return nil, gorm.ErrRecordNotFound
+	}
+	copied := *r.event
+	return &copied, nil
+}
+
+func (r *catalogUpdateRepoStub) FindEventDetail(ctx context.Context, id int64) (*models.Event, error) {
+	return r.FindEventByID(ctx, id)
+}
+
+func (r *catalogUpdateRepoStub) SaveEvent(_ context.Context, event *models.Event) error {
+	copied := *event
+	r.saved = &copied
+	return nil
+}
+
+func TestUpdateEventRewritesDraftContent(t *testing.T) {
+	t.Parallel()
+	repo := &catalogUpdateRepoStub{
+		event: &models.Event{
+			Base:               models.Base{ID: 11},
+			OrganizerID:        3,
+			Title:              "旧标题",
+			Category:           "戏剧",
+			Status:             models.EventStatusDraft,
+			MaxTicketsPerOrder: 6,
+		},
+	}
+	svc := &TicketCatalogService{repo: repo}
+	updated, err := svc.UpdateEvent(context.Background(), 9, 3, 11, CreateEventInput{
+		Title:              "新标题",
+		Subtitle:           "副标题",
+		Category:           "音乐现场",
+		CoverURL:           "https://example.com/cover.jpg",
+		Description:        "新介绍",
+		RealNameRequired:   true,
+		MaxTicketsPerOrder: 4,
+	})
+	if err != nil {
+		t.Fatalf("UpdateEvent() error = %v", err)
+	}
+	if updated.Title != "新标题" || updated.Category != "音乐现场" || !updated.RealNameRequired || updated.MaxTicketsPerOrder != 4 {
+		t.Fatalf("unexpected draft update: %#v", updated)
+	}
+	if repo.saved == nil || repo.saved.Title != "新标题" {
+		t.Fatalf("expected SaveEvent, got %#v", repo.saved)
+	}
+}
+
+func TestUpdateEventKeepsPublishedRealNameRule(t *testing.T) {
+	t.Parallel()
+	repo := &catalogUpdateRepoStub{
+		event: &models.Event{
+			Base:               models.Base{ID: 12},
+			OrganizerID:        3,
+			Title:              "已发布",
+			Category:           "展览",
+			Status:             models.EventStatusPublished,
+			RealNameRequired:   true,
+			MaxTicketsPerOrder: 6,
+		},
+	}
+	svc := &TicketCatalogService{repo: repo}
+	updated, err := svc.UpdateEvent(context.Background(), 9, 3, 12, CreateEventInput{
+		Title:              "改后的标题",
+		Category:           "展览",
+		Description:        "改介绍",
+		RealNameRequired:   false,
+		MaxTicketsPerOrder: 1,
+	})
+	if err != nil {
+		t.Fatalf("UpdateEvent() error = %v", err)
+	}
+	if updated.Title != "改后的标题" || !updated.RealNameRequired || updated.MaxTicketsPerOrder != 6 {
+		t.Fatalf("published update must keep purchase rules: %#v", updated)
+	}
+}
+
+func TestUpdateEventRejectsCancelled(t *testing.T) {
+	t.Parallel()
+	repo := &catalogUpdateRepoStub{
+		event: &models.Event{
+			Base:        models.Base{ID: 13},
+			OrganizerID: 3,
+			Title:       "已取消",
+			Category:    "展览",
+			Status:      models.EventStatusCancelled,
+		},
+	}
+	svc := &TicketCatalogService{repo: repo}
+	_, err := svc.UpdateEvent(context.Background(), 9, 3, 13, CreateEventInput{
+		Title:    "不该改",
+		Category: "展览",
+	})
+	if !errors.Is(err, ErrInvalidTicketCatalog) {
+		t.Fatalf("UpdateEvent() error = %v, want invalid catalog", err)
+	}
+}
+
+func TestUpdateEventDraftCanChangeSaleMode(t *testing.T) {
+	t.Parallel()
+	repo := &catalogUpdateRepoStub{
+		event: &models.Event{
+			Base:        models.Base{ID: 14},
+			OrganizerID: 3,
+			Title:       "草稿",
+			Category:    "音乐现场",
+			Status:      models.EventStatusDraft,
+			SaleMode:    models.EventSaleModeCounter,
+		},
+	}
+	svc := &TicketCatalogService{repo: repo}
+	updated, err := svc.UpdateEvent(context.Background(), 9, 3, 14, CreateEventInput{
+		Title:              "草稿",
+		Category:           "音乐现场",
+		MaxTicketsPerOrder: 6,
+		SaleMode:           string(models.EventSaleModeSeated),
+	})
+	if err != nil {
+		t.Fatalf("UpdateEvent() error = %v", err)
+	}
+	if !updated.SaleMode.IsSeated() {
+		t.Fatalf("draft sale_mode = %s, want seated", updated.SaleMode)
+	}
+}
+
+func TestUpdateEventPublishedKeepsSaleMode(t *testing.T) {
+	t.Parallel()
+	repo := &catalogUpdateRepoStub{
+		event: &models.Event{
+			Base:        models.Base{ID: 15},
+			OrganizerID: 3,
+			Title:       "已发布",
+			Category:    "展览",
+			Status:      models.EventStatusPublished,
+			SaleMode:    models.EventSaleModeCounter,
+		},
+	}
+	svc := &TicketCatalogService{repo: repo}
+	updated, err := svc.UpdateEvent(context.Background(), 9, 3, 15, CreateEventInput{
+		Title:    "已发布",
+		Category: "展览",
+		SaleMode: string(models.EventSaleModeSeated),
+	})
+	if err != nil {
+		t.Fatalf("UpdateEvent() error = %v", err)
+	}
+	if updated.SaleMode != models.EventSaleModeCounter {
+		t.Fatalf("published sale_mode = %s, want counter", updated.SaleMode)
+	}
+}
+
+func TestValidateSessionTimes(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 9, 1, 19, 30, 0, 0, time.UTC)
+	end := start.Add(2 * time.Hour)
+	saleStart := start.Add(-24 * time.Hour)
+	saleEnd := start
+	if err := validateSessionTimes(start, end, saleStart, saleEnd); err != nil {
+		t.Fatalf("valid times rejected: %v", err)
+	}
+	if err := validateSessionTimes(end, start, saleStart, saleEnd); err == nil {
+		t.Fatal("expected inverted session times to fail")
+	}
+	if err := validateSessionTimes(start, end, saleStart, start.Add(time.Hour)); err == nil {
+		t.Fatal("expected sale end after show start to fail")
 	}
 }
