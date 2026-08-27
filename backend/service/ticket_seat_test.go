@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+
+	"gofun/models"
 )
 
 func TestParseSeatIDs(t *testing.T) {
@@ -42,5 +44,21 @@ func TestSeatRowLabel(t *testing.T) {
 	}
 	if got := seatRowLabel(27); got != "AA" {
 		t.Fatalf("row 27 = %q", got)
+	}
+}
+
+func TestOverlaySessionSeatStatus(t *testing.T) {
+	t.Parallel()
+	if got := overlaySessionSeatStatus(models.SessionSeatAvailable, true); got != models.SessionSeatAvailable {
+		t.Fatalf("on-sale available = %q", got)
+	}
+	if got := overlaySessionSeatStatus(models.SessionSeatAvailable, false); got != models.SessionSeatOffSale {
+		t.Fatalf("disabled available should overlay off_sale, got %q", got)
+	}
+	if got := overlaySessionSeatStatus(models.SessionSeatHeld, false); got != models.SessionSeatHeld {
+		t.Fatalf("held seats stay held, got %q", got)
+	}
+	if got := overlaySessionSeatStatus(models.SessionSeatSold, false); got != models.SessionSeatSold {
+		t.Fatalf("sold seats stay sold, got %q", got)
 	}
 }

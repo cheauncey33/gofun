@@ -11,6 +11,8 @@ const (
 	SessionSeatAvailable SessionSeatStatus = "available"
 	SessionSeatHeld      SessionSeatStatus = "held"
 	SessionSeatSold      SessionSeatStatus = "sold"
+	// SessionSeatOffSale 仅用于座位列表展示：票档已停售，库存行仍是 available。
+	SessionSeatOffSale SessionSeatStatus = "off_sale"
 )
 
 func (s SessionSeatStatus) IsOccupied() bool {

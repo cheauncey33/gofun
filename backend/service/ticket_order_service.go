@@ -66,6 +66,7 @@ type PurchaseInfoInput struct {
 	TermsAccepted      bool                  `json:"terms_accepted"`
 	Attendees          []TicketAttendeeInput `json:"attendees"`
 	AttendeeProfileIDs []FlexibleID          `json:"attendee_profile_ids"`
+	VisitorID          string                `json:"visitor_id"`
 }
 
 type CreateTicketOrderInput struct {
@@ -115,7 +116,7 @@ type TicketOrderService struct {
 	// outboxNotify 在写入 pending outbox 后唤醒发布循环；容量 1，合并突发通知。
 	outboxNotify chan struct{}
 	inventory    InventoryBucketSettings
-	orderEvents  *ws.Hub
+	orderEvents  orderEventPublisher
 	queryCacheSF singleflight.Group
 	// faultInjector 仅由同包集成测试设置，运行时默认 nil。
 	faultInjector TicketFaultInjector
@@ -123,6 +124,10 @@ type TicketOrderService struct {
 
 func (s *TicketOrderService) ConfigureInventory(cfg config.InventoryConfig) {
 	s.inventory = NewInventoryBucketSettings(cfg)
+}
+
+type orderEventPublisher interface {
+	Publish(userID int64, event ws.Event)
 }
 
 func (s *TicketOrderService) ConfigureOrderEvents(hub *ws.Hub) {
@@ -561,6 +566,7 @@ func (s *TicketOrderService) CreateOrder(
 		TermsAcceptedAt:       &acceptedAt,
 		IdempotencyKey:        idempotencyKey,
 		RequestID:             strings.TrimSpace(requestID),
+		FunnelVisitorKey:      funnelVisitorKey(input.VisitorID, "", "", userID),
 		ExpiresAt:             time.Now().Add(s.paymentTimeout),
 		Items:                 items,
 	}
@@ -1559,6 +1565,12 @@ func (s *TicketOrderService) HandlePaymentCallback(
 			return err
 		}
 		if order.OrderSource != models.TicketOrderSourceWaitlist {
+			if err := upsertFunnelVisitorStage(
+				tx, order.EventID, order.OrganizerID, order.FunnelVisitorKey,
+				models.FunnelStagePaid, now,
+			); err != nil {
+				return err
+			}
 			if err := bumpFunnelOrderDaily(
 				tx, order.EventID, order.OrganizerID, string(order.OrderSource),
 				0, 1, 0, now,
@@ -1874,6 +1886,8 @@ func (s *TicketOrderService) CancelOrder(
 			)
 			_, _ = pipe.Exec(ctx)
 		}
+	}
+	if err == nil {
 		message := "订单已取消"
 		if refundCents > 0 {
 			message = "退款完成，电子票已作废"
@@ -2237,6 +2251,8 @@ func (s *TicketOrderService) cancelPendingPaymentOnlyDB(
 			)
 			_, _ = pipe.Exec(ctx)
 		}
+	}
+	if err == nil {
 		s.publishOrderEvent(
 			userID,
 			orderID,
@@ -2457,11 +2473,11 @@ func (s *TicketOrderService) buildSeatedItems(
 	if len(seats) != len(seatIDs) {
 		return nil, fmt.Errorf("%w: 座位不存在", ErrInvalidTicketCatalog)
 	}
+	if _, err := purchasableSeatTiers(s.db.WithContext(ctx), session.ID, seats); err != nil {
+		return nil, err
+	}
 	byID := map[int64]models.SessionSeat{}
 	for _, seat := range seats {
-		if seat.SessionID != session.ID {
-			return nil, fmt.Errorf("%w: 座位必须属于当前场次", ErrInvalidTicketCatalog)
-		}
 		byID[seat.ID] = seat
 	}
 	tierOrder := make([]int64, 0)

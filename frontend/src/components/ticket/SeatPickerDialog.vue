@@ -94,6 +94,7 @@ function seatClass(seat) {
   if (!seat) return 'empty'
   if (seat.status === 'sold') return 'sold'
   if (seat.status === 'held') return 'held'
+  if (seat.status === 'off_sale') return 'off-sale'
   if (seat.status !== 'available') return 'taken'
   if (focusTierId.value && String(seat.ticket_tier_id) !== String(focusTierId.value)) return 'dimmed'
   return ''
@@ -180,6 +181,7 @@ function close() {
       </li>
       <li><i class="sold" />已售</li>
       <li><i class="held" />锁定中</li>
+      <li><i class="off-sale" />停售</li>
       <li><i class="picked" />已选</li>
     </ul>
 
@@ -238,7 +240,7 @@ function close() {
   font-size: 9px;
   cursor: pointer;
 }
-.seat-btn.empty, .seat-btn.taken, .seat-btn.sold, .seat-btn.held {
+.seat-btn.empty, .seat-btn.taken, .seat-btn.sold, .seat-btn.held, .seat-btn.off-sale {
   opacity: .34;
   background: #d8d3cb;
   border-color: #c9c3ba;
@@ -246,6 +248,7 @@ function close() {
   cursor: not-allowed;
 }
 .seat-btn.held { background: repeating-linear-gradient(45deg, #d8d3cb, #d8d3cb 4px, #c9c3ba 4px, #c9c3ba 8px); }
+.seat-btn.off-sale { background: #cfc8bf; }
 .seat-btn.dimmed { opacity: .28; }
 .legend {
   display: flex;
@@ -272,6 +275,7 @@ function close() {
 .legend .held {
   background: repeating-linear-gradient(45deg, #d8d3cb, #d8d3cb 3px, #b9b3aa 3px, #b9b3aa 6px);
 }
+.legend .off-sale { background: #cfc8bf; }
 .legend .picked { background: #2f9e6d; }
 .picker-footer {
   display: flex;

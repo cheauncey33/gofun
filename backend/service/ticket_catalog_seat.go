@@ -193,6 +193,15 @@ func (s *TicketCatalogService) ListSessionSeats(
 		Order("id ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
+	var tiers []models.TicketTier
+	if err := s.db.WithContext(ctx).Select("id", "status").
+		Where("session_id = ?", sessionID).Find(&tiers).Error; err != nil {
+		return nil, err
+	}
+	onSale := make(map[int64]bool, len(tiers))
+	for _, tier := range tiers {
+		onSale[tier.ID] = tier.Status == models.TicketTierStatusOnSale
+	}
 	views := make([]SessionSeatView, 0, len(rows))
 	for _, row := range rows {
 		views = append(views, SessionSeatView{
@@ -202,7 +211,7 @@ func (s *TicketCatalogService) ListSessionSeats(
 			RowNo:        row.Seat.RowNo,
 			ColNo:        row.Seat.ColNo,
 			Label:        row.Seat.Label,
-			Status:       row.Status,
+			Status:       overlaySessionSeatStatus(row.Status, onSale[row.TicketTierID]),
 		})
 	}
 	return views, nil

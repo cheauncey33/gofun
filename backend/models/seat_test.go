@@ -20,4 +20,7 @@ func TestSessionSeatStatusOccupied(t *testing.T) {
 	if !SessionSeatHeld.IsOccupied() || !SessionSeatSold.IsOccupied() {
 		t.Fatal("held and sold are occupied")
 	}
+	if SessionSeatOffSale.IsOccupied() {
+		t.Fatal("off_sale is a display overlay, not an occupied inventory state")
+	}
 }

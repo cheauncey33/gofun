@@ -114,6 +114,49 @@ func sessionSeatsHeldOrSold(tx *gorm.DB, orderID int64) (int64, error) {
 	return count, err
 }
 
+func overlaySessionSeatStatus(status models.SessionSeatStatus, tierOnSale bool) models.SessionSeatStatus {
+	if status == models.SessionSeatAvailable && !tierOnSale {
+		return models.SessionSeatOffSale
+	}
+	return status
+}
+
+func purchasableSeatTiers(tx *gorm.DB, sessionID int64, seats []models.SessionSeat) ([]int64, error) {
+	if len(seats) == 0 {
+		return nil, fmt.Errorf("%w: 座位不存在", ErrInvalidTicketCatalog)
+	}
+	tierIDs := make([]int64, 0)
+	seen := map[int64]struct{}{}
+	for _, seat := range seats {
+		if seat.SessionID != sessionID {
+			return nil, fmt.Errorf("%w: 座位必须属于当前场次", ErrInvalidTicketCatalog)
+		}
+		if _, ok := seen[seat.TicketTierID]; ok {
+			continue
+		}
+		seen[seat.TicketTierID] = struct{}{}
+		tierIDs = append(tierIDs, seat.TicketTierID)
+	}
+	var tiers []models.TicketTier
+	if err := tx.Select("id", "session_id", "status").Where("id IN ?", tierIDs).Find(&tiers).Error; err != nil {
+		return nil, err
+	}
+	if len(tiers) != len(tierIDs) {
+		return nil, fmt.Errorf("%w: 票档不存在", ErrInvalidTicketCatalog)
+	}
+	onSaleIDs := make([]int64, 0, len(tiers))
+	for _, row := range tiers {
+		if row.SessionID != sessionID {
+			return nil, fmt.Errorf("%w: 票档不属于当前场次", ErrInvalidTicketCatalog)
+		}
+		if row.Status != models.TicketTierStatusOnSale {
+			return nil, fmt.Errorf("%w: 所选座位所在分区已停售", ErrTicketOrderUnavailable)
+		}
+		onSaleIDs = append(onSaleIDs, row.ID)
+	}
+	return onSaleIDs, nil
+}
+
 func holdSessionSeats(tx *gorm.DB, order *models.TicketOrder, seatIDs []int64) error {
 	if order == nil || len(order.Items) == 0 || len(seatIDs) == 0 {
 		return fmt.Errorf("%w: 选座参数不完整", ErrInvalidTicketCatalog)
@@ -127,10 +170,21 @@ func holdSessionSeats(tx *gorm.DB, order *models.TicketOrder, seatIDs []int64) e
 	if want != len(seatIDs) {
 		return fmt.Errorf("%w: 座位数必须与购票数量一致", ErrInvalidTicketCatalog)
 	}
+	var seats []models.SessionSeat
+	if err := tx.Where("id IN ?", seatIDs).Find(&seats).Error; err != nil {
+		return err
+	}
+	if len(seats) != len(seatIDs) {
+		return fmt.Errorf("%w: 座位不存在", ErrInvalidTicketCatalog)
+	}
+	onSaleIDs, err := purchasableSeatTiers(tx, order.SessionID, seats)
+	if err != nil {
+		return err
+	}
 	result := tx.Model(&models.SessionSeat{}).
 		Where(
-			"id IN ? AND session_id = ? AND status = ?",
-			seatIDs, order.SessionID, models.SessionSeatAvailable,
+			"id IN ? AND session_id = ? AND status = ? AND ticket_tier_id IN ?",
+			seatIDs, order.SessionID, models.SessionSeatAvailable, onSaleIDs,
 		).
 		Updates(map[string]interface{}{
 			"status":   models.SessionSeatHeld,
