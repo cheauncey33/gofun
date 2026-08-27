@@ -2,7 +2,6 @@
   <div class="account-page">
     <header>
       <h1>个人中心</h1>
-      <span>管理联系方式、登录密码和观演人证件。</span>
     </header>
 
     <section class="account-card">
@@ -14,6 +13,7 @@
           <strong>{{ user.username || '—' }}</strong>
           <p>{{ user.role === 'admin' ? '平台管理员' : '购票用户' }}</p>
           <router-link v-if="user.role === 'admin'" class="admin-link" to="/admin">进入平台管理</router-link>
+          <router-link v-else class="admin-link" to="/organizer">主办方工作台</router-link>
         </div>
       </div>
       <dl>
@@ -38,9 +38,7 @@
 
     <section class="account-card">
       <h2>观演人证件</h2>
-      <p class="card-lead">实名制活动购票时勾选已绑定证件，不必每次手填。同一证件同一场只能买一张。</p>
-      <p v-if="!attendees.length" class="card-lead">还没有绑定证件，填下面的姓名和身份证号即可。</p>
-      <ul v-else class="attendee-list">
+      <ul v-if="attendees.length" class="attendee-list">
         <li v-for="item in attendees" :key="item.id">
           <div>
             <strong>{{ item.name }}</strong>

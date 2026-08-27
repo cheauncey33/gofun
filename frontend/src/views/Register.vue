@@ -15,7 +15,6 @@
     <section class="auth-panel">
       <div class="auth-box">
         <h2>创建账号</h2>
-        <p class="auth-sub">填写下面的信息即可开始</p>
         <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent>
           <el-form-item prop="username">
             <el-input v-model="form.username" placeholder="用户名，3-20 位" size="large">

@@ -15,11 +15,13 @@ import EventCreationDrawer from '../components/organizer/EventCreationDrawer.vue
 import EventEditDialog from '../components/organizer/EventEditDialog.vue'
 import TicketVerificationPanel from '../components/organizer/TicketVerificationPanel.vue'
 import RushSaleCreateDialog from '../components/organizer/RushSaleCreateDialog.vue'
+import FunnelBoard from '../components/organizer/FunnelBoard.vue'
 
 const router = useRouter()
 const loading = ref(true)
 const workspaceLoading = ref(false)
-const memberships = ref([])
+const applying = ref(false)
+const applications = ref([])
 const organizerId = ref('')
 const overview = ref({
   on_sale_events: 0,
@@ -51,7 +53,25 @@ const venueForm = reactive({
   address: '',
   timezone: 'Asia/Shanghai',
 })
+const applyForm = reactive({
+  name: '',
+  slug: '',
+  contact_name: '',
+  contact_phone: '',
+  description: '',
+})
 
+const memberships = computed(() =>
+  applications.value.filter(item =>
+    item.organizer?.status === 'active' && item.organizer?.audit_status === 'approved',
+  ),
+)
+const pendingApplication = computed(() =>
+  applications.value.find(item => item.organizer?.audit_status === 'pending'),
+)
+const rejectedApplication = computed(() =>
+  applications.value.find(item => item.organizer?.audit_status === 'rejected'),
+)
 const currentMembership = computed(() =>
   memberships.value.find(item => String(item.organizer.id) === String(organizerId.value))
 )
@@ -101,13 +121,54 @@ async function loadMemberships() {
   loading.value = true
   try {
     const res = await api.organizerGetMine()
-    memberships.value = res.data || []
+    applications.value = res.data || []
     organizerId.value = memberships.value[0]?.organizer?.id || ''
     if (organizerId.value) await loadWorkspace()
+    const rejected = rejectedApplication.value?.organizer
+    if (rejected && !applyForm.name) {
+      applyForm.name = rejected.name || ''
+      applyForm.slug = rejected.slug || ''
+      applyForm.contact_name = rejected.contact_name || ''
+      applyForm.contact_phone = rejected.contact_phone || ''
+      applyForm.description = rejected.description || ''
+    }
   } catch (error) {
     ElMessage.error(error.response?.data?.msg || '无法加载主办方权限')
   } finally {
     loading.value = false
+  }
+}
+
+function slugFromName() {
+  if (applyForm.slug.trim()) return
+  applyForm.slug = applyForm.name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
+}
+
+async function submitOrganizerApply() {
+  if (!applyForm.name.trim() || !applyForm.slug.trim()) {
+    ElMessage.warning('请填写主办方名称和标识')
+    return
+  }
+  applying.value = true
+  try {
+    await api.organizerApply({
+      name: applyForm.name.trim(),
+      slug: applyForm.slug.trim(),
+      contact_name: applyForm.contact_name.trim(),
+      contact_phone: applyForm.contact_phone.trim(),
+      description: applyForm.description.trim(),
+    })
+    ElMessage.success('申请已提交，等待平台审核')
+    await loadMemberships()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.msg || '申请失败')
+  } finally {
+    applying.value = false
   }
 }
 
@@ -174,6 +235,26 @@ async function unpublishEvent(event) {
   }
 }
 
+async function submitEventReview(event) {
+  try {
+    await api.organizerSubmitEventReview(organizerId.value, event.id)
+    ElMessage.success('已提交审核，通过后才会出现在购票站')
+    await loadWorkspace()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.msg || '提交审核失败')
+  }
+}
+
+async function withdrawEventReview(event) {
+  try {
+    await api.organizerWithdrawEventReview(organizerId.value, event.id)
+    ElMessage.success('已撤回，活动回到草稿')
+    await loadWorkspace()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.msg || '撤回失败')
+  }
+}
+
 async function cancelEvent(event) {
   try {
     await ElMessageBox.confirm(
@@ -230,6 +311,7 @@ function scrollTo(id) {
 function eventStatus(status) {
   return {
     draft: { label: '待发布', type: 'warning' },
+    pending_review: { label: '审核中', type: 'warning' },
     published: { label: '售票中', type: 'success' },
     cancelled: { label: '已取消', type: 'info' },
     finished: { label: '已结束', type: 'info' },
@@ -310,11 +392,35 @@ function formatDate(value) {
     <template v-if="loading">
       <div class="console-state">正在核对主办方权限…</div>
     </template>
-    <template v-else-if="!memberships.length">
+    <template v-else-if="pendingApplication">
       <div class="console-state empty">
-        <strong>你还不属于任何主办方</strong>
-        <p>主办方需要由平台管理员创建并指定负责人。当前账号仍可返回购票站正常购票。</p>
-        <el-button type="primary" @click="router.push('/')">返回购票站</el-button>
+        <strong>主办方申请审核中</strong>
+        <p>「{{ pendingApplication.organizer.name }}」审核中。</p>
+        <el-button @click="router.push('/')">返回购票站</el-button>
+      </div>
+    </template>
+    <template v-else-if="!memberships.length">
+      <div class="console-state empty apply">
+        <strong>{{ rejectedApplication ? '申请未通过，可修改后重提' : '开通主办方工作台' }}</strong>
+        <p v-if="rejectedApplication?.organizer?.audit_note">驳回原因：{{ rejectedApplication.organizer.audit_note }}</p>
+        <el-form class="apply-form" label-position="top" @submit.prevent="submitOrganizerApply">
+          <el-form-item label="主办方名称">
+            <el-input v-model="applyForm.name" maxlength="80" @blur="slugFromName" />
+          </el-form-item>
+          <el-form-item label="标识 slug">
+            <el-input v-model="applyForm.slug" maxlength="64" placeholder="例如 wuhan-livehouse" />
+          </el-form-item>
+          <el-form-item label="联系人">
+            <el-input v-model="applyForm.contact_name" />
+          </el-form-item>
+          <el-form-item label="联系电话">
+            <el-input v-model="applyForm.contact_phone" maxlength="20" />
+          </el-form-item>
+          <el-form-item label="简介">
+            <el-input v-model="applyForm.description" type="textarea" :rows="3" maxlength="400" />
+          </el-form-item>
+          <el-button type="primary" :loading="applying" @click="submitOrganizerApply">提交审核</el-button>
+        </el-form>
       </div>
     </template>
     <template v-else>
@@ -346,9 +452,11 @@ function formatDate(value) {
           <div><span>待支付订单</span><strong>{{ overview.pending_payment_orders }}</strong><small>笔</small></div>
         </section>
 
+        <FunnelBoard :organizer-id="organizerId" :events="events" />
+
         <section id="events" class="console-section">
           <header>
-            <div><h2>活动管理</h2><p>草稿可继续补齐多场次、票档和厅图；售票中也能改时间、票价和加票。</p></div>
+            <div><h2>活动管理</h2></div>
             <span>共 {{ events.length }} 场</span>
           </header>
           <div class="table-frame">
@@ -375,9 +483,11 @@ function formatDate(value) {
                     @click="openEdit(row)"
                   >编辑</button>
                   <button v-if="row.status === 'draft'" class="table-action" type="button" @click="resumeDraft(row)">继续配置</button>
+                  <button v-if="row.status === 'draft'" class="table-action" type="button" @click="submitEventReview(row)">提交审核</button>
+                  <button v-if="row.status === 'pending_review'" class="table-action" type="button" @click="withdrawEventReview(row)">撤回审核</button>
                   <button v-if="row.status === 'published'" class="table-action" type="button" @click="unpublishEvent(row)">下架</button>
                   <button v-if="row.status === 'published'" class="table-action danger" type="button" @click="cancelEvent(row)">取消并退款</button>
-                  <button v-if="row.status !== 'draft'" class="table-action" type="button" @click="router.push(`/events/${row.id}`)">查看前台</button>
+                  <button v-if="row.status === 'published'" class="table-action" type="button" @click="router.push(`/events/${row.id}`)">查看前台</button>
                 </template>
               </el-table-column>
             </el-table>
@@ -386,7 +496,7 @@ function formatDate(value) {
 
         <section id="rush" class="console-section">
           <header>
-            <div><h2>限时开售</h2><p>仅计数售卖的已发布票档可配置；选座活动不支持抢票。</p></div>
+            <div><h2>限时开售</h2></div>
             <el-button type="primary" size="small" @click="rushVisible = true">配置开售</el-button>
           </header>
           <div class="table-frame">
@@ -410,7 +520,7 @@ function formatDate(value) {
 
         <section id="orders" class="console-section">
           <header>
-            <div><h2>订单</h2><p>按活动名、场馆或订单号检索；金额以订单快照为准。</p></div>
+            <div><h2>订单</h2></div>
             <span>共 {{ orderTotal }} 笔</span>
           </header>
           <div class="order-toolbar">
@@ -434,7 +544,7 @@ function formatDate(value) {
             <el-table :data="orders" empty-text="暂时还没有购票订单">
               <el-table-column v-if="!isMobile" prop="order_no" label="订单号" min-width="190" />
               <el-table-column label="活动" :min-width="isMobile ? 145 : 220">
-                <template #default="{ row }">{{ row.items?.[0]?.event_title_snapshot || '活动快照缺失' }}</template>
+                <template #default="{ row }">{{ row.items?.[0]?.event_title_snapshot || '—' }}</template>
               </el-table-column>
               <el-table-column v-if="!isMobile" label="票数" width="80">
                 <template #default="{ row }">{{ row.items?.reduce((sum, item) => sum + item.quantity, 0) || 0 }}</template>
@@ -464,7 +574,7 @@ function formatDate(value) {
 
         <section id="verification" class="console-section">
           <header>
-            <div><h2>电子票核销</h2><p>工作人员扫码或输入票码，系统实时校验入场资格并留下操作记录。</p></div>
+            <div><h2>电子票核销</h2></div>
           </header>
           <TicketVerificationPanel :organizer-id="organizerId" />
         </section>
@@ -576,6 +686,7 @@ function formatDate(value) {
 .console-state { min-height: calc(100vh - 60px); display: grid; place-content: center; text-align: center; color: var(--muted); }
 .console-state.empty strong { color: var(--ink); font: 700 26px var(--font-display); }
 .console-state.empty p { max-width: 480px; line-height: 1.8; }
+.apply-form { width: min(420px, 100%); margin: 18px auto 0; text-align: left; }
 .venue-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 900px) {
   .console-sidebar { display: none; }

@@ -260,12 +260,6 @@ function addTier(session) {
 
 <template>
   <div class="sales-panel">
-    <p class="lead">
-      <template v-if="isSeated">选座活动共用一张厅图，目前只支持一场。发布后改厅图需先下架。</template>
-      <template v-else-if="isPublished">售票中可以改时间、票价和加票；新增场次或减票额需要先下架。</template>
-      <template v-else>草稿可添加多场次和票档。选座请先画厅图再发布。</template>
-    </p>
-
     <article v-for="(session, sessionIndex) in sessions" :key="session.id || `new-${sessionIndex}`" class="session-card">
       <header>
         <strong>场次 {{ sessionIndex + 1 }}</strong>

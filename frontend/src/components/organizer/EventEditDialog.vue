@@ -121,7 +121,6 @@ async function save() {
           <el-option label="必须选座：电影 / 脱口秀" value="seated" />
         </el-select>
       </el-form-item>
-      <p v-if="!isDraft" class="hint">售票中活动可以改文案、封面、时间和加票；卖法、实名与限购已影响在售订单，需先下架再改。</p>
     </el-form>
     <h3 class="sales-heading">场次与票档</h3>
     <EventSalesPanel

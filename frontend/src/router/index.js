@@ -8,7 +8,7 @@ const routes = [
     path: '/organizer',
     name: 'OrganizerConsole',
     component: () => import('../views/OrganizerConsole.vue'),
-    meta: { title: '主办方工作台', requiresAuth: true },
+    meta: { title: '主办方工作台', requiresAuth: true, blockAdmin: true },
   },
   {
     path: '/admin',
@@ -19,11 +19,13 @@ const routes = [
   {
     path: '/',
     component: () => import('../layouts/LayoutMain.vue'),
+    meta: { blockAdmin: true },
     children: [
       { path: '', name: 'Home', component: () => import('../views/Home.vue'), meta: { title: '发现活动' } },
       { path: 'events/:id', name: 'EventDetail', component: () => import('../views/EventDetail.vue'), meta: { title: '活动详情' } },
       { path: 'checkout/:eventId', name: 'Checkout', component: () => import('../views/Checkout.vue'), meta: { title: '确认购票', requiresAuth: true } },
       { path: 'cashier/:id', name: 'Cashier', component: () => import('../views/Cashier.vue'), meta: { title: '收银台', requiresAuth: true } },
+      { path: 'waitlist/:id', name: 'WaitlistCashier', component: () => import('../views/WaitlistCashier.vue'), meta: { title: '候补', requiresAuth: true } },
       { path: 'rush-sales', name: 'RushSales', component: () => import('../views/RushSales.vue'), meta: { title: '限时开售' } },
       { path: 'orders', name: 'OrderList', component: () => import('../views/OrderList.vue'), meta: { title: '我的订单', requiresAuth: true } },
       { path: 'tickets', redirect: { path: '/orders', query: { tab: 'tickets' } } },
@@ -39,33 +41,38 @@ const router = createRouter({ history: createWebHistory(), routes })
 router.beforeEach(async (to, from, next) => {
   const token = localStorage.getItem('access_token') || localStorage.getItem('token')
   const isAuthPage = to.path === '/login' || to.path === '/register'
+  const blockedForAdmin = !!(to.meta.blockAdmin || to.matched.some(record => record.meta.blockAdmin))
 
   if (!token && to.meta.requiresAuth) {
     next({ path: '/login', query: { redirect: to.fullPath } })
     return
   }
+
+  let role = localStorage.getItem('role') || ''
+  if (token && to.meta.requiresAdmin && role !== 'admin') {
+    try {
+      const res = await api.getUserInfo()
+      role = res.data?.role || ''
+      if (res.data?.username) localStorage.setItem('username', res.data.username)
+      if (role) localStorage.setItem('role', role)
+    } catch {
+      role = ''
+    }
+  }
+
   if (token && isAuthPage) {
+    next(role === 'admin' ? '/admin' : '/')
+    return
+  }
+  if (role === 'admin' && blockedForAdmin) {
+    next('/admin')
+    return
+  }
+  if (to.meta.requiresAdmin && role !== 'admin') {
     next('/')
     return
   }
-  if (to.meta.requiresAdmin) {
-    let role = localStorage.getItem('role')
-    if (role !== 'admin' && token) {
-      try {
-        const res = await api.getUserInfo()
-        role = res.data?.role || ''
-        if (res.data?.username) localStorage.setItem('username', res.data.username)
-        if (role) localStorage.setItem('role', role)
-      } catch {
-        role = ''
-      }
-    }
-    if (role !== 'admin') {
-      next('/')
-      return
-    }
-  }
-  document.title = `${to.meta.title || '发现活动'} · Gofun`
+  document.title = `${to.meta.title || to.matched.find(record => record.meta.title)?.meta.title || '发现活动'} · Gofun`
   next()
 })
 

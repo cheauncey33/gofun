@@ -70,7 +70,11 @@ async function handleLogin() {
     localStorage.setItem('username', res.data.username || form.username)
     if (res.data.role) localStorage.setItem('role', res.data.role)
     ElMessage.success('登录成功')
-    router.push(typeof route.query.redirect === 'string' ? route.query.redirect : '/')
+    if (res.data.role === 'admin') {
+      router.push('/admin')
+    } else {
+      router.push(typeof route.query.redirect === 'string' ? route.query.redirect : '/')
+    }
   } catch (e) {
     ElMessage.error(e.response?.data?.msg || '登录失败')
   } finally {

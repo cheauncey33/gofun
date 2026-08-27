@@ -31,6 +31,7 @@ onMounted(async () => {
     sales.value = salesRes.data || []
     userHint.contactName = userRes?.data?.username || ''
     userHint.contactPhone = userRes?.data?.phone || ''
+    api.trackFunnelVisits('browse', sales.value.map(item => item.event_id))
   } catch (error) {
     ElMessage.error(error.response?.data?.msg || '限时开售加载失败')
   } finally {
@@ -66,6 +67,7 @@ function openRush(sale) {
   form.contactPhone = userHint.contactPhone
   form.termsAccepted = false
   syncAttendees(sale, 1)
+  api.trackFunnelVisits('checkout', [sale.event_id])
 }
 
 watch(quantity, (value) => {

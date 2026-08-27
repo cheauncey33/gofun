@@ -140,7 +140,6 @@ async function submit() {
           <el-date-picker v-model="form.ends_at" type="datetime" placeholder="结束时间" />
         </el-form-item>
       </div>
-      <p class="hint">抢票价必须低于原价，票额不能超过当前剩余。选座活动不能配置限时开售。</p>
     </el-form>
     <template #footer>
       <el-button @click="close">取消</el-button>

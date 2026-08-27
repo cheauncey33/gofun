@@ -21,6 +21,7 @@ const form = reactive({
   termsAccepted: false,
 })
 
+const isWaitlist = computed(() => String(route.query.waitlist || '') === '1')
 const quantity = computed(() => {
   const seats = String(route.query.seat_ids || '').split(',').filter(Boolean)
   if (seats.length) return seats.length
@@ -62,10 +63,14 @@ onMounted(async () => {
       api.getUserAttendees().catch(() => ({ data: [] })),
     ])
     event.value = eventRes.data
+    api.trackFunnelVisits('checkout', [event.value.id])
     profiles.value = profileRes.data || []
     form.contactName = userRes.data?.username || ''
     form.contactPhone = userRes.data?.phone || ''
     if (!selected.value) throw new Error('所选票档不属于当前活动')
+    if (event.value.sale_mode === 'seated' && isWaitlist.value) {
+      throw new Error('选座活动暂不支持候补')
+    }
     if (event.value.sale_mode === 'seated' && !seatIds.value.length) {
       throw new Error('选座活动必须先选择座位')
     }
@@ -155,17 +160,22 @@ async function submitOrder() {
   }
   submitting.value = true
   try {
-    const result = await api.createOrder(selected.value.tier.id, quantity.value, {
+    const payload = {
       contact_name: form.contactName.trim(),
       contact_phone: form.contactPhone.trim(),
       terms_accepted: form.termsAccepted,
       attendees: [],
       attendee_profile_ids: event.value.real_name_required ? selectedProfileIds.value : [],
       ...(seatIds.value.length ? { seat_ids: seatIds.value } : {}),
-    })
-    router.replace(`/cashier/${result.data.order_id}`)
+    }
+    const result = isWaitlist.value
+      ? await api.createWaitlist(selected.value.tier.id, quantity.value, payload)
+      : await api.createOrder(selected.value.tier.id, quantity.value, payload)
+    router.replace(isWaitlist.value
+      ? `/waitlist/${result.data.waitlist_id}`
+      : `/cashier/${result.data.order_id}`)
   } catch (error) {
-    ElMessage.error(error.response?.data?.msg || '订单提交失败，请检查信息后重试')
+    ElMessage.error(error.response?.data?.msg || (isWaitlist.value ? '候补提交失败，请检查信息后重试' : '订单提交失败，请检查信息后重试'))
   } finally {
     submitting.value = false
   }
@@ -180,7 +190,7 @@ async function submitOrder() {
       <button type="button" @click="router.push(`/events/${route.params.eventId}`)">返回活动详情</button>
     </div>
     <template v-else>
-      <nav class="breadcrumb">活动详情 <i>/</i> 确认购票</nav>
+      <nav class="breadcrumb">活动详情 <i>/</i> {{ isWaitlist ? '确认候补' : '确认购票' }}</nav>
       <ol class="steps" aria-label="购票进度">
         <li :class="{ active: step === 1, done: step > 1 }"><b>1</b><span>填写信息</span></li>
         <li :class="{ active: step === 2 }"><b>2</b><span>核对订单</span></li>
@@ -191,9 +201,10 @@ async function submitOrder() {
         <section class="form-panel">
           <template v-if="step === 1">
             <header class="section-heading">
-              <div><h1>购票人信息</h1></div>
+              <div><h1>{{ isWaitlist ? '候补人信息' : '购票人信息' }}</h1></div>
               <span>带 * 为必填项</span>
             </header>
+            <p v-if="isWaitlist" class="waitlist-note">售罄候补：先付沙箱款进入队列。退票按提交顺序派票，配到即出票；开场前仍未配到会退款。不是抢票。</p>
 
             <div class="contact-grid">
               <label>联系人姓名 *<input v-model.trim="form.contactName" maxlength="64" placeholder="用于订单通知与现场联系" /></label>
@@ -353,6 +364,7 @@ input:focus, select:focus { border-color: var(--red); box-shadow: 0 0 0 3px rgba
 .bind-row button { height: 43px; padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: var(--red); color: #fff; cursor: pointer; }
 .non-real-name-note { margin-top: 28px; padding: 18px; border-left: 3px solid var(--red); border-radius: 0 var(--radius-md) var(--radius-md) 0; background: var(--paper-deep); display: grid; gap: 5px; }
 .non-real-name-note span { color: var(--muted); font-size: 12px; }
+.waitlist-note { margin: 0 0 18px; padding: 14px 16px; border-left: 3px solid var(--red); background: var(--paper-deep); color: var(--muted); font-size: 12px; line-height: 1.7; }
 .notice { margin-top: 28px; padding-top: 20px; border-top: 1px dashed var(--line-strong); }
 .notice h2, .review-section h2 { margin: 0 0 14px; font: 700 19px var(--font-display); }
 .notice dl { margin: 0; }

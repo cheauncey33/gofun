@@ -58,6 +58,14 @@ export function parseTimeMs(value) {
   return Number.isFinite(parsed) ? parsed : NaN
 }
 
+export const waitlistStatusText = {
+  pending_payment: '待支付',
+  queued: '候补排队中',
+  fulfilled: '已配票',
+  cancelled: '已取消',
+  expired: '已截止退款',
+}
+
 export const ticketOrderStatusText = {
   queued: '排队确认中',
   pending_payment: '待支付',

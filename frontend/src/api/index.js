@@ -78,6 +78,11 @@ export default {
   getEvents: (params) => get('/events', params),
   getEventDetail: (id) => get(`/events/${id}`),
   getCatalogMeta: () => get('/catalog/meta'),
+  trackFunnelVisits: (stage, eventIds) => {
+    const ids = [...new Set((eventIds || []).map(id => String(id || '')).filter(Boolean))].slice(0, 20)
+    if (!ids.length) return Promise.resolve()
+    return post('/funnel/visits', { stage, event_ids: ids }).catch(() => {})
+  },
   getRushSales: () => get('/rush-sales'),
   getEventComments: (eventId, params) => get(`/events/${eventId}/comments`, params),
   createEventComment: (eventId, content) => post(`/events/${eventId}/comments`, { content }),
@@ -93,6 +98,18 @@ export default {
     }, {
       headers: { 'X-Idempotency-Key': idempotencyKey },
     }),
+  createWaitlist: (ticketTierId, quantity, purchaseInfo = {}, idempotencyKey = newIdempotencyKey()) =>
+    post('/waitlists', {
+      ticket_tier_id: String(ticketTierId),
+      quantity,
+      ...purchaseInfo,
+    }, {
+      headers: { 'X-Idempotency-Key': idempotencyKey },
+    }),
+  getWaitlists: (params) => get('/waitlists', params),
+  getWaitlistDetail: (id) => get(`/waitlists/${id}`),
+  payWaitlist: (id, scenario = 'success') => post(`/waitlists/${id}/pay`, { scenario }),
+  cancelWaitlist: (id, reason) => post(`/waitlists/${id}/cancel`, { reason }),
   getSessionSeats: (eventId, sessionId) => get(`/events/${eventId}/sessions/${sessionId}/seats`),
   getOrders: (params) => get('/orders', params),
   getMyTickets: (params) => get('/tickets', params),
@@ -115,10 +132,18 @@ export default {
     }),
 
   // Platform and organizer management APIs are ready for the phase-two console.
+  adminGetOverview: () => get('/admin/overview'),
   adminGetOrganizers: (params) => get('/admin/organizers', params),
+  adminApproveOrganizer: (id) => post(`/admin/organizers/${id}/approve`),
+  adminRejectOrganizer: (id, note) => post(`/admin/organizers/${id}/reject`, { note }),
+  adminGetPendingEvents: (params) => get('/admin/events/pending', params),
+  adminApproveEvent: (id) => post(`/admin/events/${id}/approve`),
+  adminRejectEvent: (id, note) => post(`/admin/events/${id}/reject`, { note }),
   adminCreateOrganizer: (data) => post('/admin/organizers', data),
   organizerGetMine: () => get('/organizers/mine'),
+  organizerApply: (data) => post('/organizers/apply', data),
   organizerGetOverview: (organizerId) => get(`/organizers/${organizerId}/overview`),
+  organizerGetFunnel: (organizerId, params) => get(`/organizers/${organizerId}/funnel`, params),
   organizerGetVenues: (organizerId) => get(`/organizers/${organizerId}/venues`),
   organizerCreateVenue: (organizerId, data) => post(`/organizers/${organizerId}/venues`, data),
   organizerGetEvents: (organizerId, params) => get(`/organizers/${organizerId}/events`, params),
@@ -138,7 +163,11 @@ export default {
   organizerSaveSeatLayout: (organizerId, eventId, data) =>
     put(`/organizers/${organizerId}/events/${eventId}/seat-layout`, data),
   organizerPublishEvent: (organizerId, eventId) =>
-    post(`/organizers/${organizerId}/events/${eventId}/publish`),
+    post(`/organizers/${organizerId}/events/${eventId}/submit-review`),
+  organizerSubmitEventReview: (organizerId, eventId) =>
+    post(`/organizers/${organizerId}/events/${eventId}/submit-review`),
+  organizerWithdrawEventReview: (organizerId, eventId) =>
+    post(`/organizers/${organizerId}/events/${eventId}/withdraw-review`),
   organizerUnpublishEvent: (organizerId, eventId) =>
     post(`/organizers/${organizerId}/events/${eventId}/unpublish`),
   organizerCancelEvent: (organizerId, eventId, data = {}) =>

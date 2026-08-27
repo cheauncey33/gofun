@@ -40,7 +40,7 @@ const publishStep = computed(() => isSeated.value ? 4 : 3)
 const drawerTitle = computed(() => props.draftEvent ? '继续配置活动' : '创建活动')
 const primaryLabel = computed(() => {
   if (submitting.value) return '正在提交'
-  return step.value === publishStep.value ? '发布活动' : '下一步'
+  return step.value === publishStep.value ? '提交审核' : '下一步'
 })
 const createdTiers = computed(() =>
   sessions.value.flatMap(session => (session.tiers || []).filter(tier => tier.id).map(tier => ({
@@ -344,8 +344,8 @@ async function next() {
       return
     }
 
-    await api.organizerPublishEvent(props.organizerId, createdEventId.value)
-    ElMessage.success('活动已发布，购票站现在可以看到它')
+    await api.organizerSubmitEventReview(props.organizerId, createdEventId.value)
+    ElMessage.success('已提交审核，平台通过后才会出现在购票站')
     emit('completed')
     close()
   } catch (error) {
@@ -381,7 +381,7 @@ function sessionTime(session) {
       <el-step title="场次场馆" />
       <el-step title="票档" />
       <el-step v-if="isSeated" title="厅图" />
-      <el-step title="发布" />
+      <el-step title="提交审核" />
     </el-steps>
 
     <section v-if="step === 0" class="drawer-section">
@@ -404,8 +404,6 @@ function sessionTime(session) {
           <el-option label="必须选座：电影 / 脱口秀" value="seated" :disabled="isExhibition" />
         </el-select>
       </label>
-      <p class="drawer-hint">限购按账号累计本场已买张数（含待支付）。实名制购票时勾选已绑定证件，一证一场一张。</p>
-      <p class="drawer-hint">计数可配多场次；选座共用一张厅图，目前只支持一场。发布后不能改卖法。</p>
     </section>
 
     <section v-else-if="step === 1" class="drawer-section">
@@ -427,7 +425,6 @@ function sessionTime(session) {
         </div>
       </article>
       <button v-if="!isSeated" class="add-tier" type="button" @click="addSession">＋ 添加场次</button>
-      <p class="drawer-hint">售票结束时间必须早于或等于开场时间。{{ isSeated ? '选座活动目前只支持一场。' : '多场次各自独立售票和库存。' }}</p>
     </section>
 
     <section v-else-if="step === 2" class="drawer-section tier-section">
@@ -465,8 +462,6 @@ function sessionTime(session) {
       <span>场次</span><strong>{{ sessions.length }} 场</strong>
       <span>售卖</span><strong>{{ isSeated ? '必须选座' : '计数售卖' }}</strong>
       <span>票档</span><strong>{{ sessions.flatMap(item => item.tiers.map(tier => tier.name)).filter(Boolean).join('、') }}</strong>
-      <p v-if="isSeated">发布后按厅图生成座位库存，选座活动不支持限时开售。</p>
-      <p v-else>发布后即可在购票站售卖。</p>
     </section>
 
     <template #footer>

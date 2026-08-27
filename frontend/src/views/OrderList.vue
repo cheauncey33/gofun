@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
-import { formatClock, ticketOrderLabel, ticketOrderStatusClass } from '../utils/display.js'
+import { formatClock, ticketOrderLabel, ticketOrderStatusClass, waitlistStatusText } from '../utils/display.js'
 import AdmissionTicketCard from '../components/AdmissionTicketCard.vue'
 
 const route = useRoute()
@@ -25,7 +25,15 @@ const statusChips = [
   { id: 'refunded', label: '已退款' },
 ]
 
-const tab = computed(() => route.query.tab === 'tickets' ? 'tickets' : 'orders')
+const waitlists = ref([])
+const waitlistsLoading = ref(false)
+const waitlistsLoaded = ref(false)
+
+const tab = computed(() => {
+  if (route.query.tab === 'tickets') return 'tickets'
+  if (route.query.tab === 'waitlist') return 'waitlist'
+  return 'orders'
+})
 const statusFilter = computed(() => {
   const value = String(route.query.status || '')
   return ['pending', 'paid', 'cancelled', 'refunded'].includes(value) ? value : 'all'
@@ -37,6 +45,7 @@ onMounted(async () => {
   window.addEventListener('order:status', handleOrderStatus)
   await loadOrders()
   if (tab.value === 'tickets') await loadTickets()
+  if (tab.value === 'waitlist') await loadWaitlists()
 })
 
 onBeforeUnmount(() => {
@@ -46,6 +55,7 @@ onBeforeUnmount(() => {
 
 watch(tab, async (value) => {
   if (value === 'tickets' && !ticketsLoaded.value) await loadTickets()
+  if (value === 'waitlist' && !waitlistsLoaded.value) await loadWaitlists()
 })
 
 watch([statusFilter, keyword], () => {
@@ -69,6 +79,7 @@ watch(searchDraft, (value) => {
 function handleOrderStatus() {
   loadOrders()
   if (tab.value === 'tickets' || ticketsLoaded.value) loadTickets()
+  if (tab.value === 'waitlist' || waitlistsLoaded.value) loadWaitlists()
 }
 
 function applyQuery(patch) {
@@ -81,7 +92,7 @@ function applyQuery(patch) {
 }
 
 function selectTab(next) {
-  applyQuery({ tab: next === 'tickets' ? 'tickets' : undefined })
+  applyQuery({ tab: next === 'orders' ? undefined : next })
 }
 
 function selectStatus(next) {
@@ -123,6 +134,24 @@ async function loadTickets() {
   }
 }
 
+async function loadWaitlists() {
+  waitlistsLoading.value = true
+  try {
+    const res = await api.getWaitlists({ page: 1, page_size: 30 })
+    waitlists.value = Array.isArray(res.data?.list) ? res.data.list : []
+    waitlistsLoaded.value = true
+  } catch (error) {
+    ElMessage.error(error.response?.data?.msg || '候补加载失败')
+  } finally {
+    waitlistsLoading.value = false
+  }
+}
+
+function waitlistHref(item) {
+  if (item.status === 'fulfilled' && item.fulfilled_order_id) return `/orders/${item.fulfilled_order_id}`
+  return `/waitlist/${item.id}`
+}
+
 const money = cents => `¥${(cents / 100).toFixed(2)}`
 
 function orderClock(order) {
@@ -136,6 +165,7 @@ function orderClock(order) {
       <h1>我的订单</h1>
       <nav class="order-tabs" aria-label="订单与电子票">
         <button type="button" :class="{ active: tab === 'orders' }" @click="selectTab('orders')">订单</button>
+        <button type="button" :class="{ active: tab === 'waitlist' }" @click="selectTab('waitlist')">候补</button>
         <button type="button" :class="{ active: tab === 'tickets' }" @click="selectTab('tickets')">电子票</button>
       </nav>
     </header>
@@ -185,6 +215,29 @@ function orderClock(order) {
           <div class="order-status">
             <span :class="ticketOrderStatusClass(order)">{{ ticketOrderLabel(order) }}</span>
             <strong>{{ money(order.total_amount_cents) }}</strong>
+          </div>
+        </article>
+      </div>
+    </template>
+
+    <template v-else-if="tab === 'waitlist'">
+      <div v-if="waitlistsLoading && !waitlistsLoaded" class="order-state">正在加载候补…</div>
+      <div v-else-if="!waitlists.length" class="order-state">
+        <strong>还没有候补</strong>
+      </div>
+      <div v-else class="order-list">
+        <article v-for="item in waitlists" :key="item.id" @click="router.push(waitlistHref(item))">
+          <time>{{ orderClock(item) }}</time>
+          <div class="order-main">
+            <h2>{{ item.event_title_snapshot }}</h2>
+            <p>
+              {{ item.tier_name_snapshot }} × {{ item.quantity }}
+              <template v-if="item.queue_position"> · 第 {{ item.queue_position }} 位</template>
+            </p>
+          </div>
+          <div class="order-status">
+            <span :class="item.status">{{ waitlistStatusText[item.status] || item.status }}</span>
+            <strong>{{ money(item.amount_cents) }}</strong>
           </div>
         </article>
       </div>

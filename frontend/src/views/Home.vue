@@ -118,6 +118,11 @@ async function loadCatalog({ append = false } = {}) {
       if (metaRes?.data) applyMeta(metaRes.data)
       featuredEvents.value = featuredRes?.data?.list || list.slice(0, featuredLimit)
     }
+    api.trackFunnelVisits('browse', [
+      ...list.map(item => item.id),
+      ...(!append ? featuredEvents.value.map(item => item.id) : []),
+      ...(!append ? rushSales.value.map(item => item.event_id) : []),
+    ])
   } catch (error) {
     loadError.value = error.response?.data?.msg || '暂时无法连接票务服务'
   } finally {
@@ -228,7 +233,6 @@ function onCoverError(event) {
             <p>ON SALE</p>
             <h2>近期场次</h2>
             <span v-if="filterSummary">筛选 · {{ filterSummary }}</span>
-            <span v-else>常规售票中的活动</span>
           </div>
           <span>{{ eventTotal }} 场</span>
         </header>

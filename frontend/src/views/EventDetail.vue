@@ -44,18 +44,19 @@ function sessionSaleState(session) {
   const now = Date.now()
   const start = session.sale_starts_at ? new Date(session.sale_starts_at).getTime() : 0
   const end = session.sale_ends_at ? new Date(session.sale_ends_at).getTime() : Infinity
-  if (sessionRemaining(session) <= 0) return 'sold_out'
   if (start && now < start) return 'not_started'
   if (end && Number.isFinite(end) && now > end) return 'ended'
+  if (sessionRemaining(session) <= 0) return 'sold_out'
   return 'on_sale'
 }
 
 const saleState = computed(() => sessionSaleState(selectedSession.value))
-const canBuy = computed(() => saleState.value === 'on_sale' && !!selectedTier.value)
+const canWaitlist = computed(() => saleState.value === 'sold_out' && !isSeated.value && !!selectedTier.value)
+const canBuy = computed(() => (saleState.value === 'on_sale' || canWaitlist.value) && !!selectedTier.value)
 const buyLabel = computed(() => {
-  if (saleState.value === 'sold_out') return '已售罄'
   if (saleState.value === 'not_started') return '尚未开售'
   if (saleState.value === 'ended') return '已停售'
+  if (saleState.value === 'sold_out') return isSeated.value ? '已售罄' : '登记候补'
   return isSeated.value ? '选座购票' : '立即购票'
 })
 const lowestPrice = computed(() => {
@@ -94,6 +95,7 @@ onMounted(async () => {
     event.value = res.data
     const first = event.value.sessions?.[0]
     if (first) selectSession(first)
+    api.trackFunnelVisits('detail', [event.value.id])
     await loadComments()
   } catch (error) {
     ElMessage.error(error.response?.data?.msg || '活动不存在或尚未发布')
@@ -212,13 +214,16 @@ async function buy() {
   buyOpen.value = true
 }
 
-function goCheckout({ tierId, quantity: qty, seatIds }) {
+function goCheckout({ tierId, quantity: qty, seatIds, waitlist }) {
   router.push({
     name: 'Checkout',
     params: { eventId: event.value.id },
-    query: seatIds?.length
-      ? { tier: tierId, seat_ids: seatIds.join(',') }
-      : { tier: tierId, quantity: qty },
+    query: {
+      ...(seatIds?.length
+        ? { tier: tierId, seat_ids: seatIds.join(',') }
+        : { tier: tierId, quantity: qty }),
+      ...(waitlist ? { waitlist: '1' } : {}),
+    },
   })
 }
 
@@ -230,7 +235,11 @@ function confirmSeats(payload) {
 function confirmCounter() {
   if (!selectedTier.value) return
   buyOpen.value = false
-  goCheckout({ tierId: selectedTier.value.id, quantity: quantity.value })
+  goCheckout({
+    tierId: selectedTier.value.id,
+    quantity: quantity.value,
+    waitlist: canWaitlist.value,
+  })
 }
 
 function onCounterTierChange(event) {
@@ -259,6 +268,7 @@ function onCounterTierChange(event) {
               <span v-if="event.real_name_required"> · 实名制，购票时选择已绑定证件</span>
               <span v-if="isSeated"> · 选座入场</span>
               <span v-else-if="isExhibition"> · 门票入场</span>
+              <span v-else> · 售罄可候补</span>
             </dd></div>
           </dl>
         </div>
@@ -342,15 +352,16 @@ function onCounterTierChange(event) {
         :seats="sessionSeats"
         @confirm="confirmSeats"
       />
-      <el-dialog v-model="buyOpen" title="购买门票" width="460px" align-center>
+      <el-dialog v-model="buyOpen" :title="canWaitlist ? '登记候补' : '购买门票'" width="460px" align-center>
         <div class="buy-dialog">
+          <p v-if="canWaitlist">售罄后先付沙箱款排队。有人退票按提交顺序派票，不用再抢；开场前仍未配到会原路退款。选座活动暂不支持候补。</p>
           <label>票档
             <select :value="String(selectedTier?.id || '')" @change="onCounterTierChange">
               <option
                 v-for="tier in selectedSession?.ticket_tiers || []"
                 :key="tier.id"
                 :value="String(tier.id)"
-                :disabled="Number(tier.remaining_quota || 0) <= 0"
+                :disabled="!canWaitlist && Number(tier.remaining_quota || 0) <= 0"
               >
                 {{ tier.name }} · {{ money(tier.price_cents) }}{{ Number(tier.remaining_quota || 0) <= 0 ? ' · 售罄' : '' }}
               </option>
@@ -360,14 +371,18 @@ function onCounterTierChange(event) {
             <el-input-number
               v-model="quantity"
               :min="1"
-              :max="Math.min(event.max_tickets_per_order || 1, selectedTier?.remaining_quota || 1)"
+              :max="Math.min(event.max_tickets_per_order || 1, canWaitlist ? (selectedTier?.purchase_limit || event.max_tickets_per_order || 1) : (selectedTier?.remaining_quota || 1))"
             />
           </label>
           <p>每账号本场限购 {{ event.max_tickets_per_order }} 张{{ event.real_name_required ? '，下一步勾选已绑定证件' : '' }}。</p>
-          <p v-if="!isExhibition && selectedTier?.assign_place_no">出票后系统会写入区内编号，不是选座。</p>
         </div>
         <template #footer>
-          <button class="primary-action" type="button" :disabled="!selectedTier || Number(selectedTier.remaining_quota || 0) <= 0" @click="confirmCounter">去填写订单</button>
+          <button
+            class="primary-action"
+            type="button"
+            :disabled="!selectedTier || (!canWaitlist && Number(selectedTier.remaining_quota || 0) <= 0)"
+            @click="confirmCounter"
+          >{{ canWaitlist ? '去填写候补' : '去填写订单' }}</button>
         </template>
       </el-dialog>
     </template>

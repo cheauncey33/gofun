@@ -119,9 +119,9 @@ onBeforeUnmount(() => {
         </button>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item @click="router.push('/orders')">我的订单</el-dropdown-item>
-            <el-dropdown-item @click="router.push('/account')">个人中心</el-dropdown-item>
-            <el-dropdown-item @click="router.push('/organizer')">主办方工作台</el-dropdown-item>
+            <el-dropdown-item v-if="!isAdmin" @click="router.push('/orders')">我的订单</el-dropdown-item>
+            <el-dropdown-item v-if="!isAdmin" @click="router.push('/account')">个人中心</el-dropdown-item>
+            <el-dropdown-item v-if="!isAdmin" @click="router.push('/organizer')">主办方工作台</el-dropdown-item>
             <el-dropdown-item v-if="isAdmin" @click="router.push('/admin')">平台管理</el-dropdown-item>
             <el-dropdown-item divided @click="logout">退出登录</el-dropdown-item>
           </el-dropdown-menu>

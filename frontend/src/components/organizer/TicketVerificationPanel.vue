@@ -162,7 +162,6 @@ function resultType(value) {
       <header>
         <div>
           <h3>现场核销</h3>
-          <p>扫码与手动输入走同一个后端校验流程。</p>
         </div>
         <el-button v-if="!scanning" :icon="Camera" @click="startScanner">打开摄像头</el-button>
         <el-button v-else @click="stopScanner">关闭摄像头</el-button>
@@ -211,7 +210,7 @@ function resultType(value) {
       <header>
         <div>
           <h3>最近核销记录</h3>
-          <p>今日成功 {{ todayStats.success }} · 失败 {{ todayStats.failed }}；成功与失败均保留。</p>
+          <p>今日成功 {{ todayStats.success }} · 失败 {{ todayStats.failed }}</p>
         </div>
       </header>
       <el-table :data="records" empty-text="还没有核销记录">
