@@ -11,7 +11,15 @@
 | Cursor（本会话） | Code review + 缺陷修复 + 维护本协作文档 |
 | 用户 | 需求拍板、验收、决定是否提交/开 PR |
 
-## 当前状态（2026-08-09）
+## 当前状态（2026-08-28）
+
+### 当前新增能力
+
+- 无座与选座销售并存：活动座位图、场次座位库存、选座下单和座位释放闭环。
+- 候补：付款窗口、顺序排队、退款票额派发、截止自动退款。
+- 审核：主办方申请与平台审批，活动送审、撤回和平台审核。
+- 经营分析：访问、下单、支付、核销日聚合与主办方区间漏斗。
+- 前端角色拆分：用户购票、主办方工作台、平台管理台分别承载对应流程。
 
 ### 已完成基线（Codex）
 
@@ -57,6 +65,8 @@
 3. **支付生产化**：沙箱回调调度仍在进程内；真实渠道还需查询、对账、退款重试、重启恢复和更强幂等。
 4. **支付并发边界**：统一支付回调、超时关单和退款的锁顺序，并补崩溃/并发测试。
 5. **文档与验收**：补齐多票、并发核验和退款组合的自动化验收。
+6. **候补故障验收**：补进程重启、派发事务失败和截止退款重试的运行时测试。
+7. **前端包体**：主入口 chunk 仍偏大，需按页面依赖进一步分包并压缩大图。
 
 ## 协作规则
 
@@ -76,8 +86,13 @@ backend/service/ticket_order_service.go   # 普通单、消费、支付、超时
 backend/service/rush_sale_service.go      # 令牌、Lua、抢票建单
 backend/service/ticket_verification_service.go
 backend/service/ticket_catalog_service.go
+backend/service/ticket_seat.go            # 场次座位状态与占用/释放
+backend/service/ticket_waitlist.go        # 候补状态、派发与退款
+backend/service/organizer_funnel.go       # 主办方经营漏斗
 frontend/src/views/RushSales.vue          # 抢票确认购票信息
 frontend/src/views/Checkout.vue           # 普通购票
+frontend/src/components/ticket/SeatPickerDialog.vue
+frontend/src/views/WaitlistCashier.vue
 docs/FUCHANG_PHASE1.md
 docs/FUCHANG_ADMISSION_TICKET.md
 docs/FUCHANG_ORGANIZER_CLOSURE.md

@@ -6,15 +6,16 @@
 
 ## 2. 范围与假设
 
-当前采用“多主办方、无选座票务”：
+当前采用“多主办方、无座票与选座票并存”的票务模型：
 
 1. 平台管理员创建主办方并指定负责人。
 2. 主办方维护场馆、活动、场次和票档。
-3. 用户浏览已发布活动，选择票档购票。
+3. 用户浏览已发布活动；无座票按票档购票，选座活动按具体座位购票。
 4. 热门场次可配置限时开售。
 5. 支付使用内置支付沙箱：支付单由沙箱创建，订单只等待异步回调，不读取或扣减 Gofun 账户余额。
+6. 无座票售罄后可进入候补；释放票额优先按候补提交顺序派发。
 
-本阶段仍不实现选座、真实微信/支付宝渠道、结算分账和离线核销设备同步。
+当前仍不实现真实微信/支付宝渠道、结算分账和离线核销设备同步。
 
 ## 3. 核心模型
 
@@ -26,6 +27,9 @@
 - `TicketOrder / TicketOrderItem`：订单状态、支付状态、来源、幂等键和活动快照。
 - `PaymentTransaction / PaymentCallback`：平台侧支付单、沙箱/渠道回调和幂等审计，不保存用户外部余额。
 - `RushSaleCampaign`：限时价格、独立票额、个人限购和开售时间。
+- `SeatLayout / Seat / SessionSeat`：活动座位模板及场次座位的可售、锁定、售出状态。
+- `WaitlistEntry`：候补提交、付款窗口、排队、派票和退款状态。
+- `OrganizerFunnelDaily / OrganizerVisitorCohort`：主办方经营漏斗的日聚合与访客归因。
 
 订单明细保存活动、场次、场馆、地址和票档名称快照。否则主办方修改活动后，
 历史订单会显示新内容，无法作为购票时事实记录。
@@ -55,6 +59,8 @@ POST /api/v1/orders
 
 ### 支付与超时
 
+选座订单在创建时条件锁定座位（`available → held`），支付成功后转为 `sold`；取消、超时和退款会释放座位。无座票售罄后可创建并支付候补，退款释放的票额优先按提交顺序派发，派发后复用普通订单消费者。
+
 ```text
 pending_payment -> 创建 payment_transaction -> provider callback(success) -> paid -> 签发电子票
 provider callback(failed) -> payment_status=failed，可重试
@@ -75,6 +81,7 @@ Redis 预扣会同步写 pending 凭证；统一库存恢复 Worker 扫描遗留
 - `GET /api/v1/events`
 - `GET /api/v1/events/:id`
 - `GET /api/v1/rush-sales`
+- `GET /api/v1/events/:id/sessions/:session_id/seats`
 
 登录用户：
 
@@ -84,6 +91,10 @@ Redis 预扣会同步写 pending 凭证；统一库存恢复 Worker 扫描遗留
 - `POST /api/v1/orders/:id/pay`
 - `POST /api/v1/orders/:id/cancel`
 - `POST /api/v1/rush-sales/:id/execute`
+- `POST /api/v1/waitlists`
+- `GET /api/v1/waitlists`
+- `POST /api/v1/waitlists/:id/pay`
+- `POST /api/v1/waitlists/:id/cancel`
 
 主办方成员：
 
@@ -93,11 +104,16 @@ Redis 预扣会同步写 pending 凭证；统一库存恢复 Worker 扫描遗留
 - `POST /api/v1/organizers/:organizer_id/sessions/:session_id/ticket-tiers`
 - `POST /api/v1/organizers/:organizer_id/events/:event_id/publish`
 - `POST /api/v1/organizers/:organizer_id/rush-sales`
+- `PUT /api/v1/organizers/:organizer_id/events/:event_id/seat-layout`
+- `POST /api/v1/organizers/:organizer_id/events/:event_id/submit-review`
+- `GET /api/v1/organizers/:organizer_id/funnel`
 
 平台管理员：
 
 - `POST /api/v1/admin/organizers`
 - `GET /api/v1/admin/organizers`
+- `POST /api/v1/admin/organizers/:id/approve`
+- `POST /api/v1/admin/organizers/:id/reject`
 
 ## 6. 已知代价与后续
 
@@ -105,7 +121,7 @@ Redis 预扣会同步写 pending 凭证；统一库存恢复 Worker 扫描遗留
 - 当前已使用事务 Outbox、投递状态、publisher confirm 和恢复任务；支付回调本身仍是进程内沙箱调度，
   重启恢复、渠道查询、对账和退款重试需要后续补强。
 - 支付超时：进入 `pending_payment` 后投递 RabbitMQ 延时消息（消息级 TTL + DLX），到期条件取消；DB 扫描器作兜底。
-- 前端已包含结算、订单和主办方运营台；成员邀请、复杂财务结算和真实渠道接入不在本阶段。
+- 前端已包含选座、候补、结算、订单、主办方运营台和平台管理台；成员邀请、复杂财务结算和真实渠道接入不在当前范围。
 
 ## 7. 验证与回滚
 
@@ -124,6 +140,9 @@ npm.cmd run build
 -> 普通购票 -> queued -> pending_payment -> 支付
 -> 超时取消并核对 MySQL/Redis 票额
 -> 限时开售个人限购与幂等键
+-> 选座竞争、取消/超时/退款后的座位释放
+-> 候补付款、排队、退票派发与截止退款
+-> 主办方/活动审核与经营漏斗
 -> 重启后 queued 重投且不重复扣减
 ```
 
