@@ -67,6 +67,7 @@ var ticketIntegrationModels = []interface{}{
 	&models.EventComment{},
 	&models.FunnelDaily{},
 	&models.FunnelOrderDaily{},
+	&models.FunnelVisitorDaily{},
 	&models.SeatLayout{},
 	&models.Seat{},
 	&models.SessionSeat{},

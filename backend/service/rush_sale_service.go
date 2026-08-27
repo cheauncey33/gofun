@@ -562,6 +562,7 @@ func (s *TicketOrderService) createRushOrderAfterReservation(
 		TermsAcceptedAt:       &acceptedAt,
 		IdempotencyKey:        idempotencyKey,
 		RequestID:             requestID,
+		FunnelVisitorKey:      funnelVisitorKey(purchase.VisitorID, "", "", userID),
 		ExpiresAt:             time.Now().Add(s.paymentTimeout),
 		StockBucketNo:         bucketNo,
 		RushBucketNo:          bucketNo,

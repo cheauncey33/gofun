@@ -10,6 +10,7 @@ import (
 	"gofun/repository"
 	"gofun/search"
 	"log"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -129,10 +130,32 @@ type MyOrganizerView struct {
 }
 
 type OrganizerOverview struct {
-	OnSaleEvents         int64 `json:"on_sale_events"`
-	PaidTickets          int64 `json:"paid_tickets"`
-	PaidRevenueCents     int64 `json:"paid_revenue_cents"`
-	PendingPaymentOrders int64 `json:"pending_payment_orders"`
+	PeriodDays              int       `json:"period_days"`
+	PeriodFrom              time.Time `json:"period_from"`
+	OnSaleEvents            int64     `json:"on_sale_events"`
+	PaidOrders              int64     `json:"paid_orders"`
+	PaidTickets             int64     `json:"paid_tickets"`
+	GrossRevenueCents       int64     `json:"gross_revenue_cents"`
+	RefundedOrders          int64     `json:"refunded_orders"`
+	RefundedAmountCents     int64     `json:"refunded_amount_cents"`
+	NetRevenueCents         int64     `json:"net_revenue_cents"`
+	PreviousPaidOrders      int64     `json:"previous_paid_orders"`
+	PreviousPaidTickets     int64     `json:"previous_paid_tickets"`
+	PreviousNetRevenueCents int64     `json:"previous_net_revenue_cents"`
+	PendingPaymentOrders    int64     `json:"pending_payment_orders"`
+	RefundingOrders         int64     `json:"refunding_orders"`
+	UpcomingSessions        int64     `json:"upcoming_sessions"`
+	InventoryTotal          int64     `json:"inventory_total"`
+	InventoryOccupied       int64     `json:"inventory_occupied"`
+	InventoryOccupancyRate  float64   `json:"inventory_occupancy_rate"`
+}
+
+type organizerPeriodSales struct {
+	PaidOrders          int64
+	PaidTickets         int64
+	GrossRevenueCents   int64
+	RefundedOrders      int64
+	RefundedAmountCents int64
 }
 
 type TicketCatalogService struct {
@@ -1389,7 +1412,12 @@ func (s *TicketCatalogService) GetOrganizerOverview(
 	if err := s.requireOrganizerAccess(ctx, organizerID, userID); err != nil {
 		return nil, err
 	}
-	overview := &OrganizerOverview{}
+	const periodDays = 7
+	now := time.Now()
+	periodFrom := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).
+		AddDate(0, 0, -(periodDays - 1))
+	previousFrom := periodFrom.AddDate(0, 0, -periodDays)
+	overview := &OrganizerOverview{PeriodDays: periodDays, PeriodFrom: periodFrom}
 	if err := s.db.WithContext(ctx).Model(&models.Event{}).
 		Where("organizer_id = ? AND status = ?", organizerID, models.EventStatusPublished).
 		Count(&overview.OnSaleEvents).Error; err != nil {
@@ -1401,22 +1429,103 @@ func (s *TicketCatalogService) GetOrganizerOverview(
 		return nil, err
 	}
 	if err := s.db.WithContext(ctx).Model(&models.TicketOrder{}).
-		Where("organizer_id = ? AND status = ? AND payment_status = ?",
-			organizerID, models.TicketOrderStatusPaid, models.PaymentStatusPaid).
-		Select("COALESCE(SUM(total_amount_cents), 0)").
-		Scan(&overview.PaidRevenueCents).Error; err != nil {
+		Where("organizer_id = ? AND payment_status = ?", organizerID, models.PaymentStatusRefunding).
+		Count(&overview.RefundingOrders).Error; err != nil {
 		return nil, err
 	}
-	if err := s.db.WithContext(ctx).Model(&models.TicketOrderItem{}).
-		Joins("JOIN ticket_order ON ticket_order.id = ticket_order_item.order_id").
-		Where("ticket_order.organizer_id = ? AND ticket_order.status = ?",
-			organizerID, models.TicketOrderStatusPaid).
-		Where("ticket_order.delete_time IS NULL").
-		Select("COALESCE(SUM(ticket_order_item.quantity), 0)").
-		Scan(&overview.PaidTickets).Error; err != nil {
+	if err := s.db.WithContext(ctx).Model(&models.EventSession{}).
+		Joins("JOIN event ON event.id = event_session.event_id AND event.delete_time IS NULL").
+		Where("event.organizer_id = ?", organizerID).
+		Where("event_session.starts_at >= ? AND event_session.starts_at < ?", now, now.AddDate(0, 0, periodDays)).
+		Where("event_session.status NOT IN ?", []models.SessionStatus{
+			models.SessionStatusCancelled, models.SessionStatusFinished,
+		}).
+		Count(&overview.UpcomingSessions).Error; err != nil {
 		return nil, err
 	}
+
+	var inventory struct {
+		Total    int64
+		Occupied int64
+	}
+	if err := s.db.WithContext(ctx).Model(&models.TicketTier{}).
+		Select("COALESCE(SUM(ticket_tier.total_quota), 0) AS total, COALESCE(SUM(ticket_tier.sold_count), 0) AS occupied").
+		Joins("JOIN event_session ON event_session.id = ticket_tier.session_id AND event_session.delete_time IS NULL").
+		Joins("JOIN event ON event.id = event_session.event_id AND event.delete_time IS NULL").
+		Where("event.organizer_id = ? AND event.status = ?", organizerID, models.EventStatusPublished).
+		Scan(&inventory).Error; err != nil {
+		return nil, err
+	}
+	overview.InventoryTotal = inventory.Total
+	overview.InventoryOccupied = inventory.Occupied
+	if inventory.Total > 0 {
+		overview.InventoryOccupancyRate = math.Round(float64(inventory.Occupied)/float64(inventory.Total)*1000) / 10
+	}
+
+	current, err := s.loadOrganizerPeriodSales(ctx, organizerID, periodFrom, now.Add(time.Second))
+	if err != nil {
+		return nil, err
+	}
+	previous, err := s.loadOrganizerPeriodSales(ctx, organizerID, previousFrom, periodFrom)
+	if err != nil {
+		return nil, err
+	}
+	overview.PaidOrders = current.PaidOrders
+	overview.PaidTickets = current.PaidTickets
+	overview.GrossRevenueCents = current.GrossRevenueCents
+	overview.RefundedOrders = current.RefundedOrders
+	overview.RefundedAmountCents = current.RefundedAmountCents
+	overview.NetRevenueCents = current.GrossRevenueCents - current.RefundedAmountCents
+	overview.PreviousPaidOrders = previous.PaidOrders
+	overview.PreviousPaidTickets = previous.PaidTickets
+	overview.PreviousNetRevenueCents = previous.GrossRevenueCents - previous.RefundedAmountCents
 	return overview, nil
+}
+
+func (s *TicketCatalogService) loadOrganizerPeriodSales(
+	ctx context.Context,
+	organizerID int64,
+	from, to time.Time,
+) (organizerPeriodSales, error) {
+	var out organizerPeriodSales
+	paidStatuses := []models.PaymentStatus{
+		models.PaymentStatusPaid,
+		models.PaymentStatusRefunding,
+		models.PaymentStatusRefunded,
+	}
+	// 历史演示单可能缺 paid_at：已支付状态用 create_time 回退，避免经营卡和订单列表对不上。
+	paidAtExpr := "COALESCE(paid_at, create_time)"
+	if err := s.db.WithContext(ctx).Model(&models.TicketOrder{}).
+		Select("COUNT(*) AS paid_orders, COALESCE(SUM(total_amount_cents), 0) AS gross_revenue_cents").
+		Where("organizer_id = ? AND "+paidAtExpr+" >= ? AND "+paidAtExpr+" < ? AND payment_status IN ? AND delete_time IS NULL",
+			organizerID, from, to, paidStatuses).
+		Scan(&out).Error; err != nil {
+		return out, err
+	}
+	orderPaidAtExpr := "COALESCE(ticket_order.paid_at, ticket_order.create_time)"
+	if err := s.db.WithContext(ctx).Model(&models.TicketOrderItem{}).
+		Select("COALESCE(SUM(ticket_order_item.quantity), 0)").
+		Joins("JOIN ticket_order ON ticket_order.id = ticket_order_item.order_id AND ticket_order.delete_time IS NULL").
+		Where("ticket_order.organizer_id = ? AND "+orderPaidAtExpr+" >= ? AND "+orderPaidAtExpr+" < ? AND ticket_order.payment_status IN ?",
+			organizerID, from, to, paidStatuses).
+		Scan(&out.PaidTickets).Error; err != nil {
+		return out, err
+	}
+	var refunds struct {
+		RefundedOrders      int64
+		RefundedAmountCents int64
+	}
+	if err := s.db.WithContext(ctx).Model(&models.PaymentTransaction{}).
+		Select("COUNT(DISTINCT payment_transaction.order_id) AS refunded_orders, COALESCE(SUM(payment_transaction.amount_cents), 0) AS refunded_amount_cents").
+		Joins("JOIN ticket_order ON ticket_order.id = payment_transaction.order_id AND ticket_order.delete_time IS NULL").
+		Where("ticket_order.organizer_id = ? AND payment_transaction.status = ? AND payment_transaction.refunded_at >= ? AND payment_transaction.refunded_at < ? AND payment_transaction.delete_time IS NULL",
+			organizerID, models.PaymentTransactionRefunded, from, to).
+		Scan(&refunds).Error; err != nil {
+		return out, err
+	}
+	out.RefundedOrders = refunds.RefundedOrders
+	out.RefundedAmountCents = refunds.RefundedAmountCents
+	return out, nil
 }
 
 func (s *TicketCatalogService) ListOrganizerOrders(

@@ -24,10 +24,23 @@ const applying = ref(false)
 const applications = ref([])
 const organizerId = ref('')
 const overview = ref({
+  period_days: 7,
   on_sale_events: 0,
+  paid_orders: 0,
   paid_tickets: 0,
-  paid_revenue_cents: 0,
+  gross_revenue_cents: 0,
+  refunded_orders: 0,
+  refunded_amount_cents: 0,
+  net_revenue_cents: 0,
+  previous_paid_orders: 0,
+  previous_paid_tickets: 0,
+  previous_net_revenue_cents: 0,
   pending_payment_orders: 0,
+  refunding_orders: 0,
+  upcoming_sessions: 0,
+  inventory_total: 0,
+  inventory_occupied: 0,
+  inventory_occupancy_rate: 0,
 })
 const events = ref([])
 const venues = ref([])
@@ -76,6 +89,15 @@ const currentMembership = computed(() =>
   memberships.value.find(item => String(item.organizer.id) === String(organizerId.value))
 )
 const currentOrganizer = computed(() => currentMembership.value?.organizer)
+
+function trendLabel(current, previous) {
+  const now = Number(current || 0)
+  const before = Number(previous || 0)
+  if (!before) return now ? '上期为 0，本期新增' : '与上期持平'
+  const change = ((now - before) / Math.abs(before)) * 100
+  if (Math.abs(change) < 0.05) return '与上期持平'
+  return `较前 7 天 ${change > 0 ? '↑' : '↓'} ${Math.abs(change).toFixed(1)}%`
+}
 
 const mobileMedia = window.matchMedia('(max-width: 600px)')
 const updateMobile = event => { isMobile.value = event.matches }
@@ -445,11 +467,55 @@ function formatDate(value) {
           </div>
         </section>
 
-        <section class="metric-band" aria-label="售票概览">
-          <div><span>售票中活动</span><strong>{{ overview.on_sale_events }}</strong><small>场</small></div>
-          <div><span>已支付票数</span><strong>{{ overview.paid_tickets }}</strong><small>张</small></div>
-          <div><span>已收款金额</span><strong>{{ formatMoney(overview.paid_revenue_cents) }}</strong></div>
-          <div><span>待支付订单</span><strong>{{ overview.pending_payment_orders }}</strong><small>笔</small></div>
+        <section class="overview-block" aria-labelledby="business-overview-title">
+          <header class="overview-heading">
+            <div>
+              <h2 id="business-overview-title">近 7 天经营结果</h2>
+              <p>按支付和退款实际发生时间统计，与前 7 天对比</p>
+            </div>
+          </header>
+          <div class="metric-band business-metrics">
+            <div>
+              <span>净收款</span>
+              <strong>{{ formatMoney(overview.net_revenue_cents) }}</strong>
+              <small>{{ trendLabel(overview.net_revenue_cents, overview.previous_net_revenue_cents) }}</small>
+            </div>
+            <div>
+              <span>支付订单</span>
+              <strong>{{ overview.paid_orders }}</strong><em>笔</em>
+              <small>{{ trendLabel(overview.paid_orders, overview.previous_paid_orders) }}</small>
+            </div>
+            <div>
+              <span>售出票数</span>
+              <strong>{{ overview.paid_tickets }}</strong><em>张</em>
+              <small>{{ trendLabel(overview.paid_tickets, overview.previous_paid_tickets) }}</small>
+            </div>
+            <div>
+              <span>退款</span>
+              <strong>{{ formatMoney(overview.refunded_amount_cents) }}</strong>
+              <small>{{ overview.refunded_orders }} 笔 · 毛收款 {{ formatMoney(overview.gross_revenue_cents) }}</small>
+            </div>
+          </div>
+        </section>
+
+        <section class="overview-block" aria-labelledby="operation-overview-title">
+          <header class="overview-heading">
+            <div>
+              <h2 id="operation-overview-title">当前运营状态</h2>
+              <p>需要立即处理的订单、场次与在售库存</p>
+            </div>
+          </header>
+          <div class="operation-grid">
+            <div><span>售票中活动</span><strong>{{ overview.on_sale_events }}</strong><small>场</small></div>
+            <div :class="{ attention: overview.pending_payment_orders > 0 }"><span>待支付订单</span><strong>{{ overview.pending_payment_orders }}</strong><small>笔</small></div>
+            <div :class="{ attention: overview.refunding_orders > 0 }"><span>退款处理中</span><strong>{{ overview.refunding_orders }}</strong><small>笔</small></div>
+            <div><span>未来 7 天场次</span><strong>{{ overview.upcoming_sessions }}</strong><small>场</small></div>
+            <div>
+              <span>在售库存占用率</span>
+              <strong>{{ Number(overview.inventory_occupancy_rate || 0).toFixed(1) }}%</strong>
+              <small>{{ overview.inventory_occupied }} / {{ overview.inventory_total }} 张已占用</small>
+            </div>
+          </div>
         </section>
 
         <FunnelBoard :organizer-id="organizerId" :events="events" />
@@ -664,12 +730,23 @@ function formatDate(value) {
 .console-heading h1 { margin: 0; font: 760 clamp(30px, 3vw, 42px) var(--font-display); }
 .console-heading p, .console-section header p { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
 .heading-actions { display: flex; gap: 10px; }
-.metric-band { margin-top: 28px; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); overflow: hidden; display: grid; grid-template-columns: repeat(4, 1fr); }
+.overview-block { margin-top: 28px; }
+.overview-heading { margin-bottom: 12px; }
+.overview-heading h2 { margin: 0; font: 720 22px var(--font-display); }
+.overview-heading p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+.metric-band { border: 1px solid var(--line-strong); border-radius: var(--radius-lg); overflow: hidden; display: grid; grid-template-columns: repeat(4, 1fr); }
 .metric-band div { min-height: 100px; padding: 22px 28px; border-right: 1px solid var(--line); }
 .metric-band div:last-child { border: 0; }
 .metric-band span { display: block; margin-bottom: 11px; color: var(--muted); font-size: 12px; }
 .metric-band strong { font: 680 29px var(--font-body); }
-.metric-band small { margin-left: 6px; color: var(--muted); }
+.metric-band em { margin-left: 6px; color: var(--muted); font-style: normal; font-size: 12px; }
+.metric-band small { display: block; margin-top: 8px; color: var(--muted); font-size: 11px; }
+.operation-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.operation-grid div { min-height: 92px; padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgba(255,255,255,.24); }
+.operation-grid div.attention { border-color: rgba(181,52,41,.46); background: rgba(181,52,41,.045); }
+.operation-grid span, .operation-grid small { display: block; color: var(--muted); font-size: 12px; }
+.operation-grid strong { display: inline-block; margin: 8px 0 5px; font: 680 23px var(--font-body); }
+.operation-grid small { line-height: 1.5; }
 .console-section { margin-top: 34px; scroll-margin-top: 82px; }
 .console-section > header { margin-bottom: 15px; display: flex; justify-content: space-between; align-items: end; }
 .console-section h2 { margin: 0; font: 720 22px var(--font-display); }
@@ -694,6 +771,7 @@ function formatDate(value) {
   .metric-band { grid-template-columns: repeat(2, 1fr); }
   .metric-band div:nth-child(2) { border-right: 0; }
   .metric-band div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .operation-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 600px) {
   .console-topbar { padding: 0 16px; }
@@ -703,6 +781,7 @@ function formatDate(value) {
   .heading-actions { flex-direction: column; }
   .metric-band { grid-template-columns: 1fr; }
   .metric-band div { border-right: 0; border-bottom: 1px solid var(--line); }
+  .operation-grid { grid-template-columns: 1fr; }
   .venue-grid { grid-template-columns: 1fr; }
 }
 </style>

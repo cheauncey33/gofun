@@ -23,8 +23,9 @@ const (
 )
 
 type TrackFunnelInput struct {
-	Stage    string       `json:"stage"`
-	EventIDs []FlexibleID `json:"event_ids"`
+	Stage     string       `json:"stage"`
+	EventIDs  []FlexibleID `json:"event_ids"`
+	VisitorID string       `json:"visitor_id"`
 }
 
 type FunnelStep struct {
@@ -106,12 +107,22 @@ func funnelPct(part, whole int64) float64 {
 	return math.Round(float64(part)/float64(whole)*1000) / 10
 }
 
-func funnelVisitorKey(ip, ua string, userID int64) string {
+func funnelVisitorKey(visitorID, ip, ua string, userID int64) string {
+	visitorID = strings.TrimSpace(visitorID)
+	if len(visitorID) > 128 {
+		visitorID = visitorID[:128]
+	}
 	if len(ua) > 200 {
 		ua = ua[:200]
 	}
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%d", strings.TrimSpace(ip), ua, userID)))
-	return hex.EncodeToString(sum[:8])
+	identity := "browser|" + visitorID
+	if visitorID == "" && userID > 0 {
+		identity = fmt.Sprintf("user|%d", userID)
+	} else if visitorID == "" {
+		identity = fmt.Sprintf("fallback|%s|%s", strings.TrimSpace(ip), ua)
+	}
+	sum := sha256.Sum256([]byte(identity))
+	return hex.EncodeToString(sum[:])
 }
 
 func attachFunnelRates(steps []FunnelStep) {
@@ -171,35 +182,47 @@ func funnelInsight(steps []FunnelStep, leak *FunnelLeak, refundRate float64) str
 	for _, step := range steps {
 		byKey[step.Key] = step
 	}
-	checkout := byKey["checkout"]
-	submitted := byKey["submitted"]
 	browse := byKey["browse"]
-	if checkout.Count == 0 && submitted.Count > 0 {
-		return "下单页浏览从本次上线后才记人数；时间窗内已有提交，浏览转化会偏低。"
-	}
-	if browse.Count == 0 && submitted.Count > 0 {
-		return "列表曝光从本次上线后才记人数；当前先看提交到支付和退款。"
+	if browse.Count == 0 {
+		return "所选时间窗内还没有形成可计算的同访客访问链路。"
 	}
 	if leak != nil {
-		switch leak.StepKey {
-		case "detail":
-			return "最大流失在列表到详情：封面或标题没把人点进去。"
-		case "checkout":
-			return "最大流失在详情到下单：票价、售罄或购票门槛可能劝退。"
-		case "submitted":
-			return "最大流失在填写页：联系人或实名信息没有填完。"
-		case "paid":
-			return "最大流失在支付：下了单但没完成付款。"
-		}
+		return fmt.Sprintf("同访客链路中，进入「%s」的比例相对上一步最低。", leak.Label)
 	}
 	if refundRate >= 15 {
-		return "退票占比偏高，已购用户在付款后流失。"
+		return "订单口径的退款比例较高；原因需要结合退款记录进一步判断。"
 	}
 	paid := byKey["paid"]
 	if browse.Count > 0 && paid.FromTop >= 20 {
 		return "浏览到支付没有单步特别掉队。"
 	}
-	return "转化会随前台浏览和订单累积更新。"
+	return "所选时间窗内没有单一步骤出现明显掉队。"
+}
+
+func upsertFunnelVisitorStage(
+	tx *gorm.DB,
+	eventID, organizerID int64,
+	visitorKey, stage string,
+	at time.Time,
+) error {
+	if tx == nil || eventID <= 0 || organizerID <= 0 || strings.TrimSpace(visitorKey) == "" {
+		return nil
+	}
+	if _, err := parseFunnelStage(stage); err != nil &&
+		stage != models.FunnelStageSubmitted && stage != models.FunnelStagePaid {
+		return err
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	day := at.In(time.Local).Format("2006-01-02")
+	return tx.Exec(
+		`INSERT INTO funnel_visitor_daily
+		 (event_id, organizer_id, day, visitor_key, stage, hits, first_at, last_at)
+		 VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+		 ON DUPLICATE KEY UPDATE hits = hits + 1, last_at = VALUES(last_at)`,
+		eventID, organizerID, day, visitorKey, stage, at, at,
+	).Error
 }
 
 func applyFunnelEventFilter(db *gorm.DB, eventID int64) *gorm.DB {
@@ -256,7 +279,7 @@ func (s *TicketCatalogService) TrackFunnelVisits(
 		uniques[i] = 1
 	}
 	if s.rdb != nil {
-		visitor := funnelVisitorKey(ip, ua, userID)
+		visitor := funnelVisitorKey(input.VisitorID, ip, ua, userID)
 		pipe := s.rdb.Pipeline()
 		cmds := make([]*redis.BoolCmd, len(events))
 		for i, event := range events {
@@ -278,6 +301,12 @@ func (s *TicketCatalogService) TrackFunnelVisits(
 	}
 
 	for i, event := range events {
+		if err := upsertFunnelVisitorStage(
+			s.db.WithContext(ctx), event.ID, event.OrganizerID,
+			funnelVisitorKey(input.VisitorID, ip, ua, userID), stage, time.Now(),
+		); err != nil {
+			return err
+		}
 		if err := s.db.WithContext(ctx).Exec(
 			`INSERT INTO funnel_daily (event_id, organizer_id, day, stage, hits, uniques)
 			 VALUES (?, ?, ?, ?, 1, ?)
@@ -396,37 +425,73 @@ func (s *TicketCatalogService) loadOrganizerFunnel(
 		AddDate(0, 0, -(days - 1))
 	fromDay := from.Format("2006-01-02")
 
-	visits := map[string]int64{}
-	var visitRows []struct {
-		Stage   string
-		Uniques int64
-	}
-	if err := applyFunnelEventFilter(
-		s.db.WithContext(ctx).Model(&models.FunnelDaily{}).
-			Select("stage, COALESCE(SUM(uniques), 0) AS uniques").
-			Where("organizer_id = ? AND day >= ?", organizerID, fromDay),
+	// 浏览路径只统计访客阶段；提交/支付走真实订单，避免演示种子和经营卡互相打脸。
+	stageRows := applyFunnelEventFilter(
+		s.db.WithContext(ctx).Model(&models.FunnelVisitorDaily{}).
+			Select(`event_id, visitor_key,
+				MAX(CASE WHEN stage = 'browse' THEN 1 ELSE 0 END) AS browse,
+				MAX(CASE WHEN stage = 'detail' THEN 1 ELSE 0 END) AS detail,
+				MAX(CASE WHEN stage = 'checkout' THEN 1 ELSE 0 END) AS checkout`).
+			Where("organizer_id = ? AND day >= ? AND stage IN ?",
+				organizerID, fromDay,
+				[]string{models.FunnelStageBrowse, models.FunnelStageDetail, models.FunnelStageCheckout}),
 		eventID,
-	).Group("stage").Scan(&visitRows).Error; err != nil {
-		return nil, err
+	).Group("event_id, visitor_key")
+	var cohort struct {
+		Browse   int64
+		Detail   int64
+		Checkout int64
 	}
-	for _, row := range visitRows {
-		visits[row.Stage] = row.Uniques
+	if err := s.db.WithContext(ctx).Table("(?) AS cohort", stageRows).
+		Select(`
+			COALESCE(SUM(CASE WHEN browse = 1 THEN 1 ELSE 0 END), 0) AS browse,
+			COALESCE(SUM(CASE WHEN browse = 1 AND detail = 1 THEN 1 ELSE 0 END), 0) AS detail,
+			COALESCE(SUM(CASE WHEN browse = 1 AND detail = 1 AND checkout = 1 THEN 1 ELSE 0 END), 0) AS checkout
+		`).Scan(&cohort).Error; err != nil {
+		return nil, err
 	}
 
 	var orderRows []funnelOrderAgg
 	if err := applyFunnelEventFilter(
-		s.db.WithContext(ctx).Model(&models.FunnelOrderDaily{}).
+		s.db.WithContext(ctx).Model(&models.TicketOrder{}).
 			Select(`
-				source,
-				COALESCE(SUM(submitted), 0) AS submitted,
-				COALESCE(SUM(paid), 0) AS paid,
-				COALESCE(SUM(refunded), 0) AS refunded
+				order_source AS source,
+				COUNT(*) AS submitted,
+				COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'refunding', 'refunded') THEN 1 ELSE 0 END), 0) AS paid,
+				COALESCE(SUM(CASE WHEN payment_status = 'refunded' THEN 1 ELSE 0 END), 0) AS refunded
 			`).
-			Where("organizer_id = ? AND day >= ?", organizerID, fromDay),
+			Where("organizer_id = ? AND create_time >= ? AND delete_time IS NULL AND order_source <> ?",
+				organizerID, from, models.TicketOrderSourceWaitlist),
 		eventID,
-	).Group("source").Scan(&orderRows).Error; err != nil {
+	).Group("order_source").Scan(&orderRows).Error; err != nil {
 		return nil, err
 	}
+	var waitlistRow funnelOrderAgg
+	waitlistRow.Source = string(models.TicketOrderSourceWaitlist)
+	if err := applyFunnelEventFilter(
+		s.db.WithContext(ctx).Model(&models.WaitlistEntry{}).
+			Select(`
+				COUNT(*) AS submitted,
+				COALESCE(SUM(CASE WHEN paid_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS paid
+			`).
+			Where("organizer_id = ? AND create_time >= ? AND delete_time IS NULL", organizerID, from),
+		eventID,
+	).Scan(&waitlistRow).Error; err != nil {
+		return nil, err
+	}
+	var waitlistRefunded int64
+	waitlistRefundQuery := s.db.WithContext(ctx).Model(&models.PaymentTransaction{}).
+		Joins("JOIN waitlist_entry ON waitlist_entry.id = payment_transaction.waitlist_id AND waitlist_entry.delete_time IS NULL").
+		Where("waitlist_entry.organizer_id = ? AND waitlist_entry.create_time >= ? AND payment_transaction.status = ? AND payment_transaction.delete_time IS NULL",
+			organizerID, from, models.PaymentTransactionRefunded)
+	if eventID > 0 {
+		waitlistRefundQuery = waitlistRefundQuery.Where("waitlist_entry.event_id = ?", eventID)
+	}
+	if err := waitlistRefundQuery.Distinct("payment_transaction.waitlist_id").Count(&waitlistRefunded).Error; err != nil {
+		return nil, err
+	}
+	waitlistRow.Refunded = waitlistRefunded
+	orderRows = append(orderRows, waitlistRow)
 
 	var pending int64
 	if err := applyFunnelEventFilter(
@@ -468,9 +533,9 @@ func (s *TicketCatalogService) loadOrganizerFunnel(
 	}
 
 	steps := []FunnelStep{
-		{Key: "browse", Label: "列表曝光", Count: visits[models.FunnelStageBrowse], Unit: "人"},
-		{Key: "detail", Label: "打开详情", Count: visits[models.FunnelStageDetail], Unit: "人"},
-		{Key: "checkout", Label: "进入下单页", Count: visits[models.FunnelStageCheckout], Unit: "人"},
+		{Key: "browse", Label: "列表出现", Count: cohort.Browse, Unit: "访客"},
+		{Key: "detail", Label: "打开详情", Count: cohort.Detail, Unit: "访客"},
+		{Key: "checkout", Label: "进入下单页", Count: cohort.Checkout, Unit: "访客"},
 		{Key: "submitted", Label: "提交订单", Count: submitted, Unit: "单"},
 		{Key: "paid", Label: "支付成功", Count: paid, Unit: "单"},
 	}
@@ -488,7 +553,7 @@ func (s *TicketCatalogService) loadOrganizerFunnel(
 		Days:         days,
 		From:         from,
 		EventID:      eventID,
-		VisitTracked: visits[models.FunnelStageBrowse]+visits[models.FunnelStageDetail]+visits[models.FunnelStageCheckout] > 0,
+		VisitTracked: cohort.Browse > 0,
 		Steps:        steps,
 		Leak:         leak,
 		Insight:      funnelInsight(steps, leak, refundRate),

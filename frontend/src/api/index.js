@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { getVisitorId } from '../utils/visitor'
 
 let _router = null
 export function setRouter(r) { _router = r }
@@ -81,7 +82,11 @@ export default {
   trackFunnelVisits: (stage, eventIds) => {
     const ids = [...new Set((eventIds || []).map(id => String(id || '')).filter(Boolean))].slice(0, 20)
     if (!ids.length) return Promise.resolve()
-    return post('/funnel/visits', { stage, event_ids: ids }).catch(() => {})
+    return post('/funnel/visits', {
+      stage,
+      event_ids: ids,
+      visitor_id: getVisitorId(),
+    }).catch(() => {})
   },
   getRushSales: () => get('/rush-sales'),
   getEventComments: (eventId, params) => get(`/events/${eventId}/comments`, params),
@@ -94,6 +99,7 @@ export default {
     post('/orders', {
       ticket_tier_id: String(ticketTierId),
       quantity,
+      visitor_id: getVisitorId(),
       ...purchaseInfo,
     }, {
       headers: { 'X-Idempotency-Key': idempotencyKey },
@@ -102,6 +108,7 @@ export default {
     post('/waitlists', {
       ticket_tier_id: String(ticketTierId),
       quantity,
+      visitor_id: getVisitorId(),
       ...purchaseInfo,
     }, {
       headers: { 'X-Idempotency-Key': idempotencyKey },
@@ -127,7 +134,7 @@ export default {
 
   // Rush sale — 到点直抢，一次 execute（无需前置 token）
   executeRushSale: (id, quantity, purchaseInfo = {}, idempotencyKey = newIdempotencyKey()) =>
-    post(`/rush-sales/${id}/execute`, { quantity, ...purchaseInfo }, {
+    post(`/rush-sales/${id}/execute`, { quantity, visitor_id: getVisitorId(), ...purchaseInfo }, {
       headers: { 'X-Idempotency-Key': idempotencyKey },
     }),
 

@@ -70,7 +70,7 @@ async function loadFunnel() {
     funnel.value = res.data
   } catch (error) {
     funnel.value = null
-    ElMessage.error(error.response?.data?.msg || '转化漏斗加载失败')
+    ElMessage.error(error.response?.data?.msg || '用户路径诊断加载失败')
   } finally {
     loading.value = false
   }
@@ -95,10 +95,10 @@ watch(
 </script>
 
 <template>
-  <section class="funnel-board" aria-label="购票转化漏斗">
+  <section class="funnel-board" aria-label="用户路径诊断">
     <header>
       <div>
-        <h2>转化漏斗</h2>
+        <h2>用户路径诊断</h2>
         <p v-if="funnel" class="funnel-range">{{ formatRange(funnel.from, funnel.days) }}</p>
       </div>
       <div class="funnel-filters">
@@ -120,6 +120,12 @@ watch(
     <div v-loading="loading" class="funnel-body">
       <template v-if="funnel">
         <p class="funnel-insight">{{ funnel.insight }}</p>
+        <p class="funnel-definition">
+          {{ eventId
+            ? '前三步按同一浏览器访客、当前活动和所选时间窗去重。'
+            : '前三步按“访客－活动”组合统计；评估单场转化时请筛选活动。' }}
+          提交/支付只统计真实订单，不读演示汇总表。
+        </p>
         <p v-if="funnel.leak" class="funnel-leak">
           最大流失在「{{ funnel.leak.label }}」，相对上一步掉了 {{ formatPct(funnel.leak.drop) }}。
         </p>
@@ -148,24 +154,7 @@ watch(
           </div>
         </div>
 
-        <div class="funnel-side">
-          <div>
-            <span>仍待支付</span>
-            <strong>{{ funnel.pending_open }}</strong>
-            <small>单</small>
-          </div>
-          <div>
-            <span>已退款</span>
-            <strong>{{ funnel.refunded }}</strong>
-            <small>单 · {{ formatPct(funnel.refund_rate) }}</small>
-          </div>
-          <div>
-            <span>已核销</span>
-            <strong>{{ funnel.used_tickets }}</strong>
-            <small>张</small>
-          </div>
-        </div>
-
+        <h3 class="funnel-subtitle">购票方式表现 <small>订单口径</small></h3>
         <div class="funnel-channels">
           <article v-for="channel in funnel.channels" :key="channel.key">
             <h3>{{ channel.label }}</h3>
@@ -225,6 +214,12 @@ watch(
   font-size: 14px;
   font-weight: 650;
 }
+.funnel-definition {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
 .funnel-leak {
   margin: 0 0 16px;
   color: var(--red);
@@ -265,26 +260,18 @@ watch(
 .funnel-slice.leak small {
   font-weight: 650;
 }
-.funnel-side {
-  margin-top: 18px;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-}
-.funnel-side div,
 .funnel-channels article {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   padding: 14px 16px;
 }
-.funnel-side span,
 .funnel-channels p {
   display: block;
   color: var(--muted);
   font-size: 12px;
 }
-.funnel-side strong { font: 680 22px var(--font-body); }
-.funnel-side small { margin-left: 6px; color: var(--muted); font-size: 12px; }
+.funnel-subtitle { margin: 22px 0 10px; font: 680 15px var(--font-body); }
+.funnel-subtitle small { margin-left: 6px; color: var(--muted); font-size: 11px; font-weight: 500; }
 .funnel-channels {
   margin-top: 12px;
   display: grid;
@@ -309,7 +296,6 @@ watch(
 }
 @media (max-width: 640px) {
   .funnel-board > header { display: grid; }
-  .funnel-side,
   .funnel-channels { grid-template-columns: 1fr; }
 }
 </style>

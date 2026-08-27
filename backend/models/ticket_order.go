@@ -68,6 +68,7 @@ type TicketOrder struct {
 	TermsAcceptedAt       *time.Time            `json:"terms_accepted_at,omitempty"`
 	IdempotencyKey        string                `gorm:"size:64;uniqueIndex:uk_ticket_order_idempotency,priority:2" json:"-"`
 	RequestID             string                `gorm:"size:64;index" json:"request_id"`
+	FunnelVisitorKey      string                `gorm:"size:64;not null;default:''" json:"-"`
 	StockBucketNo         *int                  `json:"stock_bucket_no,omitempty"`
 	RushBucketNo          *int                  `json:"rush_bucket_no,omitempty"`
 	ExpiresAt             time.Time             `gorm:"not null;index" json:"expires_at"`

@@ -164,6 +164,7 @@ func (s *TicketOrderService) CreateWaitlist(
 		TierNameSnapshot:        tier.Name,
 		IdempotencyKey:          idempotencyKey,
 		RequestID:               strings.TrimSpace(requestID),
+		FunnelVisitorKey:        funnelVisitorKey(input.VisitorID, "", "", userID),
 		ExpiresAt:               now.Add(s.paymentTimeout),
 	}
 	if attendees := s.buildWaitlistAttendeeSnapshots(waitlistID, input.Attendees, event.RealNameRequired); len(attendees) > 0 {
@@ -171,6 +172,12 @@ func (s *TicketOrderService) CreateWaitlist(
 	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(entry).Error; err != nil {
+			return err
+		}
+		if err := upsertFunnelVisitorStage(
+			tx, event.ID, event.OrganizerID, entry.FunnelVisitorKey,
+			models.FunnelStageSubmitted, now,
+		); err != nil {
 			return err
 		}
 		return bumpFunnelOrderDaily(
@@ -593,6 +600,7 @@ func (s *TicketOrderService) fulfillWaitlistEntry(
 		PurchaseNoticeVersion: entry.PurchaseNoticeVersion,
 		IdempotencyKey:        "waitlist:" + entry.WaitlistNo,
 		RequestID:             entry.RequestID,
+		FunnelVisitorKey:      entry.FunnelVisitorKey,
 		ExpiresAt:             now,
 		PaidAt:                &now,
 		Items: []models.TicketOrderItem{{
@@ -732,6 +740,12 @@ func (s *TicketOrderService) applyWaitlistPaymentInTx(
 	if err = bumpFunnelOrderDaily(
 		tx, entry.EventID, entry.OrganizerID, string(models.TicketOrderSourceWaitlist),
 		0, 1, 0, now,
+	); err != nil {
+		return
+	}
+	if err = upsertFunnelVisitorStage(
+		tx, entry.EventID, entry.OrganizerID, entry.FunnelVisitorKey,
+		models.FunnelStagePaid, now,
 	); err != nil {
 		return
 	}

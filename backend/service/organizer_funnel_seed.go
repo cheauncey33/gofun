@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"strings"
 	"time"
 
@@ -150,6 +152,77 @@ func sumFunnelOrderSubmitted(rows []models.FunnelOrderDaily, now time.Time, days
 	return total
 }
 
+func generateOrganizerFunnelVisitorHistory(
+	visits []models.FunnelDaily,
+	orders []models.FunnelOrderDaily,
+) []models.FunnelVisitorDaily {
+	type dayCounts struct {
+		eventID, organizerID     int64
+		day                      time.Time
+		browse, detail, checkout int64
+		submitted, paid          int64
+	}
+	byDay := map[string]*dayCounts{}
+	keyFor := func(eventID int64, day time.Time) string {
+		return fmt.Sprintf("%d:%s", eventID, day.Format("2006-01-02"))
+	}
+	for _, row := range visits {
+		key := keyFor(row.EventID, row.Day)
+		counts := byDay[key]
+		if counts == nil {
+			counts = &dayCounts{eventID: row.EventID, organizerID: row.OrganizerID, day: row.Day}
+			byDay[key] = counts
+		}
+		switch row.Stage {
+		case models.FunnelStageBrowse:
+			counts.browse = row.Uniques
+		case models.FunnelStageDetail:
+			counts.detail = row.Uniques
+		case models.FunnelStageCheckout:
+			counts.checkout = row.Uniques
+		}
+	}
+	for _, row := range orders {
+		key := keyFor(row.EventID, row.Day)
+		counts := byDay[key]
+		if counts == nil {
+			counts = &dayCounts{eventID: row.EventID, organizerID: row.OrganizerID, day: row.Day}
+			byDay[key] = counts
+		}
+		counts.submitted += row.Submitted
+		counts.paid += row.Paid
+	}
+	// 只灌浏览路径；提交/支付必须来自真实订单，不能用汇总种子冒充。
+	stages := []struct {
+		name string
+		get  func(*dayCounts) int64
+	}{
+		{models.FunnelStageBrowse, func(c *dayCounts) int64 { return c.browse }},
+		{models.FunnelStageDetail, func(c *dayCounts) int64 { return c.detail }},
+		{models.FunnelStageCheckout, func(c *dayCounts) int64 { return c.checkout }},
+	}
+	rows := make([]models.FunnelVisitorDaily, 0)
+	for _, counts := range byDay {
+		at := counts.day.Add(12 * time.Hour)
+		for index := int64(0); index < counts.browse; index++ {
+			raw := fmt.Sprintf("demo|%d|%s|%d", counts.eventID, counts.day.Format("2006-01-02"), index)
+			sum := sha256.Sum256([]byte(raw))
+			visitorKey := fmt.Sprintf("%x", sum[:])
+			for _, stage := range stages {
+				if index >= stage.get(counts) {
+					continue
+				}
+				rows = append(rows, models.FunnelVisitorDaily{
+					EventID: counts.eventID, OrganizerID: counts.organizerID,
+					Day: counts.day, VisitorKey: visitorKey, Stage: stage.name,
+					Hits: 1, FirstAt: at, LastAt: at,
+				})
+			}
+		}
+	}
+	return rows
+}
+
 // ReplaceOrganizerFunnelHistory 用日汇总覆盖该主办方近 30 天漏斗。
 // 只写 funnel_daily / funnel_order_daily，不插订单明细。
 func ReplaceOrganizerFunnelHistory(
@@ -168,6 +241,7 @@ func ReplaceOrganizerFunnelHistory(
 	from := funnelHistoryDayStart(now, funnelHistoryDays-1)
 	fromDay := from.Format("2006-01-02")
 	visits, orders := generateOrganizerFunnelHistory(events, now, funnelHistoryDays)
+	visitorStages := generateOrganizerFunnelVisitorHistory(visits, orders)
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(
 			`DELETE FROM funnel_daily WHERE organizer_id = ? AND day >= ?`,
@@ -181,6 +255,12 @@ func ReplaceOrganizerFunnelHistory(
 		).Error; err != nil {
 			return err
 		}
+		if err := tx.Exec(
+			`DELETE FROM funnel_visitor_daily WHERE organizer_id = ? AND day >= ?`,
+			organizerID, fromDay,
+		).Error; err != nil {
+			return err
+		}
 		if len(visits) > 0 {
 			if err := tx.Create(&visits).Error; err != nil {
 				return err
@@ -188,6 +268,11 @@ func ReplaceOrganizerFunnelHistory(
 		}
 		if len(orders) > 0 {
 			if err := tx.Create(&orders).Error; err != nil {
+				return err
+			}
+		}
+		if len(visitorStages) > 0 {
+			if err := tx.CreateInBatches(&visitorStages, 500).Error; err != nil {
 				return err
 			}
 		}

@@ -32,9 +32,9 @@ func TestParseFunnelStage(t *testing.T) {
 
 func TestFunnelVisitorKeyStable(t *testing.T) {
 	t.Parallel()
-	a := funnelVisitorKey("1.1.1.1", "ua", 0)
-	b := funnelVisitorKey("1.1.1.1", "ua", 0)
-	c := funnelVisitorKey("1.1.1.1", "ua", 9)
+	a := funnelVisitorKey("browser-a", "1.1.1.1", "ua", 0)
+	b := funnelVisitorKey("browser-a", "2.2.2.2", "other", 9)
+	c := funnelVisitorKey("browser-b", "1.1.1.1", "ua", 0)
 	if a != b || a == "" || a == c {
 		t.Fatalf("visitor key a=%s b=%s c=%s", a, b, c)
 	}
@@ -61,7 +61,7 @@ func TestAttachFunnelRatesAndLeak(t *testing.T) {
 		t.Fatalf("leak=%+v", leak)
 	}
 	insight := funnelInsight(steps, leak, 0)
-	if insight != "最大流失在详情到下单：票价、售罄或购票门槛可能劝退。" {
+	if insight != "同访客链路中，进入「进入下单页」的比例相对上一步最低。" {
 		t.Fatalf("insight=%q", insight)
 	}
 }
@@ -92,7 +92,7 @@ func TestFunnelInsightVisitLag(t *testing.T) {
 	}
 	attachFunnelRates(steps)
 	got := funnelInsight(steps, nil, 0)
-	if got != "下单页浏览从本次上线后才记人数；时间窗内已有提交，浏览转化会偏低。" {
+	if got != "所选时间窗内还没有形成可计算的同访客访问链路。" {
 		t.Fatalf("insight=%q", got)
 	}
 }
@@ -104,11 +104,15 @@ func TestGenerateOrganizerFunnelHistoryWindows(t *testing.T) {
 		ID: 1, OrganizerID: 9, Title: "夏夜回声 Livehouse 专场", Weight: 1,
 	}}
 	visits, orders := generateOrganizerFunnelHistory(events, now, 30)
+	visitorRows := generateOrganizerFunnelVisitorHistory(visits, orders)
 	if len(visits) != 90 {
 		t.Fatalf("visit rows=%d want 90", len(visits))
 	}
 	if len(orders) != 90 {
 		t.Fatalf("order rows=%d want 90", len(orders))
+	}
+	if len(visitorRows) == 0 {
+		t.Fatal("visitor cohort seed should not be empty")
 	}
 	browse7 := sumFunnelVisitUniques(visits, now, 7, models.FunnelStageBrowse)
 	browse30 := sumFunnelVisitUniques(visits, now, 30, models.FunnelStageBrowse)

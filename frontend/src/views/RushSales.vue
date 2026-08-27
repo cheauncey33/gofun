@@ -67,6 +67,7 @@ function openRush(sale) {
   form.contactPhone = userHint.contactPhone
   form.termsAccepted = false
   syncAttendees(sale, 1)
+  api.trackFunnelVisits('detail', [sale.event_id])
   api.trackFunnelVisits('checkout', [sale.event_id])
 }
 

@@ -190,6 +190,12 @@ func (s *TicketOrderService) createOrderAndOutbox(
 				return err
 			}
 			if order.OrderSource != models.TicketOrderSourceWaitlist {
+				if err := upsertFunnelVisitorStage(
+					tx, order.EventID, order.OrganizerID, order.FunnelVisitorKey,
+					models.FunnelStageSubmitted, time.Now(),
+				); err != nil {
+					return err
+				}
 				if err := bumpFunnelOrderDaily(
 					tx, order.EventID, order.OrganizerID, string(order.OrderSource),
 					1, 0, 0, time.Now(),
