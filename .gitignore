@@ -12,6 +12,7 @@ uploads/*
 # Backend build artifacts
 backend/gofun
 backend/gofun.exe
+backend/gofun-server
 *.exe
 
 # Logs
@@ -43,6 +44,10 @@ mineru_vlm_output/
 
 # k6 夹具含 JWT，勿提交
 tests/load/k6/fixtures/*.json
+
+# Load-test run artifacts. Curated evidence already tracked by Git remains tracked;
+# new raw runs should be summarized into docs instead of being committed wholesale.
+tests/load/results/
 
 # 构建/测试临时输出
 backend/_build_out.txt

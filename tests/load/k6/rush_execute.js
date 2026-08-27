@@ -10,8 +10,11 @@
  * 常用环境变量：
  *   K6_FIXTURE     夹具路径（默认 tests/load/k6/fixtures/rush_execute.json）
  *   BASE_URL       覆盖夹具里的 base_url
- *   VUS            虚拟用户数（默认 50）
+ *   VUS            虚拟用户数（默认 50；RATE>0 时仅作预分配参考）
  *   DURATION       持续时间（默认 30s）
+ *   RATE           若 >0 则用 constant-arrival-rate，单位 req/s（优先于 VUS/RAMP）
+ *   PRE_VUS        RATE 模式预分配 VU（默认 max(RATE, 50)）
+ *   MAX_VUS        RATE 模式最大 VU（默认 max(RATE*2, PRE_VUS)）
  *   RAMP_VUS       若设置则走阶梯：ramp -> hold -> ramp-down（忽略 DURATION 的恒定 VU）
  *   RAMP_UP        爬升时间（默认 10s）
  *   HOLD           平台时间（默认 30s）
@@ -57,6 +60,9 @@ let transportErrorLogs = 0;
 const vus = Number(__ENV.VUS || 50);
 const duration = __ENV.DURATION || "30s";
 const rampVUs = Number(__ENV.RAMP_VUS || 0);
+const rate = Number(__ENV.RATE || 0);
+const preVUs = Number(__ENV.PRE_VUS || Math.max(rate, 50));
+const maxVUs = Number(__ENV.MAX_VUS || Math.max(rate * 2, preVUs));
 
 const commonOptions = {
   summaryTrendStats: ["avg", "min", "med", "p(90)", "p(95)", "p(99)", "max"],
@@ -67,27 +73,41 @@ const commonOptions = {
 };
 
 export const options =
-  rampVUs > 0
+  rate > 0
     ? {
         ...commonOptions,
         scenarios: {
-          rush_ramp: {
-            executor: "ramping-vus",
-            startVUs: 0,
-            stages: [
-              { duration: __ENV.RAMP_UP || "10s", target: rampVUs },
-              { duration: __ENV.HOLD || "30s", target: rampVUs },
-              { duration: __ENV.RAMP_DOWN || "10s", target: 0 },
-            ],
-            gracefulRampDown: "5s",
+          rush_rate: {
+            executor: "constant-arrival-rate",
+            rate,
+            timeUnit: "1s",
+            duration,
+            preAllocatedVUs: preVUs,
+            maxVUs,
           },
         },
       }
-    : {
-        ...commonOptions,
-        vus,
-        duration,
-      };
+    : rampVUs > 0
+      ? {
+          ...commonOptions,
+          scenarios: {
+            rush_ramp: {
+              executor: "ramping-vus",
+              startVUs: 0,
+              stages: [
+                { duration: __ENV.RAMP_UP || "10s", target: rampVUs },
+                { duration: __ENV.HOLD || "30s", target: rampVUs },
+                { duration: __ENV.RAMP_DOWN || "10s", target: 0 },
+              ],
+              gracefulRampDown: "5s",
+            },
+          },
+        }
+      : {
+          ...commonOptions,
+          vus,
+          duration,
+        };
 
 export function setup() {
   return {

@@ -18,6 +18,9 @@ param(
   [string]$RabbitPort = "26073",
   [string]$RabbitManagementPort = "36073",
   [string]$OutputDir = "tests/load/results/full-chain-baseline-$(Get-Date -Format yyyyMMdd-HHmmss)",
+  [int]$InnoDBFlushLogAtTrxCommit = 1,
+  [int]$SyncBinlog = 1,
+  [switch]$SkipLogBin,
   [switch]$KeepStack,
   [switch]$AllowHighPerUserLimit,
   [switch]$FastPrepare,
@@ -42,7 +45,11 @@ $vusList = @($Vus.Split(",") | ForEach-Object { [int]$_.Trim() } | Where-Object 
 if ($vusList.Count -eq 0) { throw "Vus must contain positive integers" }
 New-Item -ItemType Directory -Force -Path $outputPath | Out-Null
 
+$nobinlogCompose = Join-Path $repo "tests\load\docker-compose.nobinlog.yml"
 $composeArgs = @("compose", "-p", $Project, "-f", $baseCompose, "-f", $capacityCompose)
+if ($SkipLogBin) {
+  $composeArgs += @("-f", $nobinlogCompose)
+}
 
 function Invoke-Compose {
   param([string[]]$Arguments)
@@ -370,6 +377,22 @@ try {
   Invoke-Compose @("up", "-d", "--build", "--wait")
   Wait-ForBackend
   Enable-MySqlStatementHistory
+  if (-not $SkipLogBin) {
+    docker exec -e MYSQL_PWD=fuchang-it-root $mysqlContainer mysql -uroot -N -B -e "SET GLOBAL innodb_flush_log_at_trx_commit=$InnoDBFlushLogAtTrxCommit; SET GLOBAL sync_binlog=$SyncBinlog;" 2>$null | Out-Null
+  } else {
+    docker exec -e MYSQL_PWD=fuchang-it-root $mysqlContainer mysql -uroot -N -B -e "SET GLOBAL innodb_flush_log_at_trx_commit=$InnoDBFlushLogAtTrxCommit;" 2>$null | Out-Null
+  }
+  $durability = @(docker exec -e MYSQL_PWD=fuchang-it-root $mysqlContainer mysql -uroot -N -B -e "SHOW VARIABLES WHERE Variable_name IN ('innodb_flush_log_at_trx_commit','sync_binlog','log_bin','log_bin_basename');" 2>$null)
+  Write-Host ("MySQL durability: " + ($durability -join " | ")) -ForegroundColor DarkYellow
+  if ($SkipLogBin) {
+    $logBinOff = ($durability | Where-Object { $_ -match '^log_bin\s+OFF$' -or $_ -match '^log_bin\tOFF$' })
+    if (-not $logBinOff) {
+      throw "SkipLogBin requested but log_bin is not OFF"
+    }
+    Write-Host "WARNING: binary logging disabled (--skip-log-bin); diagnostic only." -ForegroundColor Yellow
+  } elseif ($InnoDBFlushLogAtTrxCommit -ne 1 -or $SyncBinlog -ne 1) {
+    Write-Host "WARNING: non-default durability is for diagnostic comparison only." -ForegroundColor Yellow
+  }
 
   foreach ($currentVus in $vusList) {
     $runName = "vus-$currentVus"
@@ -462,6 +485,7 @@ try {
     "- generated_at: $(Get-Date -Format o)",
     "- topology: one backend + one Redis + one MySQL + one RabbitMQ + Elasticsearch",
     "- configuration: same-db inventory buckets enabled, transactional outbox, $OrderConsumerWorkers order workers, prefetch 5, $PaymentTimeoutWorkers payment-timeout workers, $OutboxPublishWorkers outbox publisher workers",
+    "- durability: innodb_flush_log_at_trx_commit=$InnoDBFlushLogAtTrxCommit sync_binlog=$SyncBinlog skip_log_bin=$SkipLogBin",
     "- duration per VUS: $Duration; drain timeout: ${DrainSeconds}s",
     "",
     "| VUS | Consumer | buckets | HTTP req/s | HTTP 200 est. | transport errors | p99 | HTTP-window MQ peak | post-test MQ peak | drain(work queue) | orders | pending outbox | lock waits |",

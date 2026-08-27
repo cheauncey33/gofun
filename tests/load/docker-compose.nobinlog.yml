@@ -1,0 +1,9 @@
+# Diagnostic overlay: disable binary logging for COMMIT/IO ceiling experiments.
+services:
+  mysql:
+    command:
+      [
+        "mysqld",
+        "--max-connections=${MYSQL_MAX_CONNECTIONS:-300}",
+        "--skip-log-bin",
+      ]
