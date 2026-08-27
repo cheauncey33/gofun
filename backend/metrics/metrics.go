@@ -157,7 +157,7 @@ var (
 			Name: "mq_messages_consumed_total",
 			Help: "Total messages consumed from RabbitMQ",
 		},
-		[]string{"result"}, // success | error
+		[]string{"result"}, // success | retry | malformed | permanent_error | dead_letter
 	)
 
 	TicketOrderConsumerTransactionDuration = promauto.NewHistogramVec(
@@ -401,6 +401,7 @@ func PrometheusMiddleware() gin.HandlerFunc {
 		HTTPRequestsTotal.WithLabelValues(c.Request.Method, path, status).Inc()
 		HTTPRequestDuration.WithLabelValues(c.Request.Method, path).Observe(duration)
 		observeHTTPTraffic()
+		observeHTTPHealth(c.Writer.Status(), duration)
 	}
 }
 

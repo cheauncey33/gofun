@@ -36,6 +36,14 @@ function formatMs(value) {
   return `${Math.round(n)} ms`
 }
 
+function formatAge(value) {
+  const seconds = Number(value || 0)
+  if (!seconds) return '—'
+  if (seconds < 60) return `${Math.round(seconds)} 秒`
+  if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟`
+  return `${(seconds / 3600).toFixed(1)} 小时`
+}
+
 function formatPct(value) {
   const n = Number(value || 0)
   if (!Number.isFinite(n)) return '—'
@@ -64,35 +72,35 @@ const sreTiles = computed(() => {
   const qps = Number(r.http_qps || 0)
   const p95 = Number(r.http_p95_ms || 0)
   const err = Number(r.http_error_rate || 0)
-  const reject = Number(r.rate_limit_reject_rate || 0)
+  const backlog = Number(r.outbox_pending || 0) + Number(r.stock_reservation_pending || 0) + Number(r.mq_work_queue_ready || 0)
   return [
     {
       key: 'qps',
-      label: '流量 QPS',
+      label: '请求流量',
       value: formatNum(qps, 1),
-      hint: `近 10 秒 · 在途 ${Math.round(r.http_in_flight || 0)}`,
+      hint: `近 10 秒 QPS · 在途 ${Math.round(r.http_in_flight || 0)}`,
       tone: qps > 80 ? 'warn' : 'ok',
     },
     {
       key: 'latency',
-      label: 'HTTP 延迟 p95',
+      label: 'HTTP p95',
       value: formatMs(p95),
-      hint: `p50 ${formatMs(r.http_p50_ms)} · p99 ${formatMs(r.http_p99_ms)}`,
+      hint: `近 5 分钟 · p99 ${formatMs(r.http_p99_ms)}`,
       tone: p95 > 1000 ? 'alert' : p95 > 500 ? 'warn' : 'ok',
     },
     {
       key: 'error',
-      label: 'HTTP 错误率',
+      label: '服务端错误率',
       value: formatPct(err),
-      hint: `5xx ${Math.round(r.http_5xx || 0)} · 4xx ${Math.round(r.http_4xx || 0)} · 总请求 ${Math.round(r.http_requests || 0)}`,
+      hint: `近 5 分钟 · 5xx ${Math.round(r.http_5xx || 0)} / ${Math.round(r.http_requests || 0)}`,
       tone: err > 1 ? 'alert' : Number(r.http_5xx || 0) > 0 ? 'warn' : 'ok',
     },
     {
-      key: 'limit',
-      label: '限流拦截率',
-      value: formatPct(reject),
-      hint: `拦截 ${Math.round(r.rate_limit_rejected || 0)} · 放行 ${Math.round(r.rate_limit_allowed || 0)}`,
-      tone: reject > 20 ? 'alert' : reject > 5 ? 'warn' : 'ok',
+      key: 'backlog',
+      label: '待处理积压',
+      value: String(Math.round(backlog)),
+      hint: `MQ ${Math.round(r.mq_work_queue_ready || 0)} · Outbox ${Math.round(r.outbox_pending || 0)} · 库存预留 ${Math.round(r.stock_reservation_pending || 0)}`,
+      tone: backlog > 100 ? 'alert' : backlog > 0 ? 'warn' : 'ok',
     },
   ]
 })
@@ -114,34 +122,76 @@ const latencyBars = computed(() => {
 
 const correctness = computed(() => {
   const r = runtime.value
-  const mqTotal = Number(r.mq_consumed_ok || 0) + Number(r.mq_consumed_err || 0)
+  const mqOk = Number(r.mq_consumed_ok || 0)
+  const mqErr = Number(r.mq_consumed_err || 0)
+  const mqRetry = Number(r.mq_consumed_retry || 0)
+  const mqMalformed = Number(r.mq_consumed_malformed || 0)
+  const mqPermanent = Number(r.mq_consumed_permanent || 0)
+  const mqDeadLetter = Number(r.mq_consumed_dead_letter || 0)
+  const mqFinal = mqOk + mqErr
   const txTotal = Number(r.consumer_tx_ok || 0) + Number(r.consumer_tx_err || 0)
   return [
     {
-      label: 'MQ 消费成功率',
-      value: mqTotal ? formatPct(100 - Number(r.mq_error_rate || 0)) : '—',
-      hint: mqTotal ? `失败 ${Math.round(r.mq_consumed_err || 0)}` : '暂无数据',
-      alert: Number(r.mq_consumed_err || 0) > 0,
+      label: 'MQ 最终成功率',
+      value: mqFinal ? formatPct(100 - Number(r.mq_error_rate || 0)) : '—',
+      hint: (mqFinal || mqRetry)
+        ? `成功 ${Math.round(mqOk)} · 重试 ${Math.round(mqRetry)} · 永久失败 ${Math.round(mqPermanent)} · 死信 ${Math.round(mqDeadLetter)} · 格式错误 ${Math.round(mqMalformed)} · 本次启动累计`
+        : '暂无数据',
+      alert: mqErr > 0,
     },
     {
       label: '订单落库成功率',
       value: txTotal ? formatPct(100 - Number(r.consumer_error_rate || 0)) : '—',
-      hint: txTotal ? `失败 ${Math.round(r.consumer_tx_err || 0)}` : '暂无数据',
+      hint: txTotal ? `异常 ${Math.round(r.consumer_tx_err || 0)} · 本次启动累计` : '暂无数据',
       alert: Number(r.consumer_tx_err || 0) > 0,
     },
     {
       label: '下单到待支付 p95',
       value: formatMs(r.order_accept_p95_ms),
-      hint: `消费事务 ${formatMs(r.consumer_tx_p95_ms)}`,
+      hint: `消费事务 ${formatMs(r.consumer_tx_p95_ms)} · 本次启动累计`,
       alert: Number(r.order_accept_p95_ms || 0) > 5000,
     },
     {
-      label: '积压',
-      value: String(Math.round(r.outbox_pending || 0)),
-      hint: Number(r.outbox_pending || 0) || Number(r.stock_reservation_pending || 0)
-        ? '有待处理积压'
-        : '无积压',
-      alert: Number(r.outbox_pending || 0) > 0 || Number(r.stock_reservation_pending || 0) > 0,
+      label: '库存恢复心跳',
+      value: formatAge(r.stock_recovery_last_success_ago_seconds),
+      hint: Number(r.stock_recovery_last_success_ago_seconds || 0) ? '距最近一次成功扫描' : '尚无成功记录',
+      alert: Number(r.stock_recovery_last_success_ago_seconds || 0) > 120,
+    },
+  ]
+})
+
+const infrastructure = computed(() => {
+  const r = runtime.value
+  return [
+    {
+      label: 'Outbox 待投递',
+      value: Math.round(r.outbox_pending || 0),
+      hint: `最老 ${formatAge(r.outbox_oldest_age_seconds)}`,
+      alert: Number(r.outbox_pending || 0) > 0,
+    },
+    {
+      label: '库存预留待确认',
+      value: Math.round(r.stock_reservation_pending || 0),
+      hint: `最老 ${formatAge(r.stock_reservation_oldest_age_seconds)}`,
+      alert: Number(r.stock_reservation_pending || 0) > 0,
+    },
+    {
+      label: '订单工作队列',
+      value: Math.round(r.mq_work_queue_ready || 0),
+      hint: `消费者 ${Math.round(r.mq_work_queue_consumers || 0)}`,
+      alert: Number(r.mq_work_queue_ready || 0) > 100,
+    },
+    {
+      label: 'HTTP 数据库连接池',
+      value: formatPct(r.db_pool_usage_rate),
+      hint: `${Math.round(r.db_connections_in_use || 0)} / ${Math.round(r.db_max_open_connections || 0)} 使用中`,
+      alert: Number(r.db_pool_usage_rate || 0) > 80,
+    },
+    {
+      label: '限流保护',
+      value: formatPct(r.rate_limit_reject_rate),
+      hint: `拦截 ${Math.round(r.rate_limit_rejected || 0)} · 本次启动累计`,
+      alert: Number(r.rate_limit_reject_rate || 0) > 20,
     },
   ]
 })
@@ -293,6 +343,7 @@ function auditLabel(status) {
         <header class="heading">
           <div>
             <h1>平台工作台</h1>
+            <p>先处理审核事项，再查看近 5 分钟平台健康与票务链路状态</p>
           </div>
           <el-button @click="loadAll">刷新</el-button>
         </header>
@@ -333,7 +384,10 @@ function auditLabel(status) {
           </article>
         </div>
 
-        <section class="sre-grid">
+        <header class="section-heading">
+          <div><h2>平台健康</h2><p>HTTP 使用近 5 分钟窗口；QPS 使用近 10 秒窗口</p></div>
+        </header>
+        <section class="sre-grid" aria-label="平台健康">
           <article
             v-for="tile in sreTiles"
             :key="tile.key"
@@ -348,7 +402,8 @@ function auditLabel(status) {
 
         <div class="panel-row">
           <section class="panel">
-            <h2>HTTP 延迟</h2>
+            <h2>HTTP 延迟分布</h2>
+            <p class="panel-lead">近 5 分钟请求，按固定耗时桶估算</p>
             <div v-for="bar in latencyBars" :key="bar.label" class="lat-row">
               <span>{{ bar.label }}</span>
               <div class="meter-track"><i :style="{ width: `${bar.pct}%` }"></i></div>
@@ -356,7 +411,8 @@ function auditLabel(status) {
             </div>
           </section>
           <section class="panel">
-            <h2>正确率</h2>
+            <h2>票务链路</h2>
+            <p class="panel-lead">异步落库、消费与库存恢复</p>
             <ul class="correct-list">
               <li v-for="row in correctness" :key="row.label" :class="{ alert: row.alert }">
                 <div>
@@ -368,6 +424,18 @@ function auditLabel(status) {
             </ul>
           </section>
         </div>
+
+        <section class="panel infrastructure-panel">
+          <h2>依赖与积压</h2>
+          <p class="panel-lead">数量是当前值，年龄用于判断是否持续卡住</p>
+          <ul class="infrastructure-list">
+            <li v-for="row in infrastructure" :key="row.label" :class="{ alert: row.alert }">
+              <span>{{ row.label }}</span>
+              <strong>{{ row.value }}</strong>
+              <small>{{ row.hint }}</small>
+            </li>
+          </ul>
+        </section>
       </section>
 
       <section v-else-if="section === 'organizers'">
@@ -494,6 +562,9 @@ main { padding: 32px clamp(24px, 4vw, 56px) 70px; }
 .heading { display: flex; justify-content: space-between; align-items: end; gap: 16px; }
 .heading h1 { margin: 0; font: 760 36px var(--font-display); }
 .heading p { margin: 8px 0 0; color: var(--muted); font-size: 13px; max-width: 560px; line-height: 1.7; }
+.section-heading { margin-top: 26px; }
+.section-heading h2 { margin: 0; font: 720 21px var(--font-display); }
+.section-heading p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
 .todo-grid { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .todo-card {
   text-align: left;
@@ -578,6 +649,12 @@ main { padding: 32px clamp(24px, 4vw, 56px) 70px; }
 .correct-list small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
 .correct-list strong { font: 680 18px var(--font-body); }
 .correct-list li.alert strong { color: #8b1e16; }
+.infrastructure-panel { margin-top: 14px; }
+.infrastructure-list { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.infrastructure-list li { min-width: 0; padding: 13px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); }
+.infrastructure-list li.alert { border-color: rgba(139,30,22,.5); background: rgba(139,30,22,.045); }
+.infrastructure-list span, .infrastructure-list small { display: block; color: var(--muted); font-size: 11px; }
+.infrastructure-list strong { display: block; margin: 7px 0 5px; font: 680 20px var(--font-body); }
 .muted { color: var(--muted); font-size: 12px; }
 .list-card {
   margin-top: 22px;
@@ -592,5 +669,9 @@ main { padding: 32px clamp(24px, 4vw, 56px) 70px; }
   .admin-shell { grid-template-columns: 1fr; }
   aside { display: flex; overflow: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   .todo-grid, .inbox, .panel-row { grid-template-columns: 1fr; }
+  .infrastructure-list { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 560px) {
+  .sre-grid, .infrastructure-list { grid-template-columns: 1fr; }
 }
 </style>
