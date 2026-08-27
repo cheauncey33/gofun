@@ -7,6 +7,7 @@ type TicketOrderSource string
 const (
 	TicketOrderSourceNormal   TicketOrderSource = "normal"
 	TicketOrderSourceRushSale TicketOrderSource = "rush_sale"
+	TicketOrderSourceWaitlist TicketOrderSource = "waitlist"
 )
 
 type TicketOrderStatus string
@@ -118,7 +119,8 @@ const (
 type PaymentTransaction struct {
 	Base
 	PaymentNo         string                   `gorm:"size:64;uniqueIndex;not null" json:"payment_no"`
-	OrderID           int64                    `gorm:"not null;index" json:"order_id,string"`
+	OrderID           int64                    `gorm:"not null;index;default:0" json:"order_id,string"`
+	WaitlistID        int64                    `gorm:"not null;index;default:0" json:"waitlist_id,string"`
 	UserID            int64                    `gorm:"not null;index" json:"user_id,string"`
 	Provider          string                   `gorm:"size:32;not null" json:"provider"`
 	ProviderPaymentID string                   `gorm:"size:128;not null" json:"provider_payment_id"`

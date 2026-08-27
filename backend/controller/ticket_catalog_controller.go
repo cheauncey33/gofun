@@ -77,12 +77,107 @@ func (ctrl *TicketCatalogController) AdminCreateOrganizer(c *gin.Context) {
 
 func (ctrl *TicketCatalogController) AdminListOrganizers(c *gin.Context) {
 	page, pageSize := parseTicketPage(c)
-	organizers, total, err := ctrl.service.ListOrganizers(c.Request.Context(), page, pageSize)
+	organizers, total, err := ctrl.service.ListAdminOrganizers(
+		c.Request.Context(), c.Query("audit_status"), page, pageSize,
+	)
 	if err != nil {
 		writeTicketCatalogError(c, err)
 		return
 	}
 	response.SuccessWithPage(c, organizers, total, page, pageSize)
+}
+
+func (ctrl *TicketCatalogController) ApplyOrganizer(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	var input service.ApplyOrganizerInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误")
+		return
+	}
+	organizer, err := ctrl.service.ApplyOrganizer(c.Request.Context(), userID, input)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, organizer)
+}
+
+func (ctrl *TicketCatalogController) AdminApproveOrganizer(c *gin.Context) {
+	organizerID, ok := parseTicketID(c, "organizer_id")
+	if !ok {
+		return
+	}
+	organizer, err := ctrl.service.ApproveOrganizer(c.Request.Context(), organizerID)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, organizer)
+}
+
+func (ctrl *TicketCatalogController) AdminRejectOrganizer(c *gin.Context) {
+	organizerID, ok := parseTicketID(c, "organizer_id")
+	if !ok {
+		return
+	}
+	var input service.ReviewDecisionInput
+	_ = c.ShouldBindJSON(&input)
+	organizer, err := ctrl.service.RejectOrganizer(c.Request.Context(), organizerID, input.Note)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, organizer)
+}
+
+func (ctrl *TicketCatalogController) AdminListPendingEvents(c *gin.Context) {
+	page, pageSize := parseTicketPage(c)
+	events, total, err := ctrl.service.ListPendingEventReviews(c.Request.Context(), page, pageSize)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.SuccessWithPage(c, events, total, page, pageSize)
+}
+
+func (ctrl *TicketCatalogController) AdminApproveEvent(c *gin.Context) {
+	eventID, ok := parseTicketID(c, "event_id")
+	if !ok {
+		return
+	}
+	event, err := ctrl.service.AdminApproveEvent(c.Request.Context(), eventID)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, event)
+}
+
+func (ctrl *TicketCatalogController) AdminRejectEvent(c *gin.Context) {
+	eventID, ok := parseTicketID(c, "event_id")
+	if !ok {
+		return
+	}
+	var input service.ReviewDecisionInput
+	_ = c.ShouldBindJSON(&input)
+	event, err := ctrl.service.AdminRejectEvent(c.Request.Context(), eventID, input.Note)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, event)
+}
+
+func (ctrl *TicketCatalogController) AdminPlatformOverview(c *gin.Context) {
+	overview, err := ctrl.service.GetAdminPlatformOverview(c.Request.Context())
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, overview)
 }
 
 func (ctrl *TicketCatalogController) ListMyOrganizers(c *gin.Context) {
@@ -226,6 +321,51 @@ func (ctrl *TicketCatalogController) GetOrganizerOverview(c *gin.Context) {
 	response.Success(c, overview)
 }
 
+func (ctrl *TicketCatalogController) TrackFunnelVisits(c *gin.Context) {
+	var input service.TrackFunnelInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "上报参数错误")
+		return
+	}
+	userID, _ := common.GetUserID(c)
+	if err := ctrl.service.TrackFunnelVisits(
+		c.Request.Context(), userID, c.ClientIP(), c.GetHeader("User-Agent"), input,
+	); err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, gin.H{})
+}
+
+func (ctrl *TicketCatalogController) GetOrganizerFunnel(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	organizerID, ok := parseTicketID(c, "organizer_id")
+	if !ok {
+		return
+	}
+	days, _ := strconv.Atoi(c.DefaultQuery("days", "7"))
+	var eventID int64
+	if raw := strings.TrimSpace(c.Query("event_id")); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed < 0 {
+			response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "event_id 格式错误")
+			return
+		}
+		eventID = parsed
+	}
+	funnel, err := ctrl.service.GetOrganizerFunnel(
+		c.Request.Context(), userID, organizerID, eventID, days,
+	)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, funnel)
+}
+
 func (ctrl *TicketCatalogController) ListOrganizerOrders(c *gin.Context) {
 	userID, ok := ticketUserID(c)
 	if !ok {
@@ -247,7 +387,7 @@ func (ctrl *TicketCatalogController) ListOrganizerOrders(c *gin.Context) {
 	response.SuccessWithPage(c, orders, total, page, pageSize)
 }
 
-func (ctrl *TicketCatalogController) PublishEvent(c *gin.Context) {
+func (ctrl *TicketCatalogController) SubmitEventForReview(c *gin.Context) {
 	userID, ok := ticketUserID(c)
 	if !ok {
 		return
@@ -260,7 +400,28 @@ func (ctrl *TicketCatalogController) PublishEvent(c *gin.Context) {
 	if !ok {
 		return
 	}
-	event, err := ctrl.service.PublishEvent(c.Request.Context(), userID, organizerID, eventID)
+	event, err := ctrl.service.SubmitEventForReview(c.Request.Context(), userID, organizerID, eventID)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, event)
+}
+
+func (ctrl *TicketCatalogController) WithdrawEventReview(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	organizerID, ok := parseTicketID(c, "organizer_id")
+	if !ok {
+		return
+	}
+	eventID, ok := parseTicketID(c, "event_id")
+	if !ok {
+		return
+	}
+	event, err := ctrl.service.WithdrawEventReview(c.Request.Context(), userID, organizerID, eventID)
 	if err != nil {
 		writeTicketCatalogError(c, err)
 		return

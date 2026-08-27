@@ -251,7 +251,7 @@ func (s *TicketCatalogService) ListMyOrganizers(
 	}
 	organizers := make([]MyOrganizerView, 0, len(memberships))
 	for _, membership := range memberships {
-		if membership.Organizer.Status != models.OrganizerStatusActive {
+		if membership.Organizer.ID == 0 {
 			continue
 		}
 		organizers = append(organizers, MyOrganizerView{
@@ -282,7 +282,8 @@ func (s *TicketCatalogService) requireOrganizerAccess(
 		}
 		return err
 	}
-	if organizer.Status != models.OrganizerStatusActive {
+	if organizer.Status != models.OrganizerStatusActive ||
+		organizer.AuditStatus != models.AuditStatusApproved {
 		return ErrOrganizerUnavailable
 	}
 	return nil
@@ -435,20 +436,12 @@ func (s *TicketCatalogService) UpdateEvent(
 	return event, nil
 }
 
-func (s *TicketCatalogService) PublishEvent(
+func (s *TicketCatalogService) SubmitEventForReview(
 	ctx context.Context,
 	userID, organizerID, eventID int64,
 ) (*models.Event, error) {
 	if err := s.requireOrganizerAccess(ctx, organizerID, userID); err != nil {
 		return nil, err
-	}
-	organizer, err := s.repo.FindOrganizerByID(ctx, organizerID)
-	if err != nil {
-		return nil, err
-	}
-	if organizer.Status != models.OrganizerStatusActive ||
-		organizer.AuditStatus != models.AuditStatusApproved {
-		return nil, ErrOrganizerUnavailable
 	}
 	event, err := s.repo.FindEventDetail(ctx, eventID)
 	if err != nil {
@@ -458,16 +451,103 @@ func (s *TicketCatalogService) PublishEvent(
 		return nil, ErrOrganizerForbidden
 	}
 	if event.Status != models.EventStatusDraft {
-		return nil, fmt.Errorf("%w: 只有草稿活动可以发布", ErrInvalidTicketCatalog)
+		return nil, fmt.Errorf("%w: 只有草稿活动可以提交审核", ErrInvalidTicketCatalog)
+	}
+	if err := validateEventReadyToSell(event); err != nil {
+		return nil, err
+	}
+	event.Status = models.EventStatusPendingReview
+	event.ReviewNote = ""
+	if err := s.repo.SaveEvent(ctx, event); err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
+func (s *TicketCatalogService) WithdrawEventReview(
+	ctx context.Context,
+	userID, organizerID, eventID int64,
+) (*models.Event, error) {
+	if err := s.requireOrganizerAccess(ctx, organizerID, userID); err != nil {
+		return nil, err
+	}
+	event, err := s.repo.FindEventByID(ctx, eventID)
+	if err != nil {
+		return nil, normalizeTicketNotFound(err)
+	}
+	if event.OrganizerID != organizerID {
+		return nil, ErrOrganizerForbidden
+	}
+	if event.Status != models.EventStatusPendingReview {
+		return nil, fmt.Errorf("%w: 只有审核中的活动可以撤回", ErrInvalidTicketCatalog)
+	}
+	event.Status = models.EventStatusDraft
+	if err := s.repo.SaveEvent(ctx, event); err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
+func (s *TicketCatalogService) AdminApproveEvent(ctx context.Context, eventID int64) (*models.Event, error) {
+	event, err := s.repo.FindEventDetail(ctx, eventID)
+	if err != nil {
+		return nil, normalizeTicketNotFound(err)
+	}
+	if event.Status != models.EventStatusPendingReview {
+		return nil, fmt.Errorf("%w: 只有待审核活动可以上架", ErrInvalidTicketCatalog)
+	}
+	organizer, err := s.repo.FindOrganizerByID(ctx, event.OrganizerID)
+	if err != nil {
+		return nil, err
+	}
+	if organizer.Status != models.OrganizerStatusActive ||
+		organizer.AuditStatus != models.AuditStatusApproved {
+		return nil, ErrOrganizerUnavailable
+	}
+	if err := validateEventReadyToSell(event); err != nil {
+		return nil, err
+	}
+	return s.activatePublishedEvent(ctx, event)
+}
+
+func (s *TicketCatalogService) AdminRejectEvent(ctx context.Context, eventID int64, note string) (*models.Event, error) {
+	event, err := s.repo.FindEventByID(ctx, eventID)
+	if err != nil {
+		return nil, normalizeTicketNotFound(err)
+	}
+	if event.Status != models.EventStatusPendingReview {
+		return nil, fmt.Errorf("%w: 只有待审核活动可以驳回", ErrInvalidTicketCatalog)
+	}
+	event.Status = models.EventStatusDraft
+	event.ReviewNote = strings.TrimSpace(note)
+	if event.ReviewNote == "" {
+		event.ReviewNote = "未通过上架审核"
+	}
+	if err := s.repo.SaveEvent(ctx, event); err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
+func validateEventReadyToSell(event *models.Event) error {
+	if event == nil {
+		return ErrTicketResourceNotFound
 	}
 	if len(event.Sessions) == 0 {
-		return nil, fmt.Errorf("%w: 至少需要一个场次", ErrInvalidTicketCatalog)
+		return fmt.Errorf("%w: 至少需要一个场次", ErrInvalidTicketCatalog)
 	}
 	for _, session := range event.Sessions {
 		if len(session.TicketTiers) == 0 {
-			return nil, fmt.Errorf("%w: 每个场次至少需要一个票档", ErrInvalidTicketCatalog)
+			return fmt.Errorf("%w: 每个场次至少需要一个票档", ErrInvalidTicketCatalog)
 		}
 	}
+	return nil
+}
+
+func (s *TicketCatalogService) activatePublishedEvent(
+	ctx context.Context,
+	event *models.Event,
+) (*models.Event, error) {
 	if event.SaleMode.IsSeated() {
 		if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			return s.generateSessionSeats(tx, event)
@@ -502,6 +582,7 @@ func (s *TicketCatalogService) PublishEvent(
 	now := time.Now()
 	event.Status = models.EventStatusPublished
 	event.PublishedAt = &now
+	event.ReviewNote = ""
 	if err := s.repo.SaveEvent(ctx, event); err != nil {
 		return nil, err
 	}
@@ -524,8 +605,9 @@ func (s *TicketCatalogService) CancelEvent(
 	if event.OrganizerID != organizerID {
 		return nil, ErrOrganizerForbidden
 	}
-	if event.Status != models.EventStatusPublished && event.Status != models.EventStatusDraft {
-		return nil, fmt.Errorf("%w: 只有草稿或已发布活动可以取消", ErrInvalidTicketCatalog)
+	if event.Status != models.EventStatusPublished && event.Status != models.EventStatusDraft &&
+		event.Status != models.EventStatusPendingReview {
+		return nil, fmt.Errorf("%w: 只有草稿、审核中或已发布活动可以取消", ErrInvalidTicketCatalog)
 	}
 	stockKeys := make([]string, 0)
 	for si := range event.Sessions {

@@ -154,6 +154,108 @@ func (ctrl *TicketOrderController) CancelOrder(c *gin.Context) {
 	response.Success(c, gin.H{"order_id": strconv.FormatInt(orderID, 10), "status": "cancelled"})
 }
 
+func (ctrl *TicketOrderController) CreateWaitlist(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	idempotencyKey := c.GetHeader("X-Idempotency-Key")
+	if idempotencyKey == "" {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "缺少 X-Idempotency-Key")
+		return
+	}
+	var input service.CreateTicketOrderInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		return
+	}
+	requestID, _ := c.Get("request_id")
+	receipt, err := ctrl.service.CreateWaitlist(
+		c.Request.Context(), userID, idempotencyKey, stringifyRequestID(requestID), input,
+	)
+	if err != nil {
+		writeTicketOrderError(c, err)
+		return
+	}
+	response.Success(c, receipt)
+}
+
+func (ctrl *TicketOrderController) ListWaitlists(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	page, pageSize := parseTicketPage(c)
+	list, total, err := ctrl.service.ListWaitlists(c.Request.Context(), userID, page, pageSize)
+	if err != nil {
+		writeTicketOrderError(c, err)
+		return
+	}
+	response.SuccessWithPage(c, list, total, page, pageSize)
+}
+
+func (ctrl *TicketOrderController) GetWaitlist(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	waitlistID, ok := parseTicketID(c, "id")
+	if !ok {
+		return
+	}
+	entry, err := ctrl.service.GetWaitlist(c.Request.Context(), userID, waitlistID)
+	if err != nil {
+		writeTicketOrderError(c, err)
+		return
+	}
+	response.Success(c, entry)
+}
+
+func (ctrl *TicketOrderController) PayWaitlist(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	waitlistID, ok := parseTicketID(c, "id")
+	if !ok {
+		return
+	}
+	var input struct {
+		Scenario string `json:"scenario"`
+	}
+	_ = c.ShouldBindJSON(&input)
+	intent, err := ctrl.service.PayWaitlist(c.Request.Context(), userID, waitlistID, input.Scenario)
+	if err != nil {
+		writeTicketOrderError(c, err)
+		return
+	}
+	response.Success(c, gin.H{
+		"waitlist_id": strconv.FormatInt(waitlistID, 10),
+		"status":      intent.Status,
+		"payment":     intent,
+	})
+}
+
+func (ctrl *TicketOrderController) CancelWaitlist(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	waitlistID, ok := parseTicketID(c, "id")
+	if !ok {
+		return
+	}
+	var input struct {
+		Reason string `json:"reason"`
+	}
+	_ = c.ShouldBindJSON(&input)
+	if err := ctrl.service.CancelWaitlist(c.Request.Context(), userID, waitlistID, input.Reason); err != nil {
+		writeTicketOrderError(c, err)
+		return
+	}
+	response.Success(c, gin.H{"waitlist_id": strconv.FormatInt(waitlistID, 10), "status": "cancelled"})
+}
+
 func stringifyRequestID(value interface{}) string {
 	if requestID, ok := value.(string); ok {
 		return requestID
@@ -164,7 +266,8 @@ func stringifyRequestID(value interface{}) string {
 func writeTicketOrderError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrTicketOrderNotFound),
-		errors.Is(err, service.ErrTicketResourceNotFound):
+		errors.Is(err, service.ErrTicketResourceNotFound),
+		errors.Is(err, service.ErrWaitlistNotFound):
 		response.Error(c, http.StatusNotFound, response.CodeOrderNotFound, err.Error())
 	case errors.Is(err, service.ErrOrganizerForbidden):
 		response.Error(c, http.StatusForbidden, response.CodeForbidden, err.Error())
@@ -175,6 +278,9 @@ func writeTicketOrderError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrTicketOrderState),
 		errors.Is(err, service.ErrTicketAlreadyUsed),
 		errors.Is(err, service.ErrTicketOrderUnavailable),
+		errors.Is(err, service.ErrWaitlistUnavailable),
+		errors.Is(err, service.ErrWaitlistState),
+		errors.Is(err, service.ErrWaitlistSeated),
 		errors.Is(err, service.ErrInvalidTicketCatalog),
 		errors.Is(err, service.ErrPaymentSignature),
 		errors.Is(err, service.ErrPaymentAmountMismatch),

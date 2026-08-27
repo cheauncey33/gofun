@@ -189,6 +189,14 @@ func (s *TicketOrderService) createOrderAndOutbox(
 			if err := tx.Create(order).Error; err != nil {
 				return err
 			}
+			if order.OrderSource != models.TicketOrderSourceWaitlist {
+				if err := bumpFunnelOrderDaily(
+					tx, order.EventID, order.OrganizerID, string(order.OrderSource),
+					1, 0, 0, time.Now(),
+				); err != nil {
+					return err
+				}
+			}
 			if seated {
 				if err := holdSessionSeats(tx, order, message.SeatIDs); err != nil {
 					return err
@@ -198,6 +206,9 @@ func (s *TicketOrderService) createOrderAndOutbox(
 		})
 		if err == nil || !isRetryableMySQLTransactionError(err) ||
 			attempt == ticketOrderTxMaxAttempts {
+			if err == nil && order.OrderSource != models.TicketOrderSourceWaitlist {
+				bumpFunnelCacheVersion(ctx, s.rdb, order.OrganizerID)
+			}
 			return err
 		}
 		delay := time.Duration(attempt*10+int(order.ID%7)) * time.Millisecond

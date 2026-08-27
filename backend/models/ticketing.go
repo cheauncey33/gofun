@@ -55,10 +55,11 @@ func (m EventSaleMode) IsSeated() bool {
 type EventStatus string
 
 const (
-	EventStatusDraft     EventStatus = "draft"
-	EventStatusPublished EventStatus = "published"
-	EventStatusCancelled EventStatus = "cancelled"
-	EventStatusFinished  EventStatus = "finished"
+	EventStatusDraft         EventStatus = "draft"
+	EventStatusPendingReview EventStatus = "pending_review"
+	EventStatusPublished     EventStatus = "published"
+	EventStatusCancelled     EventStatus = "cancelled"
+	EventStatusFinished      EventStatus = "finished"
 )
 
 type SessionStatus string
@@ -89,6 +90,7 @@ type Organizer struct {
 	ContactPhone string          `gorm:"size:32" json:"contact_phone"`
 	Status       OrganizerStatus `gorm:"size:16;not null;default:'active';index" json:"status"`
 	AuditStatus  AuditStatus     `gorm:"size:16;not null;default:'pending';index" json:"audit_status"`
+	AuditNote    string          `gorm:"size:256;not null;default:''" json:"audit_note"`
 }
 
 type OrganizerMember struct {
@@ -128,6 +130,7 @@ type Event struct {
 	MaxTicketsPerOrder int            `gorm:"not null;default:6" json:"max_tickets_per_order"`
 	SaleMode           EventSaleMode  `gorm:"size:16;not null;default:'counter';index" json:"sale_mode"`
 	PublishedAt        *time.Time     `gorm:"index" json:"published_at,omitempty"`
+	ReviewNote         string         `gorm:"size:256;not null;default:''" json:"review_note"`
 	Sessions           []EventSession `gorm:"foreignKey:EventID" json:"sessions,omitempty"`
 }
 
@@ -155,6 +158,7 @@ type TicketTier struct {
 	TotalQuota         int              `gorm:"not null" json:"total_quota"`
 	RemainingQuota     int              `gorm:"not null;index" json:"remaining_quota"`
 	SoldCount          int64            `gorm:"not null;default:0" json:"sold_count"`
+	WaitlistPending    int              `gorm:"not null;default:0" json:"waitlist_pending"`
 	PurchaseLimit      int              `gorm:"not null;default:6" json:"purchase_limit"`
 	AssignPlaceNo      bool             `gorm:"not null;default:true" json:"assign_place_no"`
 	PlaceSeq           int              `gorm:"not null;default:0" json:"-"`

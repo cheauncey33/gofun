@@ -25,6 +25,7 @@ var (
 
 type PaymentCreateRequest struct {
 	OrderID     int64
+	WaitlistID  int64
 	UserID      int64
 	AmountCents int64
 	ExpiresAt   time.Time
@@ -69,6 +70,7 @@ type PaymentStateRestorer interface {
 type PaymentStateRestoreRequest struct {
 	PaymentNo   string
 	OrderID     int64
+	WaitlistID  int64
 	UserID      int64
 	AmountCents int64
 	Status      string
@@ -76,6 +78,7 @@ type PaymentStateRestoreRequest struct {
 
 type sandboxPaymentState struct {
 	OrderID     int64
+	WaitlistID  int64
 	UserID      int64
 	AmountCents int64
 	Status      string
@@ -89,9 +92,10 @@ type SandboxPaymentGateway struct {
 	secret   []byte
 	delay    time.Duration
 	provider string
-	byNo     map[string]sandboxPaymentState
-	byOrder  map[int64]string
-	callback PaymentCallbackHandler
+	byNo       map[string]sandboxPaymentState
+	byOrder    map[int64]string
+	byWaitlist map[int64]string
+	callback   PaymentCallbackHandler
 }
 
 func NewSandboxPaymentGateway(secret string, delay time.Duration) *SandboxPaymentGateway {
@@ -104,11 +108,12 @@ func NewSandboxPaymentGateway(secret string, delay time.Duration) *SandboxPaymen
 		delay = 500 * time.Millisecond
 	}
 	return &SandboxPaymentGateway{
-		secret:   []byte(secret),
-		delay:    delay,
-		provider: "sandbox",
-		byNo:     make(map[string]sandboxPaymentState),
-		byOrder:  make(map[int64]string),
+		secret:     []byte(secret),
+		delay:      delay,
+		provider:   "sandbox",
+		byNo:       make(map[string]sandboxPaymentState),
+		byOrder:    make(map[int64]string),
+		byWaitlist: make(map[int64]string),
 	}
 }
 
@@ -122,12 +127,21 @@ func (g *SandboxPaymentGateway) CreatePayment(
 	_ context.Context,
 	req PaymentCreateRequest,
 ) (*PaymentIntent, error) {
-	if req.OrderID <= 0 || req.UserID <= 0 || req.AmountCents <= 0 {
+	if (req.OrderID <= 0 && req.WaitlistID <= 0) || req.UserID <= 0 || req.AmountCents <= 0 {
 		return nil, fmt.Errorf("invalid payment request")
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if paymentNo := g.byOrder[req.OrderID]; paymentNo != "" {
+	if req.WaitlistID > 0 {
+		if paymentNo := g.byWaitlist[req.WaitlistID]; paymentNo != "" {
+			if state, ok := g.byNo[paymentNo]; ok && state.Status == "pending" {
+				return &PaymentIntent{
+					PaymentNo: paymentNo, Provider: g.provider, Status: state.Status,
+					AmountCents: state.AmountCents, ExpiresAt: req.ExpiresAt,
+				}, nil
+			}
+		}
+	} else if paymentNo := g.byOrder[req.OrderID]; paymentNo != "" {
 		if state, ok := g.byNo[paymentNo]; ok && state.Status == "pending" {
 			return &PaymentIntent{
 				PaymentNo: paymentNo, Provider: g.provider, Status: state.Status,
@@ -137,10 +151,14 @@ func (g *SandboxPaymentGateway) CreatePayment(
 	}
 	paymentNo := "sandbox_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	g.byNo[paymentNo] = sandboxPaymentState{
-		OrderID: req.OrderID, UserID: req.UserID,
+		OrderID: req.OrderID, WaitlistID: req.WaitlistID, UserID: req.UserID,
 		AmountCents: req.AmountCents, Status: "pending",
 	}
-	g.byOrder[req.OrderID] = paymentNo
+	if req.WaitlistID > 0 {
+		g.byWaitlist[req.WaitlistID] = paymentNo
+	} else {
+		g.byOrder[req.OrderID] = paymentNo
+	}
 	return &PaymentIntent{
 		PaymentNo: paymentNo, Provider: g.provider, Status: "pending",
 		AmountCents: req.AmountCents, ExpiresAt: req.ExpiresAt,
@@ -148,7 +166,8 @@ func (g *SandboxPaymentGateway) CreatePayment(
 }
 
 func (g *SandboxPaymentGateway) RestorePayment(req PaymentStateRestoreRequest) error {
-	if strings.TrimSpace(req.PaymentNo) == "" || req.OrderID <= 0 || req.UserID <= 0 || req.AmountCents <= 0 {
+	if strings.TrimSpace(req.PaymentNo) == "" || req.UserID <= 0 || req.AmountCents <= 0 ||
+		(req.OrderID <= 0 && req.WaitlistID <= 0) {
 		return fmt.Errorf("invalid payment restore request")
 	}
 	status := strings.ToLower(strings.TrimSpace(req.Status))
@@ -161,16 +180,20 @@ func (g *SandboxPaymentGateway) RestorePayment(req PaymentStateRestoreRequest) e
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if existing, ok := g.byNo[req.PaymentNo]; ok {
-		if existing.OrderID != req.OrderID || existing.AmountCents != req.AmountCents {
+		if existing.OrderID != req.OrderID || existing.WaitlistID != req.WaitlistID || existing.AmountCents != req.AmountCents {
 			return fmt.Errorf("payment restore conflicts with existing provider state")
 		}
 		return nil
 	}
 	g.byNo[req.PaymentNo] = sandboxPaymentState{
-		OrderID: req.OrderID, UserID: req.UserID,
+		OrderID: req.OrderID, WaitlistID: req.WaitlistID, UserID: req.UserID,
 		AmountCents: req.AmountCents, Status: status,
 	}
-	g.byOrder[req.OrderID] = req.PaymentNo
+	if req.WaitlistID > 0 {
+		g.byWaitlist[req.WaitlistID] = req.PaymentNo
+	} else {
+		g.byOrder[req.OrderID] = req.PaymentNo
+	}
 	return nil
 }
 

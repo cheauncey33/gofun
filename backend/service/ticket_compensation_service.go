@@ -161,10 +161,7 @@ func (s *TicketCompensationService) runStandardCompensation(
 		if _, skip := seatedTiers[tier.ID]; skip {
 			continue
 		}
-		available := tier.RemainingQuota - queuedByTier[tier.ID]
-		if available < 0 {
-			available = 0
-		}
+		available := publicRedisExpected(tier.RemainingQuota, tier.WaitlistPending, queuedByTier[tier.ID], false)
 		key := ticketStockKey(tier.ID)
 		anomaly, err := s.reconcileRedisStock(
 			ctx, key, available, fmt.Sprintf("票档[%d]", tier.ID),
@@ -203,6 +200,26 @@ func (s *TicketCompensationService) runBucketCompensation(
 	if err != nil {
 		return 0, err
 	}
+	pendingByTier := make(map[int64]int)
+	if len(buckets) > 0 {
+		tierIDs := make([]int64, 0, len(buckets))
+		seen := map[int64]struct{}{}
+		for _, bucket := range buckets {
+			if _, ok := seen[bucket.TierID]; ok {
+				continue
+			}
+			seen[bucket.TierID] = struct{}{}
+			tierIDs = append(tierIDs, bucket.TierID)
+		}
+		var parents []models.TicketTier
+		if err := s.db.WithContext(ctx).Select("id", "waitlist_pending").
+			Where("id IN ?", tierIDs).Find(&parents).Error; err != nil {
+			return 0, err
+		}
+		for _, tier := range parents {
+			pendingByTier[tier.ID] = tier.WaitlistPending
+		}
+	}
 
 	anomalies := 0
 	parentTierSum := make(map[int64]int)
@@ -210,10 +227,12 @@ func (s *TicketCompensationService) runBucketCompensation(
 		if _, skip := seatedTiers[bucket.TierID]; skip {
 			continue
 		}
-		available := bucket.RemainingQuota - queuedByBucket[fmt.Sprintf("%d:%d", bucket.TierID, bucket.BucketNo)]
-		if available < 0 {
-			available = 0
-		}
+		available := publicRedisExpected(
+			bucket.RemainingQuota,
+			pendingByTier[bucket.TierID],
+			queuedByBucket[fmt.Sprintf("%d:%d", bucket.TierID, bucket.BucketNo)],
+			true,
+		)
 		parentTierSum[bucket.TierID] += bucket.RemainingQuota
 		key := TicketStockBucketKey(bucket.TierID, bucket.BucketNo)
 		anomaly, err := s.reconcileRedisStock(

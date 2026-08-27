@@ -253,7 +253,7 @@ func (s *TicketOrderService) RecoverPaymentState(ctx context.Context) error {
 	now := time.Now()
 	for _, payment := range payments {
 		if err := restorer.RestorePayment(PaymentStateRestoreRequest{
-			PaymentNo: payment.PaymentNo, OrderID: payment.OrderID,
+			PaymentNo: payment.PaymentNo, OrderID: payment.OrderID, WaitlistID: payment.WaitlistID,
 			UserID: payment.UserID, AmountCents: payment.AmountCents,
 			Status: string(payment.Status),
 		}); err != nil {
@@ -269,7 +269,7 @@ func (s *TicketOrderService) RecoverPaymentState(ctx context.Context) error {
 func (s *TicketOrderService) restoreAndSchedulePayment(payment models.PaymentTransaction) error {
 	if restorer, ok := s.payment.(PaymentStateRestorer); ok {
 		if err := restorer.RestorePayment(PaymentStateRestoreRequest{
-			PaymentNo: payment.PaymentNo, OrderID: payment.OrderID,
+			PaymentNo: payment.PaymentNo, OrderID: payment.OrderID, WaitlistID: payment.WaitlistID,
 			UserID: payment.UserID, AmountCents: payment.AmountCents,
 			Status: string(payment.Status),
 		}); err != nil {
@@ -315,20 +315,23 @@ func (s *TicketOrderService) WarmTicketQuota(ctx context.Context) error {
 				return err
 			}
 		}
+		pendingByTier := make(map[int64]int, len(tiers))
+		for _, tier := range tiers {
+			pendingByTier[tier.ID] = tier.WaitlistPending
+		}
 		for _, bucket := range tierBuckets {
 			bucketKey := fmt.Sprintf("%d:%d", bucket.TierID, bucket.BucketNo)
-			available := bucket.RemainingQuota - queuedByTierBucket[bucketKey]
-			if available < 0 {
-				available = 0
-			}
+			available := publicRedisExpected(
+				bucket.RemainingQuota,
+				pendingByTier[bucket.TierID],
+				queuedByTierBucket[bucketKey],
+				true,
+			)
 			values[TicketStockBucketKey(bucket.TierID, bucket.BucketNo)] = available
 		}
 	} else {
 		for _, tier := range tiers {
-			available := tier.RemainingQuota - queuedByTier[tier.ID]
-			if available < 0 {
-				available = 0
-			}
+			available := publicRedisExpected(tier.RemainingQuota, tier.WaitlistPending, queuedByTier[tier.ID], false)
 			values[ticketStockKey(tier.ID)] = available
 		}
 	}
@@ -505,6 +508,9 @@ func (s *TicketOrderService) CreateOrder(
 	}
 	if err := s.assertEventIdentitiesFree(ctx, event.ID, input.Attendees); err != nil {
 		return nil, err
+	}
+	if !event.SaleMode.IsSeated() && tier.RemainingQuota-tier.WaitlistPending < input.Quantity {
+		return nil, ErrTicketQuotaInsufficient
 	}
 
 	proposedOrderID := s.node.Generate().Int64()
@@ -1444,8 +1450,9 @@ func (s *TicketOrderService) HandlePaymentCallback(
 	}
 	payload, _ := json.Marshal(notification)
 	var paid bool
-	var eventUserID, eventOrderID int64
+	var eventUserID, eventOrderID, funnelOrganizerID int64
 	var eventName, eventMessage string
+	var waitlistAllocateTierID int64
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var payment models.PaymentTransaction
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -1478,6 +1485,22 @@ func (s *TicketOrderService) HandlePaymentCallback(
 			return err
 		}
 		if payment.Status != models.PaymentTransactionPending {
+			return nil
+		}
+		if payment.WaitlistID > 0 {
+			queued, userID, waitlistID, name, message, tierID, organizerID, waitlistErr := s.applyWaitlistPaymentInTx(
+				tx, payment, notification, callback.ID,
+			)
+			if waitlistErr != nil {
+				return waitlistErr
+			}
+			if queued {
+				paid = true
+				waitlistAllocateTierID = tierID
+				funnelOrganizerID = organizerID
+			}
+			eventUserID, eventOrderID = userID, waitlistID
+			eventName, eventMessage = name, message
 			return nil
 		}
 		var order models.TicketOrder
@@ -1535,6 +1558,14 @@ func (s *TicketOrderService) HandlePaymentCallback(
 			}).Error; err != nil {
 			return err
 		}
+		if order.OrderSource != models.TicketOrderSourceWaitlist {
+			if err := bumpFunnelOrderDaily(
+				tx, order.EventID, order.OrganizerID, string(order.OrderSource),
+				0, 1, 0, now,
+			); err != nil {
+				return err
+			}
+		}
 		if err := tx.Model(&models.PaymentTransaction{}).Where("id = ?", payment.ID).
 			Updates(map[string]interface{}{
 				"status":  models.PaymentTransactionSuccess,
@@ -1548,9 +1579,13 @@ func (s *TicketOrderService) HandlePaymentCallback(
 		}
 		paid = true
 		eventUserID, eventOrderID = order.UserID, order.ID
+		funnelOrganizerID = order.OrganizerID
 		eventName, eventMessage = "paid", "支付成功，电子票已生成"
 		return nil
 	})
+	if err == nil && paid {
+		bumpFunnelCacheVersion(ctx, s.rdb, funnelOrganizerID)
+	}
 	if err == nil && eventName != "" {
 		if paid {
 			callbackResult = "success"
@@ -1571,6 +1606,9 @@ func (s *TicketOrderService) HandlePaymentCallback(
 	}
 	if errors.Is(err, ErrPaymentNotFound) {
 		callbackResult = "not_found"
+	}
+	if err == nil && waitlistAllocateTierID > 0 {
+		_, _ = s.AllocateWaitlist(ctx, waitlistAllocateTierID)
 	}
 	return err
 }
@@ -1645,6 +1683,8 @@ func (s *TicketOrderService) CancelOrder(
 	var stockBucketNo *int
 	var rushBucketNo *int
 	var skipRedis bool
+	var divertedTierID int64
+	var organizerID int64
 	paid := false
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var payment models.PaymentTransaction
@@ -1677,6 +1717,7 @@ func (s *TicketOrderService) CancelOrder(
 			tierID, quantity = order.Items[0].TicketTierID, order.Items[0].Quantity
 		}
 		rushCampaignID = order.RushSaleCampaignID
+		organizerID = order.OrganizerID
 		if order.Status.HasBeenPaid() {
 			if errors.Is(paymentErr, gorm.ErrRecordNotFound) {
 				return ErrPaymentNotFound
@@ -1711,6 +1752,11 @@ func (s *TicketOrderService) CancelOrder(
 		stockBucketNo, rushBucketNo, skipRedis, restoreErr = s.restoreOrderInventory(tx, &order)
 		if restoreErr != nil {
 			return restoreErr
+		}
+		var divertErr error
+		skipRedis, divertedTierID, divertErr = s.maybeDivertRestoredQuota(tx, &order, skipRedis)
+		if divertErr != nil {
+			return divertErr
 		}
 		now := time.Now()
 		if paymentErr == nil && payment.Status == models.PaymentTransactionPending {
@@ -1761,6 +1807,11 @@ func (s *TicketOrderService) CancelOrder(
 			if restoreErr != nil {
 				return restoreErr
 			}
+			var divertErr error
+			skipRedis, divertedTierID, divertErr = s.maybeDivertRestoredQuota(tx, &order, skipRedis)
+			if divertErr != nil {
+				return divertErr
+			}
 			now := time.Now()
 			if err := tx.Model(&models.PaymentTransaction{}).
 				Where("id = ? AND status IN ?", payment.ID, []models.PaymentTransactionStatus{
@@ -1781,18 +1832,30 @@ func (s *TicketOrderService) CancelOrder(
 				}).Error; err != nil {
 				return err
 			}
-			return tx.Model(&models.TicketOrder{}).
+			if err := tx.Model(&models.TicketOrder{}).
 				Where("id = ? AND status = ?", order.ID, models.TicketOrderStatusPaid).
 				Updates(map[string]interface{}{
 					"status":         models.TicketOrderStatusCancelled,
 					"payment_status": models.PaymentStatusRefunded,
 					"cancelled_at":   &now,
 					"cancel_reason":  strings.TrimSpace(reason),
-				}).Error
+				}).Error; err != nil {
+				return err
+			}
+			if order.OrderSource != models.TicketOrderSourceWaitlist {
+				if err := bumpFunnelOrderDaily(
+					tx, order.EventID, order.OrganizerID, string(order.OrderSource),
+					0, 0, 1, now,
+				); err != nil {
+					return err
+				}
+			}
+			return nil
 		})
 		if err != nil {
 			return err
 		}
+		bumpFunnelCacheVersion(ctx, s.rdb, organizerID)
 	}
 
 	if err == nil && !skipRedis {
@@ -1822,6 +1885,9 @@ func (s *TicketOrderService) CancelOrder(
 			models.TicketOrderStatusCancelled,
 			message,
 		)
+	}
+	if err == nil && divertedTierID > 0 {
+		_, _ = s.AllocateWaitlist(ctx, divertedTierID)
 	}
 	return err
 }
@@ -2086,6 +2152,7 @@ func (s *TicketOrderService) cancelPendingPaymentOnlyDB(
 	var stockBucketNo *int
 	var rushBucketNo *int
 	var skipRedis bool
+	var divertedTierID int64
 	txStarted := time.Now()
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var pendingPayment models.PaymentTransaction
@@ -2119,6 +2186,11 @@ func (s *TicketOrderService) cancelPendingPaymentOnlyDB(
 		stockBucketNo, rushBucketNo, skipRedis, restoreErr = s.restoreOrderInventory(tx, &order)
 		if restoreErr != nil {
 			return restoreErr
+		}
+		var divertErr error
+		skipRedis, divertedTierID, divertErr = s.maybeDivertRestoredQuota(tx, &order, skipRedis)
+		if divertErr != nil {
+			return divertErr
 		}
 		now := time.Now()
 		result := tx.Model(&models.TicketOrder{}).
@@ -2172,6 +2244,9 @@ func (s *TicketOrderService) cancelPendingPaymentOnlyDB(
 			models.TicketOrderStatusCancelled,
 			"订单支付超时，已自动取消",
 		)
+	}
+	if err == nil && divertedTierID > 0 {
+		_, _ = s.AllocateWaitlist(ctx, divertedTierID)
 	}
 	return err
 }
@@ -2520,6 +2595,23 @@ func (s *TicketOrderService) assertEventIdentitiesFree(
 		return err
 	}
 	if count > 0 {
+		return fmt.Errorf("%w: 所选证件已购买本场门票", ErrTicketOrderUnavailable)
+	}
+	var waitlistCount int64
+	err = s.db.WithContext(ctx).Model(&models.WaitlistAttendee{}).
+		Joins("JOIN waitlist_entry ON waitlist_entry.id = waitlist_attendee.waitlist_id AND waitlist_entry.delete_time IS NULL").
+		Where("waitlist_entry.event_id = ?", eventID).
+		Where("waitlist_entry.status IN ?", []models.WaitlistStatus{
+			models.WaitlistStatusPendingPayment,
+			models.WaitlistStatusQueued,
+			models.WaitlistStatusFulfilled,
+		}).
+		Where("waitlist_attendee.identity_key IN ?", keys).
+		Count(&waitlistCount).Error
+	if err != nil {
+		return err
+	}
+	if waitlistCount > 0 {
 		return fmt.Errorf("%w: 所选证件已购买本场门票", ErrTicketOrderUnavailable)
 	}
 	return nil

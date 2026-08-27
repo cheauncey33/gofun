@@ -199,6 +199,7 @@ func main() {
 		// 活动浏览无需登录；购票和主办方管理仍由各自的鉴权路由保护。
 		v1.GET("/events", ticketCatalogCtrl.ListPublishedEvents)
 		v1.GET("/events/:id", ticketCatalogCtrl.GetPublishedEvent)
+		v1.POST("/funnel/visits", common.OptionalAuthMiddleware(), ticketCatalogCtrl.TrackFunnelVisits)
 		v1.GET("/events/:id/sessions/:session_id/seats", ticketCatalogCtrl.ListSessionSeats)
 		v1.GET("/events/:id/comments", common.OptionalAuthMiddleware(), eventCommentCtrl.List)
 		v1.GET("/catalog/meta", ticketCatalogCtrl.GetCatalogMeta)
@@ -214,6 +215,11 @@ func main() {
 			auth.GET("/orders/:id", ticketOrderCtrl.GetOrder)
 			auth.POST("/orders/:id/cancel", ticketOrderCtrl.CancelOrder)
 			auth.POST("/orders/:id/pay", ticketOrderCtrl.PayOrder)
+			auth.POST("/waitlists", writeLimit, ticketOrderCtrl.CreateWaitlist)
+			auth.GET("/waitlists", ticketOrderCtrl.ListWaitlists)
+			auth.GET("/waitlists/:id", ticketOrderCtrl.GetWaitlist)
+			auth.POST("/waitlists/:id/pay", ticketOrderCtrl.PayWaitlist)
+			auth.POST("/waitlists/:id/cancel", ticketOrderCtrl.CancelWaitlist)
 			auth.POST("/rush-sales/:id/execute", writeLimit, rushSaleCtrl.Execute)
 			auth.POST("/events/:id/comments", writeLimit, eventCommentCtrl.Create)
 			auth.DELETE("/comments/:id", eventCommentCtrl.Delete)
@@ -226,6 +232,7 @@ func main() {
 			auth.POST("/user/attendees", userCtrl.CreateAttendee)
 			auth.DELETE("/user/attendees/:id", userCtrl.DeleteAttendee)
 			auth.GET("/organizers/mine", ticketCatalogCtrl.ListMyOrganizers)
+			auth.POST("/organizers/apply", writeLimit, ticketCatalogCtrl.ApplyOrganizer)
 			auth.POST("/uploads", writeLimit, uploadCtrl.Create)
 		}
 
@@ -238,10 +245,12 @@ func main() {
 			organizer.PUT("/events/:event_id", ticketCatalogCtrl.UpdateEvent)
 			organizer.GET("/events", ticketCatalogCtrl.ListOrganizerEvents)
 			organizer.GET("/overview", ticketCatalogCtrl.GetOrganizerOverview)
+			organizer.GET("/funnel", ticketCatalogCtrl.GetOrganizerFunnel)
 			organizer.GET("/orders", ticketCatalogCtrl.ListOrganizerOrders)
 			organizer.POST("/verifications", ticketVerificationCtrl.Verify)
 			organizer.GET("/verifications", ticketVerificationCtrl.ListRecords)
-			organizer.POST("/events/:event_id/publish", ticketCatalogCtrl.PublishEvent)
+			organizer.POST("/events/:event_id/submit-review", ticketCatalogCtrl.SubmitEventForReview)
+			organizer.POST("/events/:event_id/withdraw-review", ticketCatalogCtrl.WithdrawEventReview)
 			organizer.POST("/events/:event_id/unpublish", ticketCatalogCtrl.UnpublishEvent)
 			organizer.POST("/events/:event_id/cancel", ticketCatalogCtrl.CancelEvent)
 			organizer.POST("/events/:event_id/refunds", ticketCatalogCtrl.BatchRefundEvent)
@@ -260,6 +269,12 @@ func main() {
 		{
 			admin.POST("/organizers", ticketCatalogCtrl.AdminCreateOrganizer)
 			admin.GET("/organizers", ticketCatalogCtrl.AdminListOrganizers)
+			admin.POST("/organizers/:organizer_id/approve", ticketCatalogCtrl.AdminApproveOrganizer)
+			admin.POST("/organizers/:organizer_id/reject", ticketCatalogCtrl.AdminRejectOrganizer)
+			admin.GET("/events/pending", ticketCatalogCtrl.AdminListPendingEvents)
+			admin.POST("/events/:event_id/approve", ticketCatalogCtrl.AdminApproveEvent)
+			admin.POST("/events/:event_id/reject", ticketCatalogCtrl.AdminRejectEvent)
+			admin.GET("/overview", ticketCatalogCtrl.AdminPlatformOverview)
 		}
 	}
 
@@ -271,6 +286,7 @@ func main() {
 	go ticketOrderConsumer.Start(mainCtx, cfg.OrderConsumer)
 	go ticketOrderSvc.StartPaymentTimeoutConsumer(mainCtx, cfg.DelayedOrder.WorkerCount)
 	go ticketOrderSvc.StartTimeoutScanner(mainCtx)
+	go ticketOrderSvc.StartWaitlistWorker(mainCtx)
 	go ticketOrderSvc.StartOutboxPublisher(mainCtx, cfg.OrderOutbox)
 	go ticketCompensationSvc.Start(mainCtx)
 	go eventSearchCompensationSvc.Start(mainCtx)

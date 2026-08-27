@@ -400,6 +400,7 @@ func PrometheusMiddleware() gin.HandlerFunc {
 
 		HTTPRequestsTotal.WithLabelValues(c.Request.Method, path, status).Inc()
 		HTTPRequestDuration.WithLabelValues(c.Request.Method, path).Observe(duration)
+		observeHTTPTraffic()
 	}
 }
 
