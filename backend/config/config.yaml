@@ -2,6 +2,7 @@ server:
   host: "127.0.0.1"
   port: 8080
   mode: "release"
+  upload_dir: "uploads"
 
 mysql:
   dsn: "gofun:gofun123456@tcp(127.0.0.1:3307)/gofun?charset=utf8mb4&parseTime=True&loc=Local"
@@ -67,3 +68,8 @@ cors:
   allow_origins:
     - "http://127.0.0.1:5173"
     - "http://localhost:5173"
+
+delayed_order:
+  timeout_minutes: 15
+  lock_timeout_sec: 10
+  worker_count: 2
