@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -46,6 +47,12 @@ func TestNormalStockReservationRetryDoesNotDeductTwice(t *testing.T) {
 	}
 	if got := mustRedisValue(t, mr, ticketStockKey(tier.ID)); got != "3" {
 		t.Fatalf("stock after first reserve = %s, want 3", got)
+	}
+	if got := mustRedisValue(t, mr, stockIdempotencyKey(11, ticketOrderOperationNormal, "idem-normal-retry")); got != strconv.FormatInt(firstOrderID, 10) {
+		t.Fatalf("idempotency mapping = %s, want order %d", got, firstOrderID)
+	}
+	if !mr.Exists(stockReservationKey(firstOrderID)) {
+		t.Fatalf("reservation must be addressed by order_id=%d", firstOrderID)
 	}
 
 	// 模拟第一次 Lua 已执行、但 HTTP 没拿到结果：同一幂等键再次进入预扣。
@@ -133,6 +140,9 @@ func TestRushReservationRollbackUsesDetachedContextAndIsIdempotent(t *testing.T)
 	}
 	if mr.Exists(reservation.Key) {
 		t.Fatal("reservation should be deleted after rollback")
+	}
+	if mr.Exists(stockIdempotencyKey(13, ticketOrderOperationRush, "idem-rush-cancelled")) {
+		t.Fatal("rolled back reservation must release its idempotency-to-order mapping")
 	}
 
 	// 第二次回滚必须是 no-op，不能把库存加到 6。

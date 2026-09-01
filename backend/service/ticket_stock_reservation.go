@@ -18,6 +18,7 @@ import (
 
 const (
 	stockReservationPrefix           = "fuchang:ticket:reservation:"
+	stockIdempotencyPrefix           = "fuchang:ticket:order-idem:"
 	stockReservationPendingKey       = stockReservationPrefix + "pending"
 	stockReservationStatePending     = "pending"
 	stockReservationStateCommitted   = "committed"
@@ -39,14 +40,16 @@ const (
 // reserveNormalStockScript 原子完成普通购票库存预扣与预扣凭证写入。
 // order_id 作为字符串保存和返回，避免 Redis Lua number 对 Snowflake int64 丢精度。
 var reserveNormalStockScript = redis.NewScript(`
-local existingOrderID = redis.call('HGET', KEYS[2], 'order_id')
+local existingOrderID = redis.call('GET', KEYS[2])
 if existingOrderID then
-  if redis.call('HGET', KEYS[2], 'kind') ~= ARGV[5]
-    or redis.call('HGET', KEYS[2], 'tier_id') ~= ARGV[4]
-    or redis.call('HGET', KEYS[2], 'quantity') ~= ARGV[1] then
+  local existingReservationKey = ARGV[11] .. existingOrderID
+  if redis.call('EXISTS', existingReservationKey) == 0 then
+    return {2, existingOrderID, 0, -1}
+  end
+  if redis.call('HGET', existingReservationKey, 'request_hash') ~= ARGV[8] then
     return {-5, '', 0, -1}
   end
-  return {2, existingOrderID, redis.call('HGET', KEYS[2], 'remaining') or '0', redis.call('HGET', KEYS[2], 'stock_bucket_no') or '-1'}
+  return {2, existingOrderID, redis.call('HGET', existingReservationKey, 'remaining') or '0', redis.call('HGET', existingReservationKey, 'stock_bucket_no') or '-1'}
 end
 
 local stock = tonumber(redis.call('GET', KEYS[1]))
@@ -59,7 +62,9 @@ if stock < quantity then
 end
 local remaining = stock - quantity
 redis.call('DECRBY', KEYS[1], quantity)
-redis.call('HSET', KEYS[2],
+redis.call('SET', KEYS[2], ARGV[2])
+redis.call('PEXPIRE', KEYS[2], ARGV[10])
+redis.call('HSET', KEYS[3],
   'order_id', ARGV[2],
   'user_id', ARGV[3],
   'tier_id', ARGV[4],
@@ -69,25 +74,28 @@ redis.call('HSET', KEYS[2],
   'stock_bucket_no', ARGV[6],
   'rush_bucket_no', '-1',
   'idempotency_key', ARGV[7],
+  'idempotency_map_key', KEYS[2],
+  'request_hash', ARGV[8],
   'state', 'pending',
   'remaining', tostring(remaining),
-  'created_at_ms', ARGV[8])
-redis.call('PERSIST', KEYS[2])
-redis.call('ZADD', KEYS[3], ARGV[8], KEYS[2])
+  'created_at_ms', ARGV[9])
+redis.call('PERSIST', KEYS[3])
+redis.call('ZADD', KEYS[4], ARGV[9], KEYS[3])
 return {1, ARGV[2], remaining, ARGV[6]}
 `)
 
 // reserveRushStockScript 将秒杀活动库存、票档库存、用户限购计数与预扣凭证放在同一 Lua 中。
 var reserveRushStockScript = redis.NewScript(`
-local existingOrderID = redis.call('HGET', KEYS[4], 'order_id')
+local existingOrderID = redis.call('GET', KEYS[4])
 if existingOrderID then
-  if redis.call('HGET', KEYS[4], 'kind') ~= ARGV[6]
-    or redis.call('HGET', KEYS[4], 'tier_id') ~= ARGV[5]
-    or redis.call('HGET', KEYS[4], 'campaign_id') ~= ARGV[4]
-    or redis.call('HGET', KEYS[4], 'quantity') ~= ARGV[1] then
+  local existingReservationKey = ARGV[14] .. existingOrderID
+  if redis.call('EXISTS', existingReservationKey) == 0 then
+    return {2, existingOrderID, 0, -1}
+  end
+  if redis.call('HGET', existingReservationKey, 'request_hash') ~= ARGV[11] then
     return {-5, '', 0, -1}
   end
-  return {2, existingOrderID, redis.call('HGET', KEYS[4], 'remaining') or '0', redis.call('HGET', KEYS[4], 'stock_bucket_no') or '-1'}
+  return {2, existingOrderID, redis.call('HGET', existingReservationKey, 'remaining') or '0', redis.call('HGET', existingReservationKey, 'stock_bucket_no') or '-1'}
 end
 
 local rushStock = tonumber(redis.call('GET', KEYS[1]))
@@ -109,7 +117,9 @@ redis.call('DECRBY', KEYS[1], quantity)
 redis.call('DECRBY', KEYS[2], quantity)
 redis.call('INCRBY', KEYS[3], quantity)
 redis.call('EXPIRE', KEYS[3], ARGV[3])
-redis.call('HSET', KEYS[4],
+redis.call('SET', KEYS[4], ARGV[7])
+redis.call('PEXPIRE', KEYS[4], ARGV[13])
+redis.call('HSET', KEYS[5],
   'order_id', ARGV[7],
   'user_id', ARGV[8],
   'tier_id', ARGV[5],
@@ -119,11 +129,13 @@ redis.call('HSET', KEYS[4],
   'stock_bucket_no', ARGV[9],
   'rush_bucket_no', ARGV[9],
   'idempotency_key', ARGV[10],
+  'idempotency_map_key', KEYS[4],
+  'request_hash', ARGV[11],
   'state', 'pending',
   'remaining', tostring(remaining),
-  'created_at_ms', ARGV[11])
-redis.call('PERSIST', KEYS[4])
-redis.call('ZADD', KEYS[5], ARGV[11], KEYS[4])
+  'created_at_ms', ARGV[12])
+redis.call('PERSIST', KEYS[5])
+redis.call('ZADD', KEYS[6], ARGV[12], KEYS[5])
 return {1, ARGV[7], remaining, ARGV[9]}
 `)
 
@@ -153,6 +165,9 @@ end
 if redis.call('EXISTS', KEYS[1]) == 1 then
   redis.call('INCRBY', KEYS[1], tonumber(redis.call('HGET', KEYS[2], 'quantity')))
 end
+if redis.call('GET', KEYS[4]) == ARGV[1] then
+  redis.call('DEL', KEYS[4])
+end
 redis.call('DEL', KEYS[2])
 redis.call('ZREM', KEYS[3], KEYS[2])
 return 1
@@ -178,6 +193,9 @@ local bought = redis.call('DECRBY', KEYS[3], quantity)
 if bought <= 0 then
   redis.call('DEL', KEYS[3])
 end
+if redis.call('GET', KEYS[6]) == ARGV[1] then
+  redis.call('DEL', KEYS[6])
+end
 redis.call('DEL', KEYS[4])
 redis.call('ZREM', KEYS[5], KEYS[4])
 return 1
@@ -192,17 +210,19 @@ type stockReservationResult struct {
 }
 
 type stockReservation struct {
-	Key            string
-	OrderID        int64
-	UserID         int64
-	TierID         int64
-	CampaignID     int64
-	Quantity       int
-	StockBucketNo  int
-	RushBucketNo   int
-	IdempotencyKey string
-	Kind           string
-	State          string
+	Key               string
+	OrderID           int64
+	UserID            int64
+	TierID            int64
+	CampaignID        int64
+	Quantity          int
+	StockBucketNo     int
+	RushBucketNo      int
+	IdempotencyKey    string
+	IdempotencyMapKey string
+	RequestHash       string
+	Kind              string
+	State             string
 }
 
 type stockReservationRecoveryOutcome string
@@ -212,9 +232,13 @@ const (
 	stockReservationRecoveryRolledBack stockReservationRecoveryOutcome = "rolled_back"
 )
 
-func stockReservationKey(userID int64, idempotencyKey string) string {
+func stockReservationKey(orderID int64) string {
+	return stockReservationPrefix + strconv.FormatInt(orderID, 10)
+}
+
+func stockIdempotencyKey(userID int64, operation, idempotencyKey string) string {
 	sum := sha256.Sum256([]byte(idempotencyKey))
-	return fmt.Sprintf("%s%d:%x", stockReservationPrefix, userID, sum[:16])
+	return fmt.Sprintf("%s%d:%s:%x", stockIdempotencyPrefix, userID, operation, sum[:16])
 }
 
 func stockReservationTTLMillis() int64 {
@@ -229,7 +253,7 @@ func detachedReservationContext(parent context.Context) (context.Context, contex
 	return context.WithTimeout(base, 3*time.Second)
 }
 
-func decodeStockReservationResult(raw interface{}, key string) (stockReservationResult, int64, error) {
+func decodeStockReservationResult(raw interface{}) (stockReservationResult, int64, error) {
 	values, ok := raw.([]interface{})
 	if !ok || len(values) != 4 {
 		return stockReservationResult{}, 0, fmt.Errorf("解析 Redis 预扣结果: %#v", raw)
@@ -254,7 +278,7 @@ func decodeStockReservationResult(raw interface{}, key string) (stockReservation
 		return stockReservationResult{}, 0, err
 	}
 	return stockReservationResult{
-		Key: key, OrderID: orderID, BucketNo: int(bucket), Remaining: remaining,
+		Key: stockReservationKey(orderID), OrderID: orderID, BucketNo: int(bucket), Remaining: remaining,
 		Created: code == stockReservationCodeCreated,
 	}, code, nil
 }
@@ -366,7 +390,9 @@ func (s *TicketOrderService) loadStockReservation(ctx context.Context, key strin
 		Key: key, OrderID: orderID, UserID: userID, TierID: tierID,
 		CampaignID: campaignID, Quantity: int(quantity), StockBucketNo: int(stockBucketNo),
 		RushBucketNo: int(rushBucketNo), IdempotencyKey: values["idempotency_key"],
-		Kind: values["kind"], State: values["state"],
+		IdempotencyMapKey: values["idempotency_map_key"],
+		Kind:              values["kind"], State: values["state"],
+		RequestHash: values["request_hash"],
 	}, nil
 }
 
@@ -391,6 +417,7 @@ func (s *TicketOrderService) rollbackLoadedStockReservation(ctx context.Context,
 				rushUserCountKey(reservation.CampaignID, reservation.UserID),
 				reservation.Key,
 				stockReservationPendingKey,
+				reservation.IdempotencyMapKey,
 			},
 			orderID,
 		))
@@ -405,7 +432,7 @@ func (s *TicketOrderService) rollbackLoadedStockReservation(ctx context.Context,
 	return reservationMutationResult(rollbackNormalStockReservationScript.Run(
 		ctx,
 		s.rdb,
-		[]string{stockKey, reservation.Key, stockReservationPendingKey},
+		[]string{stockKey, reservation.Key, stockReservationPendingKey, reservation.IdempotencyMapKey},
 		orderID,
 	))
 }

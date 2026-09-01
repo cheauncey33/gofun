@@ -67,6 +67,7 @@ type TicketOrder struct {
 	PurchaseNoticeVersion string                `gorm:"size:32;not null" json:"purchase_notice_version"`
 	TermsAcceptedAt       *time.Time            `json:"terms_accepted_at,omitempty"`
 	IdempotencyKey        string                `gorm:"size:64;uniqueIndex:uk_ticket_order_idempotency,priority:2" json:"-"`
+	RequestHash           string                `gorm:"size:64;not null;default:''" json:"-"`
 	RequestID             string                `gorm:"size:64;index" json:"request_id"`
 	FunnelVisitorKey      string                `gorm:"size:64;not null;default:''" json:"-"`
 	StockBucketNo         *int                  `json:"stock_bucket_no,omitempty"`
@@ -184,6 +185,7 @@ const (
 type TicketOrderOutbox struct {
 	ID          int64                   `gorm:"primaryKey" json:"id,string"`
 	OrderID     int64                   `gorm:"not null;index:idx_outbox_order" json:"order_id,string"`
+	EventType   string                  `gorm:"size:64;not null" json:"event_type"`
 	Payload     string                  `gorm:"type:json;not null" json:"payload"`
 	Status      TicketOrderOutboxStatus `gorm:"size:16;not null;default:pending;index:idx_outbox_status_create,priority:1" json:"status"`
 	Attempts    int                     `gorm:"not null;default:0" json:"attempts"`
@@ -194,6 +196,19 @@ type TicketOrderOutbox struct {
 
 func (TicketOrderOutbox) TableName() string {
 	return "ticket_order_outbox"
+}
+
+// TicketOrderConsumerInbox makes broker redeliveries idempotent by event ID.
+// The composite primary key permits independent consumers of the same event.
+type TicketOrderConsumerInbox struct {
+	ConsumerName string    `gorm:"primaryKey;size:64" json:"consumer_name"`
+	EventID      int64     `gorm:"primaryKey" json:"event_id,string"`
+	OrderID      int64     `gorm:"not null;index" json:"order_id,string"`
+	CreateTime   time.Time `gorm:"not null;autoCreateTime" json:"create_time"`
+}
+
+func (TicketOrderConsumerInbox) TableName() string {
+	return "ticket_order_consumer_inbox"
 }
 
 type TicketStockRecoveryFenceOwner string

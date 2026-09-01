@@ -52,8 +52,8 @@ func TestIntegrationBucketParentStatusOnlyTransitionsAtBoundaries(t *testing.T) 
 	if err := env.db.First(&current, tier.ID).Error; err != nil {
 		t.Fatalf("load after sold-out transition: %v", err)
 	}
-	if current.Status != models.TicketTierStatusSoldOut {
-		t.Fatalf("tier status after final deduction = %s, want sold_out", current.Status)
+	if current.Status != models.TicketTierStatusWaitlist {
+		t.Fatalf("tier status after final deduction = %s, want waitlist", current.Status)
 	}
 	soldOutUpdateTime := current.UpdateTime
 
@@ -70,7 +70,7 @@ func TestIntegrationBucketParentStatusOnlyTransitionsAtBoundaries(t *testing.T) 
 		t.Fatalf("tier status after restore = %s, want on_sale", current.Status)
 	}
 	if !current.UpdateTime.After(soldOutUpdateTime) {
-		t.Fatalf("expected sold_out -> on_sale parent transition")
+		t.Fatalf("expected waitlist -> on_sale parent transition")
 	}
 	onSaleUpdateTime := current.UpdateTime
 

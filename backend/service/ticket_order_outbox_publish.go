@@ -1,15 +1,16 @@
 package service
 
 import (
-	"gofun/config"
-	"gofun/metrics"
-	"gofun/models"
-	apptelemetry "gofun/pkg/telemetry"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"gofun/config"
+	"gofun/metrics"
+	"gofun/models"
+	apptelemetry "gofun/pkg/telemetry"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -188,9 +189,13 @@ func (s *TicketOrderService) publishClaimedOutboxBatch(
 	for _, row := range rows {
 		var message TicketOrderMessage
 		parentCtx := ctx
-		if err := json.Unmarshal([]byte(row.Payload), &message); err == nil {
-			parentCtx = apptelemetry.ExtractMap(ctx, message.TraceContext)
+		if err := json.Unmarshal([]byte(row.Payload), &message); err != nil {
+			return 0, fmt.Errorf("解析 outbox event=%d: %w", row.ID, err)
 		}
+		if message.EventID != row.ID || message.OrderID != row.OrderID || message.EventType != row.EventType {
+			return 0, fmt.Errorf("outbox event=%d 载荷身份不匹配", row.ID)
+		}
+		parentCtx = apptelemetry.ExtractMap(ctx, message.TraceContext)
 		confirm, pubErr := ch.PublishWithDeferredConfirmWithContext(
 			parentCtx,
 			"",
@@ -198,10 +203,13 @@ func (s *TicketOrderService) publishClaimedOutboxBatch(
 			true,
 			false,
 			amqp.Publishing{
-				ContentType:  "application/json",
-				Body:         []byte(row.Payload),
-				DeliveryMode: amqp.Persistent,
-				Headers:      apptelemetry.InjectAMQP(parentCtx),
+				ContentType:   "application/json",
+				Body:          []byte(row.Payload),
+				DeliveryMode:  amqp.Persistent,
+				Headers:       apptelemetry.InjectAMQP(parentCtx),
+				MessageId:     strconv.FormatInt(message.EventID, 10),
+				CorrelationId: strconv.FormatInt(message.OrderID, 10),
+				Type:          message.EventType,
 			},
 		)
 		if pubErr != nil {

@@ -171,7 +171,7 @@ func restoreRushBucket(tx *gorm.DB, campaignID int64, bucketNo, quantity int) er
 	return nil
 }
 
-// refreshTierSoldOutFromBuckets 父表退出热路径：仅当全部分桶余量归零时标记 sold_out。
+// refreshTierSoldOutFromBuckets 父表退出热路径：仅当全部分桶余量归零时切入候补模式。
 // sold_count / remaining_quota 由补偿任务按桶 SUM 回写，避免消费期打到同一父行。
 func refreshTierSoldOutFromBuckets(tx *gorm.DB, tierID int64, _ int) error {
 	var sum int64
@@ -183,18 +183,21 @@ func refreshTierSoldOutFromBuckets(tx *gorm.DB, tierID int64, _ int) error {
 	if sum > 0 {
 		return nil
 	}
-	// 只有真正发生 on_sale -> sold_out 边界转换时才更新父级行。
+	// 只有真正发生 on_sale -> waitlist 边界转换时才更新父级行。
 	// 普通分桶扣减不会触碰 ticket_tier，状态漂移由补偿任务修正。
 	return tx.Model(&models.TicketTier{}).
 		Where("id = ? AND status = ?", tierID, models.TicketTierStatusOnSale).
-		Update("status", models.TicketTierStatusSoldOut).Error
+		Update("status", models.TicketTierStatusWaitlist).Error
 }
 
 func refreshTierOnSaleFromBuckets(tx *gorm.DB, tierID int64, _ int) error {
-	// 恢复库存时只有 sold_out -> on_sale 才需要更新父级行；
+	// 恢复库存时只有 waitlist/sold_out -> on_sale 才需要更新父级行；
 	// 已经 on_sale 的普通恢复不再执行无效 UPDATE。
 	return tx.Model(&models.TicketTier{}).
-		Where("id = ? AND status = ?", tierID, models.TicketTierStatusSoldOut).
+		Where("id = ? AND status IN ?", tierID, []models.TicketTierStatus{
+			models.TicketTierStatusWaitlist,
+			models.TicketTierStatusSoldOut,
+		}).
 		Update("status", models.TicketTierStatusOnSale).Error
 }
 

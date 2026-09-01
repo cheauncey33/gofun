@@ -170,10 +170,13 @@ func (c *TicketOrderConsumer) handle(
 		if publishErr := channel.PublishWithContext(
 			consumerCtx, c.dlxName, c.dlqName, true, false,
 			amqp.Publishing{
-				ContentType:  "application/json",
-				Body:         delivery.Body,
-				DeliveryMode: amqp.Persistent,
-				Headers:      headers,
+				ContentType:   "application/json",
+				Body:          delivery.Body,
+				DeliveryMode:  amqp.Persistent,
+				Headers:       headers,
+				MessageId:     delivery.MessageId,
+				CorrelationId: delivery.CorrelationId,
+				Type:          delivery.Type,
 			},
 		); publishErr != nil {
 			return publishErr
@@ -189,10 +192,13 @@ func (c *TicketOrderConsumer) handle(
 	if err := channel.PublishWithContext(
 		consumerCtx, "", c.retryQueueName, true, false,
 		amqp.Publishing{
-			ContentType:  "application/json",
-			Body:         delivery.Body,
-			DeliveryMode: amqp.Persistent,
-			Headers:      headers,
+			ContentType:   "application/json",
+			Body:          delivery.Body,
+			DeliveryMode:  amqp.Persistent,
+			Headers:       headers,
+			MessageId:     delivery.MessageId,
+			CorrelationId: delivery.CorrelationId,
+			Type:          delivery.Type,
 		},
 	); err != nil {
 		return err
@@ -213,6 +219,7 @@ func startTicketOrderConsumerSpan(
 		trace.WithSpanKind(trace.SpanKindConsumer),
 		trace.WithAttributes(
 			attribute.Int64("ticket.order.id", message.OrderID),
+			attribute.Int64("messaging.event.id", message.EventID),
 			attribute.Int("messaging.retry_count", readRetryCount(delivery.Headers)),
 		),
 	)

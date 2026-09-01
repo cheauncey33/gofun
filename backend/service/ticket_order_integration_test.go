@@ -55,6 +55,7 @@ var ticketIntegrationModels = []interface{}{
 	&models.TicketOrderItem{},
 	&models.TicketOrderAttendee{},
 	&models.TicketOrderOutbox{},
+	&models.TicketOrderConsumerInbox{},
 	&models.TicketStockRecoveryFence{},
 	&models.PaymentTransaction{},
 	&models.PaymentCallback{},
@@ -387,8 +388,8 @@ func TestIntegrationFaultAfterRedisReserveIsRolledBack(t *testing.T) {
 	}
 	env.svc.faultInjector = nil
 
-	reservationKey := stockReservationKey(user.ID, idempotencyKey)
-	if !env.mr.Exists(reservationKey) {
+	members, _ := env.mr.ZMembers(stockReservationPendingKey)
+	if len(members) != 1 || !env.mr.Exists(members[0]) {
 		t.Fatal("pending Redis reservation should remain after interruption")
 	}
 	if stock, _ := env.rdb.Get(ctx, ticketStockKey(tier.ID)).Int(); stock != 1 {
@@ -431,7 +432,7 @@ func TestIntegrationFaultAfterOrderCommitIsConfirmed(t *testing.T) {
 		First(&order).Error; err != nil {
 		t.Fatalf("committed order not found: %v", err)
 	}
-	reservationKey := stockReservationKey(user.ID, idempotencyKey)
+	reservationKey := stockReservationKey(order.ID)
 	if state := env.mr.HGet(reservationKey, "state"); state != stockReservationStatePending {
 		t.Fatalf("reservation state=%q, want pending", state)
 	}
@@ -490,7 +491,9 @@ func TestIntegrationConsumerCommitBeforeAckRedeliversIdempotently(t *testing.T) 
 		}
 	})
 	message := TicketOrderMessage{
-		OrderID: receipt.OrderID, UserID: user.ID, TicketTierID: tier.ID, Quantity: 1,
+		EventID:   receipt.OrderID + 100,
+		EventType: ticketOrderFinalizeEventType,
+		OrderID:   receipt.OrderID, UserID: user.ID, TicketTierID: tier.ID, Quantity: 1,
 	}
 	body, _ := json.Marshal(message)
 	if err := setupChannel.PublishWithContext(ctx, "", queueName, false, false, amqp.Publishing{
@@ -724,7 +727,7 @@ func TestIntegrationTransactionalOutboxCommitAndRollback(t *testing.T) {
 		}
 	}
 	message := func(order *models.TicketOrder) TicketOrderMessage {
-		return TicketOrderMessage{OrderID: order.ID, UserID: user.ID, TicketTierID: tier.ID, Quantity: 1}
+		return TicketOrderMessage{EventID: order.ID + 100, EventType: ticketOrderFinalizeEventType, OrderID: order.ID, UserID: user.ID, TicketTierID: tier.ID, Quantity: 1}
 	}
 
 	rolledBack := newOrder()
@@ -776,7 +779,7 @@ func TestIntegrationConsumerReservesBeforePendingPayment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("创建成功订单失败: %v", err)
 	}
-	message := TicketOrderMessage{OrderID: receipt.OrderID, UserID: user.ID, TicketTierID: tier.ID, Quantity: 3}
+	message := TicketOrderMessage{EventID: receipt.OrderID + 100, EventType: ticketOrderFinalizeEventType, OrderID: receipt.OrderID, UserID: user.ID, TicketTierID: tier.ID, Quantity: 3}
 	if err := env.svc.ProcessOrderTask(ctx, message); err != nil {
 		t.Fatalf("消费者扣库存失败: %v", err)
 	}
@@ -807,7 +810,9 @@ func TestIntegrationConsumerReservesBeforePendingPayment(t *testing.T) {
 		t.Fatalf("准备不足库存失败: %v", err)
 	}
 	failure := env.svc.ProcessOrderTask(ctx, TicketOrderMessage{
-		OrderID: failedReceipt.OrderID, UserID: user.ID, TicketTierID: tier.ID, Quantity: 2,
+		EventID:   failedReceipt.OrderID + 100,
+		EventType: ticketOrderFinalizeEventType,
+		OrderID:   failedReceipt.OrderID, UserID: user.ID, TicketTierID: tier.ID, Quantity: 2,
 	})
 	if failure == nil {
 		t.Fatal("库存不足时消费者应返回错误")
@@ -831,7 +836,7 @@ func TestIntegrationPaymentAndTimeoutSerialize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("创建支付竞争订单失败: %v", err)
 	}
-	if err := env.svc.ProcessOrderTask(ctx, TicketOrderMessage{OrderID: receipt.OrderID, UserID: user.ID, TicketTierID: tier.ID, Quantity: 1}); err != nil {
+	if err := env.svc.ProcessOrderTask(ctx, TicketOrderMessage{EventID: receipt.OrderID + 100, EventType: ticketOrderFinalizeEventType, OrderID: receipt.OrderID, UserID: user.ID, TicketTierID: tier.ID, Quantity: 1}); err != nil {
 		t.Fatalf("推进 pending_payment 失败: %v", err)
 	}
 	intent, err := env.svc.PayOrder(ctx, user.ID, receipt.OrderID, "manual")
@@ -897,12 +902,14 @@ func TestIntegrationIdempotencyCacheRefreshesStatus(t *testing.T) {
 		t.Fatalf("预置过期缓存快照: %v", err)
 	}
 	if err := env.svc.ProcessOrderTask(ctx, TicketOrderMessage{
-		OrderID: first.OrderID, UserID: user.ID, TicketTierID: tier.ID, Quantity: 1,
+		EventID:   first.OrderID + 100,
+		EventType: ticketOrderFinalizeEventType,
+		OrderID:   first.OrderID, UserID: user.ID, TicketTierID: tier.ID, Quantity: 1,
 	}); err != nil {
 		t.Fatalf("推进 pending_payment: %v", err)
 	}
 
-	receipt, err := env.svc.lookupIdempotentOrder(ctx, user.ID, idemKey)
+	receipt, err := env.svc.lookupIdempotentOrder(ctx, user.ID, idemKey, "")
 	if err != nil {
 		t.Fatalf("幂等回源查询失败: %v", err)
 	}

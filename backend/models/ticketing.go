@@ -77,6 +77,8 @@ type TicketTierStatus string
 const (
 	TicketTierStatusDisabled TicketTierStatus = "disabled"
 	TicketTierStatusOnSale   TicketTierStatus = "on_sale"
+	// TicketTierStatusWaitlist 关闭公开购票，仅接受候补；候补派完有余票时才回 on_sale。
+	TicketTierStatusWaitlist TicketTierStatus = "waitlist"
 	TicketTierStatusSoldOut  TicketTierStatus = "sold_out"
 )
 

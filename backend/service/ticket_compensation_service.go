@@ -137,6 +137,7 @@ func (s *TicketCompensationService) runStandardCompensation(
 	if err := s.db.WithContext(ctx).
 		Where("status IN ?", []models.TicketTierStatus{
 			models.TicketTierStatusOnSale,
+			models.TicketTierStatusWaitlist,
 			models.TicketTierStatusSoldOut,
 		}).Find(&tiers).Error; err != nil {
 		return 0, err
@@ -270,7 +271,7 @@ func (s *TicketCompensationService) runBucketCompensation(
 						"ELSE status END",
 					remaining,
 					models.TicketTierStatusOnSale,
-					models.TicketTierStatusSoldOut,
+					models.TicketTierStatusWaitlist,
 					remaining,
 					models.TicketTierStatusSoldOut,
 					models.TicketTierStatusOnSale,

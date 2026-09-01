@@ -175,6 +175,8 @@ func (e *orderIntegrationEnv) processSeated(
 ) {
 	t.Helper()
 	err := e.svc.ProcessOrderTask(context.Background(), TicketOrderMessage{
+		EventID:      receipt.OrderID + 100,
+		EventType:    ticketOrderFinalizeEventType,
 		OrderID:      receipt.OrderID,
 		UserID:       userID,
 		TicketTierID: tierID,

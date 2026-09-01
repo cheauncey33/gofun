@@ -51,9 +51,17 @@ function sessionSaleState(session) {
 }
 
 const saleState = computed(() => sessionSaleState(selectedSession.value))
-const canWaitlist = computed(() => saleState.value === 'sold_out' && !isSeated.value && !!selectedTier.value)
-const canBuy = computed(() => (saleState.value === 'on_sale' || canWaitlist.value) && !!selectedTier.value)
+const canWaitlist = computed(() =>
+  selectedTier.value?.status === 'waitlist'
+  && !isSeated.value
+  && (saleState.value === 'on_sale' || saleState.value === 'sold_out')
+)
+const canBuy = computed(() => !!selectedTier.value && (
+  canWaitlist.value
+  || (saleState.value === 'on_sale' && selectedTier.value.status === 'on_sale')
+))
 const buyLabel = computed(() => {
+  if (canWaitlist.value) return '登记候补'
   if (saleState.value === 'not_started') return '尚未开售'
   if (saleState.value === 'ended') return '已停售'
   if (saleState.value === 'sold_out') return isSeated.value ? '已售罄' : '登记候补'
@@ -354,16 +362,16 @@ function onCounterTierChange(event) {
       />
       <el-dialog v-model="buyOpen" :title="canWaitlist ? '登记候补' : '购买门票'" width="460px" align-center>
         <div class="buy-dialog">
-          <p v-if="canWaitlist">售罄后先付沙箱款排队。有人退票按提交顺序派票，不用再抢；开场前仍未配到会原路退款。选座活动暂不支持候补。</p>
+          <p v-if="canWaitlist">售罄后先付沙箱款排队。有人退票按付款成功顺序派票，不用再抢；开场前仍未配到会原路退款。选座活动暂不支持候补。</p>
           <label>票档
             <select :value="String(selectedTier?.id || '')" @change="onCounterTierChange">
               <option
                 v-for="tier in selectedSession?.ticket_tiers || []"
                 :key="tier.id"
                 :value="String(tier.id)"
-                :disabled="!canWaitlist && Number(tier.remaining_quota || 0) <= 0"
+                :disabled="tier.status !== 'waitlist' && Number(tier.remaining_quota || 0) <= 0"
               >
-                {{ tier.name }} · {{ money(tier.price_cents) }}{{ Number(tier.remaining_quota || 0) <= 0 ? ' · 售罄' : '' }}
+                {{ tier.name }} · {{ money(tier.price_cents) }}{{ tier.status === 'waitlist' ? ' · 候补中' : (Number(tier.remaining_quota || 0) <= 0 ? ' · 售罄' : '') }}
               </option>
             </select>
           </label>

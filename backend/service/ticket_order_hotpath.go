@@ -28,7 +28,7 @@ const (
 )
 
 func ticketIdempotencyRedisKey(userID int64, idempotencyKey string) string {
-	return "fuchang:ticket:idem:" + strconv.FormatInt(userID, 10) + ":" + idempotencyKey
+	return "fuchang:ticket:idem-result:" + strconv.FormatInt(userID, 10) + ":" + idempotencyKey
 }
 
 func purchasableContextLocalKey(tierID int64) string {
@@ -46,7 +46,7 @@ type purchasableContext struct {
 func (s *TicketOrderService) lookupIdempotentOrder(
 	ctx context.Context,
 	userID int64,
-	idempotencyKey string,
+	idempotencyKey, requestHash string,
 ) (*TicketOrderReceipt, error) {
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	if userID <= 0 || len(idempotencyKey) < 8 {
@@ -61,10 +61,13 @@ func (s *TicketOrderService) lookupIdempotentOrder(
 				// 回源 MySQL 刷新后再返回，避免客户端重试拿到过期的 queued。
 				var existing models.TicketOrder
 				queryErr := s.db.WithContext(ctx).
-					Select("id", "order_no", "status").
+					Select("id", "order_no", "status", "request_hash").
 					Where("id = ? AND user_id = ?", orderID, userID).
 					First(&existing).Error
 				if queryErr == nil {
+					if requestHash != "" && existing.RequestHash != "" && existing.RequestHash != requestHash {
+						return nil, ErrInvalidTicketCatalog
+					}
 					receipt := ticketOrderReceipt(&existing)
 					s.rememberIdempotentOrder(ctx, userID, idempotencyKey, receipt)
 					return receipt, nil
@@ -88,7 +91,7 @@ func (s *TicketOrderService) lookupIdempotentOrder(
 
 	var existing models.TicketOrder
 	err := s.db.WithContext(ctx).
-		Select("id", "order_no", "status").
+		Select("id", "order_no", "status", "request_hash").
 		Where("user_id = ? AND idempotency_key = ?", userID, idempotencyKey).
 		First(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -96,6 +99,9 @@ func (s *TicketOrderService) lookupIdempotentOrder(
 	}
 	if err != nil {
 		return nil, err
+	}
+	if requestHash != "" && existing.RequestHash != "" && existing.RequestHash != requestHash {
+		return nil, ErrInvalidTicketCatalog
 	}
 	receipt := ticketOrderReceipt(&existing)
 	s.rememberIdempotentOrder(ctx, userID, idempotencyKey, receipt)
@@ -147,6 +153,8 @@ func (s *TicketOrderService) enqueueOutboxInTx(
 		trace.WithAttributes(attribute.Int64("ticket.order.id", orderID)),
 	)
 	defer span.End()
+	message.EventID = s.node.Generate().Int64()
+	message.EventType = ticketOrderFinalizeEventType
 	message.TraceContext = apptelemetry.InjectMap(ctx)
 	payload, err := json.Marshal(message)
 	if err != nil {
@@ -155,10 +163,11 @@ func (s *TicketOrderService) enqueueOutboxInTx(
 		return err
 	}
 	row := models.TicketOrderOutbox{
-		ID:      s.node.Generate().Int64(),
-		OrderID: orderID,
-		Payload: string(payload),
-		Status:  models.TicketOrderOutboxPending,
+		ID:        message.EventID,
+		OrderID:   orderID,
+		EventType: message.EventType,
+		Payload:   string(payload),
+		Status:    models.TicketOrderOutboxPending,
 	}
 	if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
 		span.RecordError(err)

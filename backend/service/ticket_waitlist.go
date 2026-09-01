@@ -102,10 +102,6 @@ func (s *TicketOrderService) CreateWaitlist(
 	if input.Quantity > tier.PurchaseLimit {
 		return nil, fmt.Errorf("%w: 超过限购数量", ErrWaitlistUnavailable)
 	}
-	public := tier.RemainingQuota - tier.WaitlistPending
-	if public > 0 {
-		return nil, fmt.Errorf("%w: 仍有余票，请直接购买", ErrWaitlistUnavailable)
-	}
 	used, err := s.countUserEventTickets(ctx, userID, event.ID)
 	if err != nil {
 		return nil, err
@@ -420,10 +416,10 @@ func (s *TicketOrderService) divertReleasedQuotaToWaitlist(tx *gorm.DB, tierID i
 	result := tx.Exec(`
 		UPDATE ticket_tier
 		SET waitlist_pending = waitlist_pending + ?,
-		    status = CASE WHEN remaining_quota <= waitlist_pending + ? THEN ? ELSE status END,
+		    status = ?,
 		    version = version + 1
 		WHERE id = ? AND delete_time IS NULL
-	`, quantity, quantity, models.TicketTierStatusSoldOut, tierID)
+	`, quantity, models.TicketTierStatusWaitlist, tierID)
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -472,7 +468,7 @@ func (s *TicketOrderService) AllocateWaitlist(ctx context.Context, tierID int64)
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Preload("Attendees").
 			Where("ticket_tier_id = ? AND status = ?", tierID, models.WaitlistStatusQueued).
-			Order("id ASC").Find(&entries).Error; err != nil {
+			Order("paid_at ASC, id ASC").Find(&entries).Error; err != nil {
 			return err
 		}
 		quantities := make([]int, len(entries))
@@ -496,9 +492,7 @@ func (s *TicketOrderService) AllocateWaitlist(ctx context.Context, tierID int64)
 		} else {
 			leftover = leftoverPublic
 			updates["waitlist_pending"] = 0
-			if leftoverPublic == 0 && tier.RemainingQuota <= 0 {
-				updates["status"] = models.TicketTierStatusSoldOut
-			} else if leftoverPublic > 0 {
+			if leftoverPublic > 0 {
 				updates["status"] = models.TicketTierStatusOnSale
 			}
 		}
@@ -751,7 +745,7 @@ func (s *TicketOrderService) applyWaitlistPaymentInTx(
 	}
 	queued = true
 	userID, waitlistID, tierID, organizerID = entry.UserID, entry.ID, entry.TicketTierID, entry.OrganizerID
-	eventName, eventMessage = "waitlist_queued", "候补已付款，按提交顺序排队，有退票将派给你"
+	eventName, eventMessage = "waitlist_queued", "候补已付款，按付款成功顺序排队，有退票将派给你"
 	return
 }
 
@@ -889,7 +883,7 @@ func (s *TicketOrderService) loadWaitlistableTier(
 	now := time.Now()
 	if event.Status != models.EventStatusPublished ||
 		session.Status != models.SessionStatusOnSale ||
-		(tier.Status != models.TicketTierStatusOnSale && tier.Status != models.TicketTierStatusSoldOut) ||
+		tier.Status != models.TicketTierStatusWaitlist ||
 		now.Before(session.SaleStartsAt) || now.After(session.SaleEndsAt) ||
 		!now.Before(session.StartsAt) {
 		return nil, nil, nil, nil, ErrWaitlistUnavailable
@@ -943,13 +937,15 @@ func (s *TicketOrderService) countUserWaitlistTickets(ctx context.Context, userI
 }
 
 func (s *TicketOrderService) waitlistQueuePosition(ctx context.Context, entry *models.WaitlistEntry) int {
-	if entry == nil || entry.Status != models.WaitlistStatusQueued {
+	if entry == nil || entry.Status != models.WaitlistStatusQueued || entry.PaidAt == nil {
 		return 0
 	}
 	var ahead int64
 	if err := s.db.WithContext(ctx).Model(&models.WaitlistEntry{}).
-		Where("ticket_tier_id = ? AND status = ? AND id < ?",
-			entry.TicketTierID, models.WaitlistStatusQueued, entry.ID).
+		Where(`ticket_tier_id = ? AND status = ?
+			AND (paid_at < ? OR (paid_at = ? AND id < ?))`,
+			entry.TicketTierID, models.WaitlistStatusQueued,
+			entry.PaidAt, entry.PaidAt, entry.ID).
 		Count(&ahead).Error; err != nil {
 		return 0
 	}

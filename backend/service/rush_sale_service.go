@@ -232,7 +232,12 @@ func (s *RushSaleService) Execute(
 	} else if event.SaleMode.IsSeated() {
 		return nil, fmt.Errorf("%w: 选座购票尚未开放", ErrTicketOrderUnavailable)
 	}
-	if receipt, err := s.order.lookupIdempotentOrder(ctx, userID, idempotencyKey); err != nil {
+	requestHash := orderRequestHash(ticketOrderOperationRush, struct {
+		CampaignID int64             `json:"campaign_id"`
+		Quantity   int               `json:"quantity"`
+		Purchase   PurchaseInfoInput `json:"purchase"`
+	}{campaignID, quantity, purchase})
+	if receipt, err := s.order.lookupIdempotentOrder(ctx, userID, idempotencyKey, requestHash); err != nil {
 		return nil, err
 	} else if receipt != nil {
 		return receipt, nil
@@ -241,7 +246,7 @@ func (s *RushSaleService) Execute(
 	ttl := int64(time.Until(campaign.EndsAt).Seconds()) + 3600
 	proposedOrderID := s.order.node.Generate().Int64()
 	reservation, reserveCode, err := s.reserveRushStock(
-		ctx, userID, campaign, quantity, ttl, idempotencyKey, proposedOrderID,
+		ctx, userID, campaign, quantity, ttl, idempotencyKey, proposedOrderID, requestHash,
 	)
 	if err != nil {
 		return nil, err
@@ -274,7 +279,7 @@ func (s *RushSaleService) Execute(
 		bucketPtr = intPtr(bucketNo)
 	}
 	receipt, err := s.order.createRushOrderAfterReservation(
-		ctx, reservation.OrderID, userID, idempotencyKey, requestID,
+		ctx, reservation.OrderID, userID, idempotencyKey, requestHash, requestID,
 		campaign, quantity, purchase, bucketPtr,
 	)
 	if err == nil {
@@ -325,8 +330,17 @@ func (s *RushSaleService) reserveRushStock(
 	ttl int64,
 	idempotencyKey string,
 	proposedOrderID int64,
+	requestHashes ...string,
 ) (stockReservationResult, int64, error) {
-	reservationKey := stockReservationKey(userID, idempotencyKey)
+	requestHash := orderRequestHash(ticketOrderOperationRush, struct {
+		CampaignID int64 `json:"campaign_id"`
+		Quantity   int   `json:"quantity"`
+	}{campaign.ID, quantity})
+	if len(requestHashes) > 0 && requestHashes[0] != "" {
+		requestHash = requestHashes[0]
+	}
+	reservationKey := stockReservationKey(proposedOrderID)
+	idempotencyMapKey := stockIdempotencyKey(userID, ticketOrderOperationRush, idempotencyKey)
 	nowMS := time.Now().UnixMilli()
 	run := func(rushKey, ticketKey string, bucketNo int) (stockReservationResult, int64, error) {
 		raw, err := reserveRushStockScript.Run(
@@ -336,6 +350,7 @@ func (s *RushSaleService) reserveRushStock(
 				rushKey,
 				ticketKey,
 				rushUserCountKey(campaign.ID, userID),
+				idempotencyMapKey,
 				reservationKey,
 				stockReservationPendingKey,
 			},
@@ -349,13 +364,15 @@ func (s *RushSaleService) reserveRushStock(
 			strconv.FormatInt(userID, 10),
 			bucketNo,
 			idempotencyKey,
+			requestHash,
 			nowMS,
 			stockReservationTTLMillis(),
+			stockReservationPrefix,
 		).Result()
 		if err != nil {
 			return stockReservationResult{}, 0, err
 		}
-		return decodeStockReservationResult(raw, reservationKey)
+		return decodeStockReservationResult(raw)
 	}
 	if !s.order.inventory.Enabled {
 		return run(rushStockKey(campaign.ID), ticketStockKey(campaign.TicketTierID), -1)
@@ -518,7 +535,7 @@ func (s *TicketOrderService) createRushOrderAfterReservation(
 	ctx context.Context,
 	orderID int64,
 	userID int64,
-	idempotencyKey, requestID string,
+	idempotencyKey, requestHash, requestID string,
 	campaign *models.RushSaleCampaign,
 	quantity int,
 	purchase PurchaseInfoInput,
@@ -561,6 +578,7 @@ func (s *TicketOrderService) createRushOrderAfterReservation(
 		PurchaseNoticeVersion: purchaseNoticeVersion,
 		TermsAcceptedAt:       &acceptedAt,
 		IdempotencyKey:        idempotencyKey,
+		RequestHash:           requestHash,
 		RequestID:             requestID,
 		FunnelVisitorKey:      funnelVisitorKey(purchase.VisitorID, "", "", userID),
 		ExpiresAt:             time.Now().Add(s.paymentTimeout),

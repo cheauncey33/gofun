@@ -200,6 +200,7 @@ func ticketingSchemaModels() []interface{} {
 		&models.TicketOrderItem{},
 		&models.TicketOrderAttendee{},
 		&models.TicketOrderOutbox{},
+		&models.TicketOrderConsumerInbox{},
 		&models.TicketStockRecoveryFence{},
 		&models.PaymentTransaction{},
 		&models.PaymentCallback{},

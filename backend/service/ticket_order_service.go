@@ -83,6 +83,8 @@ type TicketOrderReceipt struct {
 }
 
 type TicketOrderMessage struct {
+	EventID            int64             `json:"event_id"`
+	EventType          string            `json:"event_type"`
 	OrderID            int64             `json:"order_id"`
 	UserID             int64             `json:"user_id"`
 	TicketTierID       int64             `json:"ticket_tier_id"`
@@ -93,6 +95,8 @@ type TicketOrderMessage struct {
 	SeatIDs            []int64           `json:"seat_ids,omitempty"`
 	TraceContext       map[string]string `json:"trace_context,omitempty"`
 }
+
+const ticketOrderFinalizeEventType = "ticket.order.finalize"
 
 type TicketOrderService struct {
 	db *gorm.DB
@@ -447,12 +451,6 @@ func (s *TicketOrderService) CreateOrder(
 		return nil, ErrInvalidTicketCatalog
 	}
 
-	if receipt, err := s.lookupIdempotentOrder(ctx, userID, idempotencyKey); err != nil {
-		return nil, err
-	} else if receipt != nil {
-		return receipt, nil
-	}
-
 	tier, session, event, venue, err := s.loadPurchasableTier(ctx, input.TicketTierID)
 	if err != nil {
 		return nil, err
@@ -517,6 +515,12 @@ func (s *TicketOrderService) CreateOrder(
 	if !event.SaleMode.IsSeated() && tier.RemainingQuota-tier.WaitlistPending < input.Quantity {
 		return nil, ErrTicketQuotaInsufficient
 	}
+	requestHash := orderRequestHash(ticketOrderOperationNormal, input)
+	if receipt, err := s.lookupIdempotentOrder(ctx, userID, idempotencyKey, requestHash); err != nil {
+		return nil, err
+	} else if receipt != nil {
+		return receipt, nil
+	}
 
 	proposedOrderID := s.node.Generate().Int64()
 	var reservation stockReservationResult
@@ -524,7 +528,7 @@ func (s *TicketOrderService) CreateOrder(
 	if !event.SaleMode.IsSeated() {
 		var reserveCode int64
 		reservation, reserveCode, err = s.reserveTicketStock(
-			ctx, userID, tier, input.Quantity, idempotencyKey, proposedOrderID,
+			ctx, userID, tier, input.Quantity, idempotencyKey, proposedOrderID, requestHash,
 		)
 		if err != nil || reserveCode < 0 {
 			if reserveCode == -2 {
@@ -565,6 +569,7 @@ func (s *TicketOrderService) CreateOrder(
 		PurchaseNoticeVersion: purchaseNoticeVersion,
 		TermsAcceptedAt:       &acceptedAt,
 		IdempotencyKey:        idempotencyKey,
+		RequestHash:           requestHash,
 		RequestID:             strings.TrimSpace(requestID),
 		FunnelVisitorKey:      funnelVisitorKey(input.VisitorID, "", "", userID),
 		ExpiresAt:             time.Now().Add(s.paymentTimeout),
@@ -642,6 +647,9 @@ func (s *TicketOrderService) ProcessOrderTask(
 	ctx context.Context,
 	message TicketOrderMessage,
 ) error {
+	if message.EventID <= 0 || message.EventType != ticketOrderFinalizeEventType || message.OrderID <= 0 {
+		return fmt.Errorf("%w: 订单事件身份无效", ErrTicketOrderNonRetryable)
+	}
 	ctx, span := otel.Tracer("gofun-ticketing/order").Start(
 		ctx,
 		"ticket.order.finalize",
@@ -744,6 +752,23 @@ func (s *TicketOrderService) processOrderTaskTx(
 			_ = tx.Rollback()
 		}
 	}()
+
+	// Inbox 与状态迁移位于同一事务。提交前崩溃会回滚 inbox，消息可安全重试；
+	// 提交后重复投递命中唯一键，直接视为已消费。
+	inbox := models.TicketOrderConsumerInbox{
+		ConsumerName: "ticket-order-finalizer",
+		EventID:      message.EventID,
+		OrderID:      message.OrderID,
+	}
+	if err = tx.Create(&inbox).Error; err != nil {
+		if isDuplicateStorageKeyError(err) {
+			commitStarted := time.Now()
+			err = tx.Commit().Error
+			metrics.TicketOrderConsumerStageDuration.WithLabelValues("commit").Observe(time.Since(commitStarted).Seconds())
+			return err
+		}
+		return err
+	}
 
 	var order models.TicketOrder
 	stageStarted := time.Now()
@@ -862,7 +887,7 @@ func (s *TicketOrderService) processOrderTaskTx(
 					"CASE WHEN remaining_quota <= ? AND status = ? THEN ? ELSE status END",
 					message.Quantity,
 					models.TicketTierStatusOnSale,
-					models.TicketTierStatusSoldOut,
+					models.TicketTierStatusWaitlist,
 				),
 			})
 		if tierResult.Error != nil {
@@ -2370,14 +2395,23 @@ func (s *TicketOrderService) reserveTicketStock(
 	quantity int,
 	idempotencyKey string,
 	proposedOrderID int64,
+	requestHashes ...string,
 ) (stockReservationResult, int64, error) {
-	reservationKey := stockReservationKey(userID, idempotencyKey)
+	requestHash := orderRequestHash(ticketOrderOperationNormal, struct {
+		TicketTierID int64 `json:"ticket_tier_id"`
+		Quantity     int   `json:"quantity"`
+	}{tier.ID, quantity})
+	if len(requestHashes) > 0 && requestHashes[0] != "" {
+		requestHash = requestHashes[0]
+	}
+	reservationKey := stockReservationKey(proposedOrderID)
+	idempotencyMapKey := stockIdempotencyKey(userID, ticketOrderOperationNormal, idempotencyKey)
 	nowMS := time.Now().UnixMilli()
 	run := func(stockKey string, bucketNo int) (stockReservationResult, int64, error) {
 		raw, err := reserveNormalStockScript.Run(
 			ctx,
 			s.rdb,
-			[]string{stockKey, reservationKey, stockReservationPendingKey},
+			[]string{stockKey, idempotencyMapKey, reservationKey, stockReservationPendingKey},
 			quantity,
 			strconv.FormatInt(proposedOrderID, 10),
 			strconv.FormatInt(userID, 10),
@@ -2385,13 +2419,15 @@ func (s *TicketOrderService) reserveTicketStock(
 			stockReservationKindNormal,
 			bucketNo,
 			idempotencyKey,
+			requestHash,
 			nowMS,
 			stockReservationTTLMillis(),
+			stockReservationPrefix,
 		).Result()
 		if err != nil {
 			return stockReservationResult{}, 0, err
 		}
-		return decodeStockReservationResult(raw, reservationKey)
+		return decodeStockReservationResult(raw)
 	}
 	if !s.inventory.Enabled {
 		return run(ticketStockKey(tier.ID), -1)
@@ -2451,8 +2487,11 @@ func restoreTierQuota(tx *gorm.DB, tierID int64, quantity int) error {
 			"remaining_quota": gorm.Expr("remaining_quota + ?", quantity),
 			"sold_count":      gorm.Expr("GREATEST(sold_count - ?, 0)", quantity),
 			"status": gorm.Expr(
-				"CASE WHEN status = ? THEN ? ELSE status END",
-				models.TicketTierStatusSoldOut,
+				"CASE WHEN status IN ? THEN ? ELSE status END",
+				[]models.TicketTierStatus{
+					models.TicketTierStatusWaitlist,
+					models.TicketTierStatusSoldOut,
+				},
 				models.TicketTierStatusOnSale,
 			),
 			"version": gorm.Expr("version + 1"),
