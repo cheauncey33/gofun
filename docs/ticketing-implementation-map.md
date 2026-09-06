@@ -9,6 +9,12 @@
 3. **RabbitMQ 是至少一次投递**：重复消息由 MySQL `ticket_order_consumer_inbox` 去重。
 4. **订单确认成功的定义**：`ticket_order` 与 `ticket_order_outbox` 在同一个 MySQL 事务提交；Redis reservation 随后才从 `pending` 变为 `committed`。
 
+## 固定场馆厅图（V22）
+
+选座资源按 `venue → hall → seat_layout(version) → seat` 持久化。厅图只保存物理位置和 `zone_key`，发布后冻结；需要调整时创建新版本。`event_session` 引用一个已发布厅图，`session_seat` 再把物理座位映射到本场 `ticket_tier`，因此同一厅图可被多个活动复用，各场价格和库存互不影响。
+
+多座下单仍由 MySQL 在同一事务内批量执行 `available → held`。影响行数少于请求座位数时整笔事务回滚，不产生部分占座；支付后变为 `sold`，取消或超时后恢复为 `available`。
+
 阅读入口：
 
 - 普通下单：`backend/service/ticket_order_service.go` 的 `CreateOrder`

@@ -110,8 +110,9 @@ func (s *TicketCatalogService) SaveSeatLayout(
 		}
 		seen[key] = struct{}{}
 		quotaByTier[tierID]++
+		legacyTierID := tierID
 		seats = append(seats, models.Seat{
-			TicketTierID: tierID,
+			TicketTierID: &legacyTierID,
 			RowNo:        cell.RowNo,
 			ColNo:        cell.ColNo,
 			Label:        normalizeSeatLabel(cell.Label, cell.RowNo, cell.ColNo),
@@ -125,7 +126,7 @@ func (s *TicketCatalogService) SaveSeatLayout(
 		if findErr != nil && findErr != gorm.ErrRecordNotFound {
 			return findErr
 		}
-		layout.EventID = eventID
+		layout.EventID = &eventID
 		layout.Name = strings.TrimSpace(input.Name)
 		layout.RowCount = input.RowCount
 		layout.ColCount = input.ColCount
@@ -218,6 +219,16 @@ func (s *TicketCatalogService) ListSessionSeats(
 }
 
 func (s *TicketCatalogService) generateSessionSeats(tx *gorm.DB, event *models.Event) error {
+	usesReusableLayout := len(event.Sessions) > 0
+	for _, session := range event.Sessions {
+		if session.SeatLayoutID == nil {
+			usesReusableLayout = false
+			break
+		}
+	}
+	if usesReusableLayout {
+		return validateReusableSessionSeats(tx, event)
+	}
 	var layout models.SeatLayout
 	if err := tx.Preload("Seats").Where("event_id = ?", event.ID).First(&layout).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -230,7 +241,9 @@ func (s *TicketCatalogService) generateSessionSeats(tx *gorm.DB, event *models.E
 	}
 	seatsByTier := map[int64][]models.Seat{}
 	for _, seat := range layout.Seats {
-		seatsByTier[seat.TicketTierID] = append(seatsByTier[seat.TicketTierID], seat)
+		if seat.TicketTierID != nil {
+			seatsByTier[*seat.TicketTierID] = append(seatsByTier[*seat.TicketTierID], seat)
+		}
 	}
 	generated := 0
 	for _, session := range event.Sessions {
@@ -301,6 +314,49 @@ func (s *TicketCatalogService) generateSessionSeats(tx *gorm.DB, event *models.E
 	}
 	if generated == 0 {
 		return fmt.Errorf("%w: 选座活动发布前必须配置厅图", ErrInvalidTicketCatalog)
+	}
+	return nil
+}
+
+func validateReusableSessionSeats(tx *gorm.DB, event *models.Event) error {
+	for _, session := range event.Sessions {
+		var layout models.SeatLayout
+		if err := tx.Preload("Seats").First(&layout, *session.SeatLayoutID).Error; err != nil {
+			return normalizeTicketNotFound(err)
+		}
+		if layout.Status != models.SeatLayoutPublished || len(layout.Seats) == 0 {
+			return fmt.Errorf("%w: 场次引用的厅图无效", ErrInvalidTicketCatalog)
+		}
+		var rows []models.SessionSeat
+		if err := tx.Where("session_id = ?", session.ID).Find(&rows).Error; err != nil {
+			return err
+		}
+		if len(rows) != len(layout.Seats) {
+			return fmt.Errorf("%w: 请先为场次配置全部座位的票档", ErrInvalidTicketCatalog)
+		}
+		validTiers := make(map[int64]struct{}, len(session.TicketTiers))
+		for _, tier := range session.TicketTiers {
+			validTiers[tier.ID] = struct{}{}
+		}
+		counts := make(map[int64]int)
+		for _, row := range rows {
+			if _, ok := validTiers[row.TicketTierID]; !ok {
+				return fmt.Errorf("%w: 场次座位引用了其他场次的票档", ErrInvalidTicketCatalog)
+			}
+			counts[row.TicketTierID]++
+		}
+		for _, tier := range session.TicketTiers {
+			count := counts[tier.ID]
+			status := models.TicketTierStatusOnSale
+			if count == 0 {
+				status = models.TicketTierStatusDisabled
+			}
+			if err := tx.Model(&models.TicketTier{}).Where("id = ?", tier.ID).Updates(map[string]interface{}{
+				"total_quota": count, "remaining_quota": count, "sold_count": 0, "status": status,
+			}).Error; err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

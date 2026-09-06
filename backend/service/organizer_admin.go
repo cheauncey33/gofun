@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"gofun/metrics"
 	"gofun/models"
@@ -36,11 +37,17 @@ type AdminEventReviewRow struct {
 }
 
 type AdminPlatformOverview struct {
-	PendingOrganizers int64                    `json:"pending_organizers"`
-	PendingEvents     int64                    `json:"pending_events"`
-	ActiveOrganizers  int64                    `json:"active_organizers"`
-	PublishedEvents   int64                    `json:"published_events"`
-	Runtime           metrics.PlatformSnapshot `json:"runtime"`
+	PendingOrganizers      int64                    `json:"pending_organizers"`
+	PendingEvents          int64                    `json:"pending_events"`
+	ActiveOrganizers       int64                    `json:"active_organizers"`
+	PublishedEvents        int64                    `json:"published_events"`
+	PeriodDays             int                      `json:"period_days"`
+	PeriodFrom             time.Time                `json:"period_from"`
+	PaidOrders             int64                    `json:"paid_orders"`
+	PaymentFailedOrders    int64                    `json:"payment_failed_orders"`
+	TimeoutCancelledOrders int64                    `json:"timeout_cancelled_orders"`
+	PaymentSuccessRate     float64                  `json:"payment_success_rate"`
+	Runtime                metrics.PlatformSnapshot `json:"runtime"`
 }
 
 func (s *TicketCatalogService) ApplyOrganizer(
@@ -216,7 +223,13 @@ func (s *TicketCatalogService) ListPendingEventReviews(
 }
 
 func (s *TicketCatalogService) GetAdminPlatformOverview(ctx context.Context) (*AdminPlatformOverview, error) {
-	out := &AdminPlatformOverview{Runtime: metrics.Snapshot()}
+	const periodDays = 7
+	periodFrom, _, periodTo := rollingCalendarPeriod(time.Now(), periodDays)
+	out := &AdminPlatformOverview{
+		Runtime:    metrics.Snapshot(),
+		PeriodDays: periodDays,
+		PeriodFrom: periodFrom,
+	}
 	if err := s.db.WithContext(ctx).Model(&models.Organizer{}).
 		Where("audit_status = ?", models.AuditStatusPending).
 		Count(&out.PendingOrganizers).Error; err != nil {
@@ -237,6 +250,18 @@ func (s *TicketCatalogService) GetAdminPlatformOverview(ctx context.Context) (*A
 		Count(&out.PublishedEvents).Error; err != nil {
 		return nil, err
 	}
+	sales, err := s.loadOrganizerPeriodSales(ctx, 0, 0, 0, periodFrom, periodTo)
+	if err != nil {
+		return nil, err
+	}
+	leaks, err := s.loadOrganizerPeriodLeaks(ctx, 0, 0, 0, periodFrom, periodTo)
+	if err != nil {
+		return nil, err
+	}
+	out.PaidOrders = sales.PaidOrders
+	out.PaymentFailedOrders = leaks.PaymentFailedOrders
+	out.TimeoutCancelledOrders = leaks.TimeoutCancelledOrders
+	out.PaymentSuccessRate = overviewPaymentSuccessRate(sales.PaidOrders, leaks.TimeoutCancelledOrders)
 	return out, nil
 }
 

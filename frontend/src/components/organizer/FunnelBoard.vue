@@ -41,6 +41,11 @@ const bands = computed(() => {
   })
 })
 
+const paidConversion = computed(() => {
+  const paid = funnel.value?.steps?.find(step => step.key === 'paid')
+  return paid?.from_top ?? 0
+})
+
 function formatPct(value) {
   const n = Number(value || 0)
   if (!Number.isFinite(n)) return '—'
@@ -129,6 +134,29 @@ watch(
         <p v-if="funnel.leak" class="funnel-leak">
           最大流失在「{{ funnel.leak.label }}」，相对上一步掉了 {{ formatPct(funnel.leak.drop) }}。
         </p>
+
+        <div class="funnel-kpis" aria-label="票务转化关键指标">
+          <article>
+            <span>浏览至支付</span>
+            <strong>{{ formatPct(paidConversion) }}</strong>
+            <small>同一统计窗口</small>
+          </article>
+          <article>
+            <span>待支付</span>
+            <strong>{{ funnel.pending_open }}</strong>
+            <small>窗口内未完成订单</small>
+          </article>
+          <article>
+            <span>退款率</span>
+            <strong>{{ formatPct(funnel.refund_rate) }}</strong>
+            <small>{{ funnel.refunded }} 笔已退款</small>
+          </article>
+          <article>
+            <span>已核销 / 有效已售</span>
+            <strong>{{ funnel.used_tickets || 0 }} / {{ funnel.valid_sold_tickets || 0 }}</strong>
+            <small>{{ formatPct(funnel.checkin_rate) }} · 不含退票作废</small>
+          </article>
+        </div>
 
         <div class="funnel-chart" role="img" :aria-label="funnel.insight">
           <div class="funnel-stack">
@@ -226,7 +254,32 @@ watch(
   font-size: 12px;
 }
 .funnel-chart {
+  width: 100%;
   max-width: 520px;
+  margin-inline: auto;
+}
+.funnel-kpis {
+  margin: 0 0 20px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.funnel-kpis article {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, .32);
+}
+.funnel-kpis span,
+.funnel-kpis small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.funnel-kpis strong {
+  color: var(--ink);
+  font: 700 20px var(--font-display);
 }
 .funnel-stack {
   display: grid;
@@ -296,6 +349,7 @@ watch(
 }
 @media (max-width: 640px) {
   .funnel-board > header { display: grid; }
+  .funnel-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .funnel-channels { grid-template-columns: 1fr; }
 }
 </style>

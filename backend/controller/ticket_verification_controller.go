@@ -1,9 +1,9 @@
 package controller
 
 import (
+	"errors"
 	"gofun/pkg/response"
 	"gofun/service"
-	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -58,10 +58,15 @@ func (ctrl *TicketVerificationController) ListRecords(c *gin.Context) {
 		return
 	}
 	page, pageSize := parseTicketPage(c)
-	records, total, err := ctrl.service.ListRecords(
+	sessionID, ok := parseOptionalQueryID(c, "session_id")
+	if !ok {
+		return
+	}
+	view, err := ctrl.service.ListRecords(
 		c.Request.Context(),
 		organizerID,
 		userID,
+		sessionID,
 		page,
 		pageSize,
 	)
@@ -69,7 +74,7 @@ func (ctrl *TicketVerificationController) ListRecords(c *gin.Context) {
 		ctrl.writeError(c, err)
 		return
 	}
-	response.SuccessWithPage(c, records, total, page, pageSize)
+	response.Success(c, view)
 }
 
 func (ctrl *TicketVerificationController) writeError(c *gin.Context, err error) {

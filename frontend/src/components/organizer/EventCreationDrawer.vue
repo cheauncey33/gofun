@@ -22,6 +22,9 @@ const layoutRows = ref(8)
 const layoutCols = ref(12)
 const paintTierId = ref('')
 const layoutCells = ref({})
+const hallsByVenue = ref({})
+const layoutsByHall = ref({})
+const zoneTiers = ref({})
 
 const eventForm = reactive({
   title: '',
@@ -89,6 +92,8 @@ function emptySession() {
   return {
     id: '',
     venue_id: props.venues[0]?.id || '',
+    hall_id: '',
+    seat_layout_id: '',
     starts_at: null,
     ends_at: null,
     sale_starts_at: new Date(),
@@ -101,6 +106,8 @@ function mapDraftSession(session) {
   return {
     id: session.id,
     venue_id: session.venue_id,
+    hall_id: session.hall_id || '',
+    seat_layout_id: session.seat_layout_id || '',
     starts_at: session.starts_at ? new Date(session.starts_at) : null,
     ends_at: session.ends_at ? new Date(session.ends_at) : null,
     sale_starts_at: session.sale_starts_at ? new Date(session.sale_starts_at) : null,
@@ -201,7 +208,10 @@ function resetFromDraft() {
     return
   }
   step.value = eventForm.sale_mode === 'seated' ? 3 : 3
-  if (eventForm.sale_mode === 'seated') loadLayout()
+  if (eventForm.sale_mode === 'seated') {
+    if (sessions.value[0]?.seat_layout_id) loadHalls(sessions.value[0])
+    else loadLayout()
+  }
 }
 
 function close() {
@@ -232,6 +242,7 @@ function validEvent() {
 function validSession(session) {
   if (!session.venue_id || !session.starts_at || !session.ends_at ||
       !session.sale_starts_at || !session.sale_ends_at) return false
+  if (isSeated.value && (!session.hall_id || !session.seat_layout_id)) return false
   const start = new Date(session.starts_at)
   return start < new Date(session.ends_at) &&
     new Date(session.sale_starts_at) < new Date(session.sale_ends_at) &&
@@ -247,14 +258,49 @@ function validTiers() {
 }
 
 function sessionPayload(session) {
-  return {
+  const payload = {
     venue_id: String(session.venue_id),
     starts_at: new Date(session.starts_at).toISOString(),
     ends_at: new Date(session.ends_at).toISOString(),
     sale_starts_at: new Date(session.sale_starts_at).toISOString(),
     sale_ends_at: new Date(session.sale_ends_at).toISOString(),
   }
+  if (isSeated.value) {
+    payload.hall_id = String(session.hall_id)
+    payload.seat_layout_id = String(session.seat_layout_id)
+  }
+  return payload
 }
+
+async function loadHalls(session) {
+  if (!session.venue_id) return
+  const res = await api.organizerGetHalls(props.organizerId, session.venue_id)
+  hallsByVenue.value = { ...hallsByVenue.value, [String(session.venue_id)]: res.data || [] }
+  if (!session.hall_id) session.hall_id = res.data?.[0]?.id || ''
+  await loadHallLayouts(session)
+}
+
+async function loadHallLayouts(session) {
+  if (!session.hall_id) return
+  const res = await api.organizerGetHallLayouts(props.organizerId, session.hall_id)
+  const published = (res.data || []).filter(item => item.status === 'published')
+  layoutsByHall.value = { ...layoutsByHall.value, [String(session.hall_id)]: published }
+  if (!session.seat_layout_id) session.seat_layout_id = published[0]?.id || ''
+  initializeZoneTiers(session)
+}
+
+function initializeZoneTiers(session) {
+  const layout = (layoutsByHall.value[String(session.hall_id)] || []).find(item => String(item.id) === String(session.seat_layout_id))
+  for (const zone of [...new Set((layout?.seats || []).map(seat => seat.zone_key || 'general'))]) {
+    if (!zoneTiers.value[zone]) zoneTiers.value[zone] = String(session.tiers?.[0]?.id || '')
+  }
+}
+
+const activeLayout = computed(() => {
+  const session = sessions.value[0]
+  return (layoutsByHall.value[String(session?.hall_id)] || []).find(item => String(item.id) === String(session?.seat_layout_id))
+})
+const activeZones = computed(() => [...new Set((activeLayout.value?.seats || []).map(seat => seat.zone_key || 'general'))])
 
 async function persistSessions() {
   if (!sessions.value.length) throw new Error('至少需要一个场次')
@@ -297,6 +343,7 @@ async function persistTiers() {
     }
   }
   paintTierId.value = String(createdTiers.value[0]?.id || '')
+  if (isSeated.value) initializeZoneTiers(sessions.value[0])
 }
 
 async function next() {
@@ -325,21 +372,9 @@ async function next() {
       return
     }
     if (isSeated.value && step.value === 3) {
-      if (layoutSeatCount.value < 1) throw new Error('请至少涂一个可售座位')
-      await api.organizerSaveSeatLayout(props.organizerId, createdEventId.value, {
-        name: '主厅',
-        row_count: Number(layoutRows.value),
-        col_count: Number(layoutCols.value),
-        seats: Object.entries(layoutCells.value).map(([key, tierId]) => {
-          const [row, col] = key.split(':').map(Number)
-          return {
-            row_no: row,
-            col_no: col,
-            ticket_tier_id: String(tierId),
-            label: `${rowLabel(row)}${col}`,
-          }
-        }),
-      })
+      const session = sessions.value[0]
+      if (!activeLayout.value || activeZones.value.some(zone => !zoneTiers.value[zone])) throw new Error('请为厅图每个分区配置本场票档')
+      await api.organizerConfigureSessionSeatMap(props.organizerId, session.id, { zone_tiers: zoneTiers.value })
       step.value = 4
       return
     }
@@ -413,10 +448,22 @@ function sessionTime(session) {
           <button v-if="sessions.length > 1 && !session.id" type="button" @click="removeSession(index)">移除</button>
         </header>
         <label>场馆 <b>*</b>
-          <el-select v-model="session.venue_id" placeholder="请选择已创建的场馆">
+          <el-select v-model="session.venue_id" placeholder="请选择已创建的场馆" @change="() => { session.hall_id = ''; session.seat_layout_id = ''; loadHalls(session) }">
             <el-option v-for="venue in venues" :key="venue.id" :label="`${venue.name} · ${venue.city}`" :value="venue.id" />
           </el-select>
         </label>
+        <template v-if="isSeated">
+          <label>演出厅 <b>*</b>
+            <el-select v-model="session.hall_id" placeholder="请先在厅图资产中创建" @visible-change="open => open && loadHalls(session)" @change="() => { session.seat_layout_id = ''; loadHallLayouts(session) }">
+              <el-option v-for="hall in hallsByVenue[String(session.venue_id)] || []" :key="hall.id" :label="hall.name" :value="hall.id" />
+            </el-select>
+          </label>
+          <label>厅图版本 <b>*</b>
+            <el-select v-model="session.seat_layout_id" placeholder="请选择已发布厅图" @change="initializeZoneTiers(session)">
+              <el-option v-for="layout in layoutsByHall[String(session.hall_id)] || []" :key="layout.id" :label="`${layout.name} · V${layout.version}`" :value="layout.id" />
+            </el-select>
+          </label>
+        </template>
         <label>开始时间 <b>*</b><el-date-picker v-model="session.starts_at" type="datetime" placeholder="选择开场时间" /></label>
         <label>结束时间 <b>*</b><el-date-picker v-model="session.ends_at" type="datetime" placeholder="选择结束时间" /></label>
         <div class="paired-fields">
@@ -448,13 +495,12 @@ function sessionTime(session) {
     </section>
 
     <section v-else-if="isSeated && step === 3" class="drawer-section">
-      <SeatLayoutEditor
-        v-model:rows="layoutRows"
-        v-model:cols="layoutCols"
-        v-model:cells="layoutCells"
-        v-model:paint-tier-id="paintTierId"
-        :tiers="createdTiers"
-      />
+      <p class="drawer-hint">当前使用 {{ activeLayout?.name }} V{{ activeLayout?.version }}。物理厅图保持不变，只需设置本场各分区的价格档。</p>
+      <label v-for="zone in activeZones" :key="zone">{{ zone }}
+        <el-select v-model="zoneTiers[zone]">
+          <el-option v-for="tier in createdTiers" :key="tier.id" :label="tier.name" :value="String(tier.id)" />
+        </el-select>
+      </label>
     </section>
 
     <section v-else class="publish-check">

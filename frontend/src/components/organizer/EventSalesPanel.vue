@@ -22,6 +22,7 @@ const paintTierId = ref('')
 const isDraft = computed(() => props.event?.status === 'draft')
 const isPublished = computed(() => props.event?.status === 'published')
 const isSeated = computed(() => props.event?.sale_mode === 'seated')
+const isReusableLayout = computed(() => !!sessions.value[0]?.seat_layout_id)
 const isExhibition = computed(() => props.event?.category === '展览')
 const canAddSession = computed(() => isDraft.value && !isSeated.value)
 const layoutTiers = computed(() =>
@@ -68,6 +69,8 @@ function hydrate() {
     ? list.map(session => ({
         id: session.id,
         venue_id: session.venue_id,
+        hall_id: session.hall_id || '',
+        seat_layout_id: session.seat_layout_id || '',
         starts_at: session.starts_at ? new Date(session.starts_at) : null,
         ends_at: session.ends_at ? new Date(session.ends_at) : null,
         sale_starts_at: session.sale_starts_at ? new Date(session.sale_starts_at) : null,
@@ -95,13 +98,18 @@ function sessionLabel(session) {
 }
 
 function sessionPayload(session) {
-  return {
+  const payload = {
     venue_id: String(session.venue_id),
     starts_at: new Date(session.starts_at).toISOString(),
     ends_at: new Date(session.ends_at).toISOString(),
     sale_starts_at: new Date(session.sale_starts_at).toISOString(),
     sale_ends_at: new Date(session.sale_ends_at).toISOString(),
   }
+  if (isSeated.value && session.hall_id && session.seat_layout_id) {
+    payload.hall_id = String(session.hall_id)
+    payload.seat_layout_id = String(session.seat_layout_id)
+  }
+  return payload
 }
 
 function validSession(session) {
@@ -316,7 +324,9 @@ function addTier(session) {
 
     <section v-if="isSeated" class="layout-card">
       <header><strong>厅图</strong></header>
+      <p v-if="isReusableLayout" class="lead">本场使用已发布的固定场馆厅图。已发布版本不可在活动中修改，可在“厅图资产”中创建新版本供未来场次使用。</p>
       <SeatLayoutEditor
+        v-else
         v-model:rows="layoutRows"
         v-model:cols="layoutCols"
         v-model:cells="layoutCells"
@@ -324,7 +334,7 @@ function addTier(session) {
         :tiers="layoutTiers"
         :disabled="!isDraft"
       />
-      <el-button v-if="isDraft" type="primary" size="small" :loading="saving" @click="saveLayout">保存厅图</el-button>
+      <el-button v-if="isDraft && !isReusableLayout" type="primary" size="small" :loading="saving" @click="saveLayout">保存厅图</el-button>
     </section>
   </div>
 </template>

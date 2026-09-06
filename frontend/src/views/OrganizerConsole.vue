@@ -16,6 +16,7 @@ import EventEditDialog from '../components/organizer/EventEditDialog.vue'
 import TicketVerificationPanel from '../components/organizer/TicketVerificationPanel.vue'
 import RushSaleCreateDialog from '../components/organizer/RushSaleCreateDialog.vue'
 import FunnelBoard from '../components/organizer/FunnelBoard.vue'
+import HallAssetDialog from '../components/organizer/HallAssetDialog.vue'
 
 const router = useRouter()
 const loading = ref(true)
@@ -25,6 +26,8 @@ const applications = ref([])
 const organizerId = ref('')
 const overview = ref({
   period_days: 7,
+  event_id: '',
+  session_id: '',
   on_sale_events: 0,
   paid_orders: 0,
   paid_tickets: 0,
@@ -35,6 +38,9 @@ const overview = ref({
   previous_paid_orders: 0,
   previous_paid_tickets: 0,
   previous_net_revenue_cents: 0,
+  payment_failed_orders: 0,
+  timeout_cancelled_orders: 0,
+  payment_success_rate: 0,
   pending_payment_orders: 0,
   refunding_orders: 0,
   upcoming_sessions: 0,
@@ -42,6 +48,9 @@ const overview = ref({
   inventory_occupied: 0,
   inventory_occupancy_rate: 0,
 })
+const overviewEventId = ref('')
+const overviewSessionId = ref('')
+const overviewLoading = ref(false)
 const events = ref([])
 const venues = ref([])
 const orders = ref([])
@@ -57,6 +66,7 @@ const selectedDraft = ref(null)
 const editVisible = ref(false)
 const editingEvent = ref(null)
 const venueDialogVisible = ref(false)
+const hallAssetVisible = ref(false)
 const venueSubmitting = ref(false)
 const isMobile = ref(window.matchMedia('(max-width: 600px)').matches)
 const venueForm = reactive({
@@ -89,6 +99,20 @@ const currentMembership = computed(() =>
   memberships.value.find(item => String(item.organizer.id) === String(organizerId.value))
 )
 const currentOrganizer = computed(() => currentMembership.value?.organizer)
+const overviewEventOptions = computed(() =>
+  (events.value || []).map(item => ({
+    id: String(item.id),
+    title: item.title,
+  })),
+)
+const overviewSessionOptions = computed(() => {
+  const event = (events.value || []).find(item => String(item.id) === String(overviewEventId.value))
+  return (event?.sessions || []).map(item => ({
+    id: String(item.id),
+    label: sessionOptionLabel(item),
+  }))
+})
+const overviewScoped = computed(() => Boolean(overviewEventId.value || overviewSessionId.value))
 
 function trendLabel(current, previous) {
   const now = Number(current || 0)
@@ -135,7 +159,21 @@ watch(organizerId, (value, oldValue) => {
     orderPage.value = 1
     orderKeyword.value = ''
     orderStatusFilter.value = 'all'
+    overviewEventId.value = ''
+    overviewSessionId.value = ''
     loadWorkspace()
+  }
+})
+
+watch([overviewEventId, overviewSessionId], () => {
+  if (!organizerId.value || workspaceLoading.value) return
+  loadOverview()
+})
+
+watch(events, () => {
+  if (overviewEventId.value && !overviewEventOptions.value.some(item => item.id === String(overviewEventId.value))) {
+    overviewEventId.value = ''
+    overviewSessionId.value = ''
   }
 })
 
@@ -194,20 +232,43 @@ async function submitOrganizerApply() {
   }
 }
 
+function overviewQuery() {
+  const params = {}
+  if (overviewEventId.value) params.event_id = overviewEventId.value
+  if (overviewSessionId.value) params.session_id = overviewSessionId.value
+  return params
+}
+
+async function loadOverview() {
+  if (!organizerId.value) return
+  overviewLoading.value = true
+  try {
+    const overviewRes = await api.organizerGetOverview(organizerId.value, overviewQuery())
+    overview.value = overviewRes.data
+  } catch (error) {
+    ElMessage.error(error.response?.data?.msg || '经营概览加载失败')
+  } finally {
+    overviewLoading.value = false
+  }
+}
+
+function onOverviewEventChange() {
+  overviewSessionId.value = ''
+}
+
 async function loadWorkspace() {
   if (!organizerId.value) return
   workspaceLoading.value = true
   try {
-    const [overviewRes, venueRes, eventRes, orderRes, rushRes] = await Promise.all([
-      api.organizerGetOverview(organizerId.value),
+    const [venueRes, eventRes, orderRes, rushRes] = await Promise.all([
       api.organizerGetVenues(organizerId.value),
       api.organizerGetEvents(organizerId.value, { page: 1, page_size: 50 }),
       api.organizerGetOrders(organizerId.value, organizerOrderQuery()),
       api.getRushSales().catch(() => ({ data: [] })),
     ])
-    overview.value = overviewRes.data
     venues.value = venueRes.data || []
     events.value = eventRes.data?.list || []
+    await loadOverview()
     if (editingEvent.value?.id) {
       editingEvent.value = events.value.find(item => String(item.id) === String(editingEvent.value.id)) || editingEvent.value
     }
@@ -390,6 +451,17 @@ function formatDate(value) {
     minute: '2-digit',
   }).format(new Date(value))
 }
+
+function sessionOptionLabel(session) {
+  const place = session?.venue?.name || '场馆待定'
+  return `${formatDate(session?.starts_at)} · ${place}`
+}
+
+function formatPct(value) {
+  const n = Number(value || 0)
+  if (!Number.isFinite(n)) return '—'
+  return `${n.toFixed(n % 1 ? 1 : 0)}%`
+}
 </script>
 
 <template>
@@ -462,6 +534,7 @@ function formatDate(value) {
           </div>
           <div class="heading-actions">
             <el-button @click="venueDialogVisible = true">新增场馆</el-button>
+            <el-button @click="hallAssetVisible = true">厅图资产</el-button>
             <el-button @click="rushVisible = true">配置开售</el-button>
             <el-button type="primary" :icon="Plus" @click="openCreate">创建活动</el-button>
           </div>
@@ -471,10 +544,40 @@ function formatDate(value) {
           <header class="overview-heading">
             <div>
               <h2 id="business-overview-title">近 7 天经营结果</h2>
-              <p>按支付和退款实际发生时间统计，与前 7 天对比</p>
+              <p>按支付和退款实际发生时间统计，与前 7 天对比。可按活动或场次下钻。</p>
+            </div>
+            <div class="overview-filters">
+              <el-select
+                v-model="overviewEventId"
+                clearable
+                placeholder="全部活动"
+                aria-label="筛选活动"
+                @change="onOverviewEventChange"
+              >
+                <el-option
+                  v-for="item in overviewEventOptions"
+                  :key="item.id"
+                  :label="item.title"
+                  :value="item.id"
+                />
+              </el-select>
+              <el-select
+                v-model="overviewSessionId"
+                clearable
+                placeholder="全部场次"
+                aria-label="筛选场次"
+                :disabled="!overviewEventId"
+              >
+                <el-option
+                  v-for="item in overviewSessionOptions"
+                  :key="item.id"
+                  :label="item.label"
+                  :value="item.id"
+                />
+              </el-select>
             </div>
           </header>
-          <div class="metric-band business-metrics">
+          <div v-loading="overviewLoading" class="metric-band business-metrics">
             <div>
               <span>净收款</span>
               <strong>{{ formatMoney(overview.net_revenue_cents) }}</strong>
@@ -496,13 +599,30 @@ function formatDate(value) {
               <small>{{ overview.refunded_orders }} 笔 · 毛收款 {{ formatMoney(overview.gross_revenue_cents) }}</small>
             </div>
           </div>
+          <div v-loading="overviewLoading" class="metric-band leak-metrics">
+            <div :class="{ attention: overview.payment_failed_orders > 0 }">
+              <span>支付失败</span>
+              <strong>{{ overview.payment_failed_orders }}</strong><em>笔</em>
+              <small>窗口内支付回调失败的订单，同一单只计一次</small>
+            </div>
+            <div :class="{ attention: overview.timeout_cancelled_orders > 0 }">
+              <span>超时关单</span>
+              <strong>{{ overview.timeout_cancelled_orders }}</strong><em>笔</em>
+              <small>支付窗口内未付款，系统自动取消</small>
+            </div>
+            <div>
+              <span>支付成功率</span>
+              <strong>{{ formatPct(overview.payment_success_rate) }}</strong>
+              <small>成交 / (成交 + 超时关单)，不含仍待支付</small>
+            </div>
+          </div>
         </section>
 
         <section class="overview-block" aria-labelledby="operation-overview-title">
           <header class="overview-heading">
             <div>
               <h2 id="operation-overview-title">当前运营状态</h2>
-              <p>需要立即处理的订单、场次与在售库存</p>
+              <p>{{ overviewScoped ? '实时快照，已按所选活动或场次收窄' : '实时快照，不受上方近 7 天统计周期影响' }}</p>
             </div>
           </header>
           <div class="operation-grid">
@@ -669,6 +789,7 @@ function formatDate(value) {
       :draft-event="selectedDraft"
       @completed="loadWorkspace"
     />
+    <HallAssetDialog v-model="hallAssetVisible" :organizer-id="organizerId" :venues="venues" />
     <EventEditDialog
       v-model="editVisible"
       :organizer-id="organizerId"
@@ -731,12 +852,16 @@ function formatDate(value) {
 .console-heading p, .console-section header p { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
 .heading-actions { display: flex; gap: 10px; }
 .overview-block { margin-top: 28px; }
-.overview-heading { margin-bottom: 12px; }
+.overview-heading { margin-bottom: 12px; display: flex; justify-content: space-between; align-items: end; gap: 16px; }
 .overview-heading h2 { margin: 0; font: 720 22px var(--font-display); }
 .overview-heading p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+.overview-filters { display: flex; gap: 10px; }
+.overview-filters :deep(.el-select) { width: 180px; }
 .metric-band { border: 1px solid var(--line-strong); border-radius: var(--radius-lg); overflow: hidden; display: grid; grid-template-columns: repeat(4, 1fr); }
+.metric-band.leak-metrics { margin-top: 10px; grid-template-columns: repeat(3, 1fr); }
 .metric-band div { min-height: 100px; padding: 22px 28px; border-right: 1px solid var(--line); }
 .metric-band div:last-child { border: 0; }
+.metric-band div.attention { background: rgba(181,52,41,.045); }
 .metric-band span { display: block; margin-bottom: 11px; color: var(--muted); font-size: 12px; }
 .metric-band strong { font: 680 29px var(--font-body); }
 .metric-band em { margin-left: 6px; color: var(--muted); font-style: normal; font-size: 12px; }
@@ -768,9 +893,13 @@ function formatDate(value) {
 @media (max-width: 900px) {
   .console-sidebar { display: none; }
   .console-main { margin-left: 0; padding: 24px 18px 60px; }
+  .overview-heading { align-items: flex-start; flex-direction: column; }
   .metric-band { grid-template-columns: repeat(2, 1fr); }
-  .metric-band div:nth-child(2) { border-right: 0; }
-  .metric-band div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .metric-band.leak-metrics { grid-template-columns: 1fr; }
+  .metric-band.business-metrics div:nth-child(2) { border-right: 0; }
+  .metric-band.business-metrics div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .metric-band.leak-metrics div { border-right: 0; border-bottom: 1px solid var(--line); }
+  .metric-band.leak-metrics div:last-child { border-bottom: 0; }
   .operation-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 600px) {
@@ -779,6 +908,8 @@ function formatDate(value) {
   .organizer-switcher :deep(.el-select) { width: 150px; }
   .console-heading { align-items: flex-start; gap: 18px; }
   .heading-actions { flex-direction: column; }
+  .overview-filters { width: 100%; flex-wrap: wrap; }
+  .overview-filters :deep(.el-select) { width: min(180px, 100%); }
   .metric-band { grid-template-columns: 1fr; }
   .metric-band div { border-right: 0; border-bottom: 1px solid var(--line); }
   .operation-grid { grid-template-columns: 1fr; }

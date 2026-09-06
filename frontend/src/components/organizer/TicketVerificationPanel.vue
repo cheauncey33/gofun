@@ -19,15 +19,17 @@ const videoRef = ref(null)
 let mediaStream = null
 let scanTimer = null
 
-const todayStats = computed(() => {
-  const start = new Date()
-  start.setHours(0, 0, 0, 0)
-  const today = records.value.filter(item => new Date(item.verified_at) >= start)
-  return {
-    success: today.filter(item => item.result === 'success').length,
-    failed: today.filter(item => item.result !== 'success').length,
-  }
+const checkin = ref({
+  used_tickets: 0,
+  valid_sold_tickets: 0,
+  checkin_rate: 0,
 })
+
+function formatPct(value) {
+  const n = Number(value || 0)
+  if (!Number.isFinite(n)) return '—'
+  return `${n.toFixed(n % 1 ? 1 : 0)}%`
+}
 
 const resultMeta = computed(() => {
   const value = result.value?.result
@@ -43,6 +45,10 @@ watch(() => props.organizerId, async value => {
   credential.value = ''
   if (value) await loadRecords()
 }, { immediate: true })
+
+watch(sessionFilter, () => {
+  if (props.organizerId) loadRecords()
+})
 
 onBeforeUnmount(stopScanner)
 
@@ -73,11 +79,16 @@ async function loadRecords() {
   if (!props.organizerId) return
   recordsLoading.value = true
   try {
-    const response = await api.organizerGetVerifications(props.organizerId, {
-      page: 1,
-      page_size: 30,
-    })
+    const params = { page: 1, page_size: 30 }
+    const sessionId = String(sessionFilter.value || '').trim()
+    if (/^\d+$/.test(sessionId)) params.session_id = sessionId
+    const response = await api.organizerGetVerifications(props.organizerId, params)
     records.value = response.data?.list || []
+    checkin.value = {
+      used_tickets: Number(response.data?.used_tickets || 0),
+      valid_sold_tickets: Number(response.data?.valid_sold_tickets || 0),
+      checkin_rate: Number(response.data?.checkin_rate || 0),
+    }
   } catch (error) {
     ElMessage.error(error.response?.data?.msg || '核销记录加载失败')
   } finally {
@@ -210,7 +221,7 @@ function resultType(value) {
       <header>
         <div>
           <h3>最近核销记录</h3>
-          <p>今日成功 {{ todayStats.success }} · 失败 {{ todayStats.failed }}</p>
+          <p>已核销 {{ checkin.used_tickets }} / {{ checkin.valid_sold_tickets }} · {{ formatPct(checkin.checkin_rate) }}</p>
         </div>
       </header>
       <el-table :data="records" empty-text="还没有核销记录">

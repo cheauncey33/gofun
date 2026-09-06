@@ -108,6 +108,8 @@ type CreateEventInput struct {
 
 type CreateEventSessionInput struct {
 	VenueID      int64     `json:"venue_id,string" binding:"required"`
+	HallID       int64     `json:"hall_id,string"`
+	SeatLayoutID int64     `json:"seat_layout_id,string"`
 	StartsAt     time.Time `json:"starts_at" binding:"required"`
 	EndsAt       time.Time `json:"ends_at" binding:"required"`
 	SaleStartsAt time.Time `json:"sale_starts_at" binding:"required"`
@@ -132,6 +134,8 @@ type MyOrganizerView struct {
 type OrganizerOverview struct {
 	PeriodDays              int       `json:"period_days"`
 	PeriodFrom              time.Time `json:"period_from"`
+	EventID                 int64     `json:"event_id,string,omitempty"`
+	SessionID               int64     `json:"session_id,string,omitempty"`
 	OnSaleEvents            int64     `json:"on_sale_events"`
 	PaidOrders              int64     `json:"paid_orders"`
 	PaidTickets             int64     `json:"paid_tickets"`
@@ -142,6 +146,9 @@ type OrganizerOverview struct {
 	PreviousPaidOrders      int64     `json:"previous_paid_orders"`
 	PreviousPaidTickets     int64     `json:"previous_paid_tickets"`
 	PreviousNetRevenueCents int64     `json:"previous_net_revenue_cents"`
+	PaymentFailedOrders     int64     `json:"payment_failed_orders"`
+	TimeoutCancelledOrders  int64     `json:"timeout_cancelled_orders"`
+	PaymentSuccessRate      float64   `json:"payment_success_rate"`
 	PendingPaymentOrders    int64     `json:"pending_payment_orders"`
 	RefundingOrders         int64     `json:"refunding_orders"`
 	UpcomingSessions        int64     `json:"upcoming_sessions"`
@@ -826,6 +833,16 @@ func (s *TicketCatalogService) CreateSession(
 		SaleEndsAt:   input.SaleEndsAt,
 		Status:       models.SessionStatusOnSale,
 	}
+	if event.SaleMode.IsSeated() {
+		if input.HallID <= 0 || input.SeatLayoutID <= 0 {
+			return nil, fmt.Errorf("%w: 选座场次必须选择演出厅和已发布厅图", ErrInvalidTicketCatalog)
+		}
+		if err := s.validatePublishedLayout(ctx, organizerID, input.VenueID, input.HallID, input.SeatLayoutID); err != nil {
+			return nil, err
+		}
+		session.HallID = &input.HallID
+		session.SeatLayoutID = &input.SeatLayoutID
+	}
 	if err := s.repo.CreateSession(ctx, session); err != nil {
 		return nil, err
 	}
@@ -950,6 +967,16 @@ func (s *TicketCatalogService) UpdateSession(
 			return nil, ErrOrganizerForbidden
 		}
 		session.VenueID = input.VenueID
+		if event.SaleMode.IsSeated() {
+			if input.HallID <= 0 || input.SeatLayoutID <= 0 {
+				return nil, fmt.Errorf("%w: 选座场次必须选择演出厅和已发布厅图", ErrInvalidTicketCatalog)
+			}
+			if err := s.validatePublishedLayout(ctx, organizerID, input.VenueID, input.HallID, input.SeatLayoutID); err != nil {
+				return nil, err
+			}
+			session.HallID = &input.HallID
+			session.SeatLayoutID = &input.SeatLayoutID
+		}
 	}
 	session.StartsAt = input.StartsAt
 	session.EndsAt = input.EndsAt
@@ -1407,40 +1434,57 @@ func (s *TicketCatalogService) ListOrganizerEvents(
 
 func (s *TicketCatalogService) GetOrganizerOverview(
 	ctx context.Context,
-	userID, organizerID int64,
+	userID, organizerID, eventID, sessionID int64,
 ) (*OrganizerOverview, error) {
 	if err := s.requireOrganizerAccess(ctx, organizerID, userID); err != nil {
 		return nil, err
 	}
+	eventID, sessionID, err := s.resolveOverviewScope(ctx, organizerID, eventID, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	const periodDays = 7
 	now := time.Now()
-	periodFrom := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).
-		AddDate(0, 0, -(periodDays - 1))
-	previousFrom := periodFrom.AddDate(0, 0, -periodDays)
-	overview := &OrganizerOverview{PeriodDays: periodDays, PeriodFrom: periodFrom}
-	if err := s.db.WithContext(ctx).Model(&models.Event{}).
-		Where("organizer_id = ? AND status = ?", organizerID, models.EventStatusPublished).
-		Count(&overview.OnSaleEvents).Error; err != nil {
+	periodFrom, previousFrom, periodTo := rollingCalendarPeriod(now, periodDays)
+	overview := &OrganizerOverview{
+		PeriodDays: periodDays,
+		PeriodFrom: periodFrom,
+		EventID:    eventID,
+		SessionID:  sessionID,
+	}
+	onSaleQuery := s.db.WithContext(ctx).Model(&models.Event{}).
+		Where("organizer_id = ? AND status = ?", organizerID, models.EventStatusPublished)
+	if eventID > 0 {
+		onSaleQuery = onSaleQuery.Where("id = ?", eventID)
+	}
+	if err := onSaleQuery.Count(&overview.OnSaleEvents).Error; err != nil {
 		return nil, err
 	}
-	if err := s.db.WithContext(ctx).Model(&models.TicketOrder{}).
-		Where("organizer_id = ? AND status = ?", organizerID, models.TicketOrderStatusPendingPayment).
-		Count(&overview.PendingPaymentOrders).Error; err != nil {
+	pendingQuery := applyOverviewOrderScope(
+		s.db.WithContext(ctx).Model(&models.TicketOrder{}).
+			Where("organizer_id = ? AND status = ?", organizerID, models.TicketOrderStatusPendingPayment),
+		"ticket_order", eventID, sessionID,
+	)
+	if err := pendingQuery.Count(&overview.PendingPaymentOrders).Error; err != nil {
 		return nil, err
 	}
-	if err := s.db.WithContext(ctx).Model(&models.TicketOrder{}).
-		Where("organizer_id = ? AND payment_status = ?", organizerID, models.PaymentStatusRefunding).
-		Count(&overview.RefundingOrders).Error; err != nil {
+	refundingQuery := applyOverviewOrderScope(
+		s.db.WithContext(ctx).Model(&models.TicketOrder{}).
+			Where("organizer_id = ? AND payment_status = ?", organizerID, models.PaymentStatusRefunding),
+		"ticket_order", eventID, sessionID,
+	)
+	if err := refundingQuery.Count(&overview.RefundingOrders).Error; err != nil {
 		return nil, err
 	}
-	if err := s.db.WithContext(ctx).Model(&models.EventSession{}).
+	upcomingQuery := s.db.WithContext(ctx).Model(&models.EventSession{}).
 		Joins("JOIN event ON event.id = event_session.event_id AND event.delete_time IS NULL").
 		Where("event.organizer_id = ?", organizerID).
 		Where("event_session.starts_at >= ? AND event_session.starts_at < ?", now, now.AddDate(0, 0, periodDays)).
 		Where("event_session.status NOT IN ?", []models.SessionStatus{
 			models.SessionStatusCancelled, models.SessionStatusFinished,
-		}).
-		Count(&overview.UpcomingSessions).Error; err != nil {
+		})
+	upcomingQuery = applyOverviewSessionScope(upcomingQuery, eventID, sessionID)
+	if err := upcomingQuery.Count(&overview.UpcomingSessions).Error; err != nil {
 		return nil, err
 	}
 
@@ -1448,12 +1492,13 @@ func (s *TicketCatalogService) GetOrganizerOverview(
 		Total    int64
 		Occupied int64
 	}
-	if err := s.db.WithContext(ctx).Model(&models.TicketTier{}).
+	inventoryQuery := s.db.WithContext(ctx).Model(&models.TicketTier{}).
 		Select("COALESCE(SUM(ticket_tier.total_quota), 0) AS total, COALESCE(SUM(ticket_tier.sold_count), 0) AS occupied").
 		Joins("JOIN event_session ON event_session.id = ticket_tier.session_id AND event_session.delete_time IS NULL").
 		Joins("JOIN event ON event.id = event_session.event_id AND event.delete_time IS NULL").
-		Where("event.organizer_id = ? AND event.status = ?", organizerID, models.EventStatusPublished).
-		Scan(&inventory).Error; err != nil {
+		Where("event.organizer_id = ? AND event.status = ?", organizerID, models.EventStatusPublished)
+	inventoryQuery = applyOverviewInventoryScope(inventoryQuery, eventID, sessionID)
+	if err := inventoryQuery.Scan(&inventory).Error; err != nil {
 		return nil, err
 	}
 	overview.InventoryTotal = inventory.Total
@@ -1462,11 +1507,15 @@ func (s *TicketCatalogService) GetOrganizerOverview(
 		overview.InventoryOccupancyRate = math.Round(float64(inventory.Occupied)/float64(inventory.Total)*1000) / 10
 	}
 
-	current, err := s.loadOrganizerPeriodSales(ctx, organizerID, periodFrom, now.Add(time.Second))
+	current, err := s.loadOrganizerPeriodSales(ctx, organizerID, eventID, sessionID, periodFrom, periodTo)
 	if err != nil {
 		return nil, err
 	}
-	previous, err := s.loadOrganizerPeriodSales(ctx, organizerID, previousFrom, periodFrom)
+	previous, err := s.loadOrganizerPeriodSales(ctx, organizerID, eventID, sessionID, previousFrom, periodFrom)
+	if err != nil {
+		return nil, err
+	}
+	leaks, err := s.loadOrganizerPeriodLeaks(ctx, organizerID, eventID, sessionID, periodFrom, periodTo)
 	if err != nil {
 		return nil, err
 	}
@@ -1479,12 +1528,119 @@ func (s *TicketCatalogService) GetOrganizerOverview(
 	overview.PreviousPaidOrders = previous.PaidOrders
 	overview.PreviousPaidTickets = previous.PaidTickets
 	overview.PreviousNetRevenueCents = previous.GrossRevenueCents - previous.RefundedAmountCents
+	overview.PaymentFailedOrders = leaks.PaymentFailedOrders
+	overview.TimeoutCancelledOrders = leaks.TimeoutCancelledOrders
+	overview.PaymentSuccessRate = overviewPaymentSuccessRate(current.PaidOrders, leaks.TimeoutCancelledOrders)
 	return overview, nil
+}
+
+func (s *TicketCatalogService) resolveOverviewScope(
+	ctx context.Context,
+	organizerID, eventID, sessionID int64,
+) (int64, int64, error) {
+	if eventID > 0 {
+		var n int64
+		if err := s.db.WithContext(ctx).Model(&models.Event{}).
+			Where("id = ? AND organizer_id = ?", eventID, organizerID).
+			Count(&n).Error; err != nil {
+			return 0, 0, err
+		}
+		if n == 0 {
+			return 0, 0, ErrTicketResourceNotFound
+		}
+	}
+	if sessionID <= 0 {
+		return eventID, 0, nil
+	}
+	var session models.EventSession
+	err := s.db.WithContext(ctx).Model(&models.EventSession{}).
+		Select("event_session.id", "event_session.event_id").
+		Joins("JOIN event ON event.id = event_session.event_id AND event.delete_time IS NULL").
+		Where("event_session.id = ? AND event.organizer_id = ?", sessionID, organizerID).
+		First(&session).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, 0, ErrTicketResourceNotFound
+		}
+		return 0, 0, err
+	}
+	if eventID > 0 && session.EventID != eventID {
+		return 0, 0, ErrTicketResourceNotFound
+	}
+	return session.EventID, session.ID, nil
+}
+
+func rollingCalendarPeriod(now time.Time, days int) (from, previousFrom, to time.Time) {
+	if days < 1 {
+		days = 7
+	}
+	from = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).
+		AddDate(0, 0, -(days - 1))
+	previousFrom = from.AddDate(0, 0, -days)
+	to = now.Add(time.Second)
+	return from, previousFrom, to
+}
+
+func applyOverviewOwnerScope(db *gorm.DB, table string, organizerID int64) *gorm.DB {
+	if organizerID > 0 {
+		return db.Where(table+".organizer_id = ?", organizerID)
+	}
+	return db
+}
+
+func applyOverviewOrderScope(db *gorm.DB, table string, eventID, sessionID int64) *gorm.DB {
+	if sessionID > 0 {
+		return db.Where(table+".session_id = ?", sessionID)
+	}
+	if eventID > 0 {
+		return db.Where(table+".event_id = ?", eventID)
+	}
+	return db
+}
+
+func applyOverviewSessionScope(db *gorm.DB, eventID, sessionID int64) *gorm.DB {
+	if sessionID > 0 {
+		return db.Where("event_session.id = ?", sessionID)
+	}
+	if eventID > 0 {
+		return db.Where("event.id = ?", eventID)
+	}
+	return db
+}
+
+func applyOverviewInventoryScope(db *gorm.DB, eventID, sessionID int64) *gorm.DB {
+	if sessionID > 0 {
+		return db.Where("ticket_tier.session_id = ?", sessionID)
+	}
+	if eventID > 0 {
+		return db.Where("event.id = ?", eventID)
+	}
+	return db
+}
+
+func overviewPaymentSuccessRate(paid, timeoutCancelled int64) float64 {
+	resolved := paid + timeoutCancelled
+	if resolved <= 0 {
+		return 0
+	}
+	return math.Round(float64(paid)/float64(resolved)*1000) / 10
+}
+
+func isTimeoutCancelReason(reason string) bool {
+	return strings.TrimSpace(reason) == orderPaymentTimeoutReason
+}
+
+// 与 ticket_order_timeout 写入的 cancel_reason 对齐。
+const orderPaymentTimeoutReason = "支付超时自动取消"
+
+type organizerPeriodLeaks struct {
+	PaymentFailedOrders    int64
+	TimeoutCancelledOrders int64
 }
 
 func (s *TicketCatalogService) loadOrganizerPeriodSales(
 	ctx context.Context,
-	organizerID int64,
+	organizerID, eventID, sessionID int64,
 	from, to time.Time,
 ) (organizerPeriodSales, error) {
 	var out organizerPeriodSales
@@ -1494,37 +1650,94 @@ func (s *TicketCatalogService) loadOrganizerPeriodSales(
 		models.PaymentStatusRefunded,
 	}
 	// 历史演示单可能缺 paid_at：已支付状态用 create_time 回退，避免经营卡和订单列表对不上。
-	paidAtExpr := "COALESCE(paid_at, create_time)"
-	if err := s.db.WithContext(ctx).Model(&models.TicketOrder{}).
-		Select("COUNT(*) AS paid_orders, COALESCE(SUM(total_amount_cents), 0) AS gross_revenue_cents").
-		Where("organizer_id = ? AND "+paidAtExpr+" >= ? AND "+paidAtExpr+" < ? AND payment_status IN ? AND delete_time IS NULL",
-			organizerID, from, to, paidStatuses).
-		Scan(&out).Error; err != nil {
+	paidAtExpr := "COALESCE(ticket_order.paid_at, ticket_order.create_time)"
+	paidQuery := applyOverviewOrderScope(
+		applyOverviewOwnerScope(
+			s.db.WithContext(ctx).Model(&models.TicketOrder{}).
+				Select("COUNT(*) AS paid_orders, COALESCE(SUM(total_amount_cents), 0) AS gross_revenue_cents").
+				Where(paidAtExpr+" >= ? AND "+paidAtExpr+" < ? AND payment_status IN ? AND delete_time IS NULL",
+					from, to, paidStatuses),
+			"ticket_order", organizerID,
+		),
+		"ticket_order", eventID, sessionID,
+	)
+	if err := paidQuery.Scan(&out).Error; err != nil {
 		return out, err
 	}
-	orderPaidAtExpr := "COALESCE(ticket_order.paid_at, ticket_order.create_time)"
-	if err := s.db.WithContext(ctx).Model(&models.TicketOrderItem{}).
-		Select("COALESCE(SUM(ticket_order_item.quantity), 0)").
-		Joins("JOIN ticket_order ON ticket_order.id = ticket_order_item.order_id AND ticket_order.delete_time IS NULL").
-		Where("ticket_order.organizer_id = ? AND "+orderPaidAtExpr+" >= ? AND "+orderPaidAtExpr+" < ? AND ticket_order.payment_status IN ?",
-			organizerID, from, to, paidStatuses).
-		Scan(&out.PaidTickets).Error; err != nil {
+	ticketQuery := applyOverviewOrderScope(
+		applyOverviewOwnerScope(
+			s.db.WithContext(ctx).Model(&models.TicketOrderItem{}).
+				Select("COALESCE(SUM(ticket_order_item.quantity), 0)").
+				Joins("JOIN ticket_order ON ticket_order.id = ticket_order_item.order_id AND ticket_order.delete_time IS NULL").
+				Where(paidAtExpr+" >= ? AND "+paidAtExpr+" < ? AND ticket_order.payment_status IN ?",
+					from, to, paidStatuses),
+			"ticket_order", organizerID,
+		),
+		"ticket_order", eventID, sessionID,
+	)
+	if err := ticketQuery.Scan(&out.PaidTickets).Error; err != nil {
 		return out, err
 	}
 	var refunds struct {
 		RefundedOrders      int64
 		RefundedAmountCents int64
 	}
-	if err := s.db.WithContext(ctx).Model(&models.PaymentTransaction{}).
-		Select("COUNT(DISTINCT payment_transaction.order_id) AS refunded_orders, COALESCE(SUM(payment_transaction.amount_cents), 0) AS refunded_amount_cents").
-		Joins("JOIN ticket_order ON ticket_order.id = payment_transaction.order_id AND ticket_order.delete_time IS NULL").
-		Where("ticket_order.organizer_id = ? AND payment_transaction.status = ? AND payment_transaction.refunded_at >= ? AND payment_transaction.refunded_at < ? AND payment_transaction.delete_time IS NULL",
-			organizerID, models.PaymentTransactionRefunded, from, to).
-		Scan(&refunds).Error; err != nil {
+	refundQuery := applyOverviewOrderScope(
+		applyOverviewOwnerScope(
+			s.db.WithContext(ctx).Model(&models.PaymentTransaction{}).
+				Select("COUNT(DISTINCT payment_transaction.order_id) AS refunded_orders, COALESCE(SUM(payment_transaction.amount_cents), 0) AS refunded_amount_cents").
+				Joins("JOIN ticket_order ON ticket_order.id = payment_transaction.order_id AND ticket_order.delete_time IS NULL").
+				Where("payment_transaction.status = ? AND payment_transaction.refunded_at >= ? AND payment_transaction.refunded_at < ? AND payment_transaction.delete_time IS NULL",
+					models.PaymentTransactionRefunded, from, to),
+			"ticket_order", organizerID,
+		),
+		"ticket_order", eventID, sessionID,
+	)
+	if err := refundQuery.Scan(&refunds).Error; err != nil {
 		return out, err
 	}
 	out.RefundedOrders = refunds.RefundedOrders
 	out.RefundedAmountCents = refunds.RefundedAmountCents
+	return out, nil
+}
+
+func (s *TicketCatalogService) loadOrganizerPeriodLeaks(
+	ctx context.Context,
+	organizerID, eventID, sessionID int64,
+	from, to time.Time,
+) (organizerPeriodLeaks, error) {
+	var out organizerPeriodLeaks
+	failedAtExpr := "COALESCE(payment_transaction.update_time, payment_transaction.create_time)"
+	failedQuery := applyOverviewOrderScope(
+		applyOverviewOwnerScope(
+			s.db.WithContext(ctx).Model(&models.PaymentTransaction{}).
+				Joins("JOIN ticket_order ON ticket_order.id = payment_transaction.order_id AND ticket_order.delete_time IS NULL").
+				Where("payment_transaction.order_id > 0").
+				Where("payment_transaction.status = ? AND "+failedAtExpr+" >= ? AND "+failedAtExpr+" < ?",
+					models.PaymentTransactionFailed, from, to).
+				Where("payment_transaction.delete_time IS NULL"),
+			"ticket_order", organizerID,
+		),
+		"ticket_order", eventID, sessionID,
+	)
+	if err := failedQuery.Distinct("payment_transaction.order_id").Count(&out.PaymentFailedOrders).Error; err != nil {
+		return out, err
+	}
+
+	cancelledAtExpr := "COALESCE(ticket_order.cancelled_at, ticket_order.create_time)"
+	timeoutQuery := applyOverviewOrderScope(
+		applyOverviewOwnerScope(
+			s.db.WithContext(ctx).Model(&models.TicketOrder{}).
+				Where("ticket_order.status = ? AND ticket_order.cancel_reason = ?",
+					models.TicketOrderStatusCancelled, orderPaymentTimeoutReason).
+				Where(cancelledAtExpr+" >= ? AND "+cancelledAtExpr+" < ? AND ticket_order.delete_time IS NULL", from, to),
+			"ticket_order", organizerID,
+		),
+		"ticket_order", eventID, sessionID,
+	)
+	if err := timeoutQuery.Count(&out.TimeoutCancelledOrders).Error; err != nil {
+		return out, err
+	}
 	return out, nil
 }
 

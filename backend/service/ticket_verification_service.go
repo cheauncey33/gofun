@@ -262,13 +262,23 @@ func (s *TicketVerificationService) Verify(
 	return result, err
 }
 
+type TicketVerificationListView struct {
+	List             []models.TicketVerificationRecord `json:"list"`
+	Total            int64                             `json:"total"`
+	Page             int                               `json:"page"`
+	PageSize         int                               `json:"page_size"`
+	UsedTickets      int64                             `json:"used_tickets"`
+	ValidSoldTickets int64                             `json:"valid_sold_tickets"`
+	CheckinRate      float64                           `json:"checkin_rate"`
+}
+
 func (s *TicketVerificationService) ListRecords(
 	ctx context.Context,
-	organizerID, operatorUserID int64,
+	organizerID, operatorUserID, sessionID int64,
 	page, pageSize int,
-) ([]models.TicketVerificationRecord, int64, error) {
+) (*TicketVerificationListView, error) {
 	if err := s.requireOrganizerAccess(ctx, organizerID, operatorUserID); err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	if page < 1 {
 		page = 1
@@ -280,15 +290,29 @@ func (s *TicketVerificationService) ListRecords(
 		Where("organizer_id = ?", organizerID)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	var records []models.TicketVerificationRecord
-	err := query.Preload("Ticket.OrderItem").
+	if err := query.Preload("Ticket.OrderItem").
 		Order("verified_at DESC").
 		Limit(pageSize).
 		Offset((page - 1) * pageSize).
-		Find(&records).Error
-	return records, total, err
+		Find(&records).Error; err != nil {
+		return nil, err
+	}
+	used, validSold, err := queryCheckinProgress(ctx, s.db, organizerID, 0, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return &TicketVerificationListView{
+		List:             records,
+		Total:            total,
+		Page:             page,
+		PageSize:         pageSize,
+		UsedTickets:      used,
+		ValidSoldTickets: validSold,
+		CheckinRate:      checkinRate(used, validSold),
+	}, nil
 }
 
 func (s *TicketVerificationService) requireOrganizerAccess(
@@ -348,4 +372,48 @@ func (s *TicketVerificationService) createRecord(
 func credentialFingerprint(credential string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(credential)))
 	return hex.EncodeToString(sum[:])
+}
+
+func checkinRate(used, validSold int64) float64 {
+	if validSold <= 0 {
+		return 0
+	}
+	return overviewPaymentSuccessRate(used, validSold-used)
+}
+
+func queryCheckinProgress(
+	ctx context.Context,
+	db *gorm.DB,
+	organizerID, eventID, sessionID int64,
+) (used, validSold int64, err error) {
+	query := db.WithContext(ctx).Model(&models.AdmissionTicket{}).
+		Where("delete_time IS NULL")
+	if organizerID > 0 {
+		query = query.Where("organizer_id = ?", organizerID)
+	}
+	if eventID > 0 {
+		query = query.Where("event_id = ?", eventID)
+	}
+	if sessionID > 0 {
+		query = query.Where("session_id = ?", sessionID)
+	}
+	var row struct {
+		Used      int64
+		ValidSold int64
+	}
+	err = query.Select(`
+		COALESCE(SUM(CASE WHEN status = 'used' THEN 1 ELSE 0 END), 0) AS used,
+		COALESCE(SUM(CASE WHEN status IN ('valid', 'used') THEN 1 ELSE 0 END), 0) AS valid_sold
+	`).Scan(&row).Error
+	if err != nil {
+		return 0, 0, err
+	}
+	return row.Used, row.ValidSold, nil
+}
+
+func (s *TicketCatalogService) loadCheckinProgress(
+	ctx context.Context,
+	organizerID, eventID, sessionID int64,
+) (int64, int64, error) {
+	return queryCheckinProgress(ctx, s.db, organizerID, eventID, sessionID)
 }

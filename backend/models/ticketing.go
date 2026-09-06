@@ -116,7 +116,20 @@ type Venue struct {
 	Longitude   *float64        `gorm:"type:decimal(10,7)" json:"longitude,omitempty"`
 	Timezone    string          `gorm:"size:64;not null;default:'Asia/Shanghai'" json:"timezone"`
 	Status      OrganizerStatus `gorm:"size:16;not null;default:'active';index" json:"status"`
+	Halls       []Hall          `gorm:"foreignKey:VenueID" json:"halls,omitempty"`
 }
+
+// Hall 是场馆内可复用的物理厅。活动场次选择厅及其已发布厅图，
+// 同一物理座位在不同场次拥有独立库存。
+type Hall struct {
+	Base
+	VenueID int64           `gorm:"not null;index;uniqueIndex:uk_hall_venue_name,priority:1" json:"venue_id,string"`
+	Name    string          `gorm:"size:128;not null;uniqueIndex:uk_hall_venue_name,priority:2" json:"name"`
+	Status  OrganizerStatus `gorm:"size:16;not null;default:'active';index" json:"status"`
+	Venue   Venue           `gorm:"foreignKey:VenueID" json:"venue,omitempty"`
+}
+
+func (Hall) TableName() string { return "hall" }
 
 type Event struct {
 	Base
@@ -141,6 +154,8 @@ type EventSession struct {
 	EventID      int64         `gorm:"not null;index" json:"event_id,string"`
 	VenueID      int64         `gorm:"not null;index" json:"venue_id,string"`
 	Venue        Venue         `gorm:"foreignKey:VenueID" json:"venue,omitempty"`
+	HallID       *int64        `gorm:"index" json:"hall_id,omitempty,string"`
+	SeatLayoutID *int64        `gorm:"index" json:"seat_layout_id,omitempty,string"`
 	StartsAt     time.Time     `gorm:"not null;index" json:"starts_at"`
 	EndsAt       time.Time     `gorm:"not null" json:"ends_at"`
 	SaleStartsAt time.Time     `gorm:"not null;index" json:"sale_starts_at"`

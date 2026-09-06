@@ -104,7 +104,7 @@ function toggleCell(row, col) {
 label { display: grid; gap: 8px; font-size: 13px; font-weight: 650; }
 label :deep(.el-select), label :deep(.el-input-number) { width: 100%; }
 .hint { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
-.seat-grid { display: grid; gap: 4px; justify-content: start; overflow: auto; padding-bottom: 8px; }
+.seat-grid { display: grid; gap: 4px; justify-content: center; overflow: auto; padding-bottom: 8px; }
 .seat-cell {
   width: 28px; height: 28px; padding: 0; border: 1px solid var(--line-strong);
   border-radius: 4px; background: transparent; cursor: pointer; font-size: 10px;
@@ -114,5 +114,6 @@ label :deep(.el-select), label :deep(.el-input-number) { width: 100%; }
 .seat-cell:disabled:not(.head) { cursor: default; opacity: .7; }
 @media (max-width: 600px) {
   .paired-fields { grid-template-columns: 1fr; }
+  .seat-grid { justify-content: start; }
 }
 </style>

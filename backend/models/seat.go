@@ -1,8 +1,17 @@
 package models
 
+import "time"
+
 const (
 	MaxSeatLayoutRows = 16
 	MaxSeatLayoutCols = 24
+)
+
+type SeatLayoutStatus string
+
+const (
+	SeatLayoutDraft     SeatLayoutStatus = "draft"
+	SeatLayoutPublished SeatLayoutStatus = "published"
 )
 
 type SessionSeatStatus string
@@ -24,14 +33,18 @@ func SeatLayoutBoundsOK(rowCount, colCount int) bool {
 		colCount >= 1 && colCount <= MaxSeatLayoutCols
 }
 
-// SeatLayout 是活动厅图模板。一场活动一张图，发布前可改。
+// SeatLayout 是物理厅的版本化座位图。EventID 仅用于兼容改造前的数据。
 type SeatLayout struct {
 	Base
-	EventID  int64  `gorm:"not null;uniqueIndex" json:"event_id,string"`
-	Name     string `gorm:"size:64;not null;default:''" json:"name"`
-	RowCount int    `gorm:"not null" json:"row_count"`
-	ColCount int    `gorm:"not null" json:"col_count"`
-	Seats    []Seat `gorm:"foreignKey:LayoutID" json:"seats,omitempty"`
+	EventID     *int64           `gorm:"uniqueIndex" json:"event_id,omitempty,string"`
+	HallID      *int64           `gorm:"index;uniqueIndex:uk_hall_layout_version,priority:1" json:"hall_id,omitempty,string"`
+	Version     int              `gorm:"not null;default:1;uniqueIndex:uk_hall_layout_version,priority:2" json:"version"`
+	Status      SeatLayoutStatus `gorm:"size:16;not null;default:'draft';index" json:"status"`
+	Name        string           `gorm:"size:64;not null;default:''" json:"name"`
+	RowCount    int              `gorm:"not null" json:"row_count"`
+	ColCount    int              `gorm:"not null" json:"col_count"`
+	PublishedAt *time.Time       `json:"published_at,omitempty"`
+	Seats       []Seat           `gorm:"foreignKey:LayoutID" json:"seats,omitempty"`
 }
 
 func (SeatLayout) TableName() string {
@@ -41,8 +54,10 @@ func (SeatLayout) TableName() string {
 // Seat 是厅图上的可售格。未画出的格子不建行。
 type Seat struct {
 	Base
-	LayoutID     int64  `gorm:"not null;uniqueIndex:uk_seat_layout_cell,priority:1" json:"layout_id,string"`
-	TicketTierID int64  `gorm:"not null;index" json:"ticket_tier_id,string"`
+	LayoutID int64 `gorm:"not null;uniqueIndex:uk_seat_layout_cell,priority:1" json:"layout_id,string"`
+	// TicketTierID 仅兼容旧活动厅图；新厅图在 SessionSeat 上配置本场票档。
+	TicketTierID *int64 `gorm:"index" json:"ticket_tier_id,omitempty,string"`
+	ZoneKey      string `gorm:"size:64;not null;default:'general';index" json:"zone_key"`
 	RowNo        int    `gorm:"not null;uniqueIndex:uk_seat_layout_cell,priority:2" json:"row_no"`
 	ColNo        int    `gorm:"not null;uniqueIndex:uk_seat_layout_cell,priority:3" json:"col_no"`
 	Label        string `gorm:"size:32;not null" json:"label"`

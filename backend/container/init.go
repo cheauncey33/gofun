@@ -192,6 +192,7 @@ func ticketingSchemaModels() []interface{} {
 		&models.Organizer{},
 		&models.OrganizerMember{},
 		&models.Venue{},
+		&models.Hall{},
 		&models.Event{},
 		&models.EventSession{},
 		&models.TicketTier{},

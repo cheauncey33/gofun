@@ -55,18 +55,20 @@ type FunnelChannel struct {
 }
 
 type OrganizerFunnel struct {
-	Days         int             `json:"days"`
-	From         time.Time       `json:"from"`
-	EventID      int64           `json:"event_id,string,omitempty"`
-	VisitTracked bool            `json:"visit_tracked"`
-	Steps        []FunnelStep    `json:"steps"`
-	Leak         *FunnelLeak     `json:"leak,omitempty"`
-	Insight      string          `json:"insight"`
-	Channels     []FunnelChannel `json:"channels"`
-	PendingOpen  int64           `json:"pending_open"`
-	Refunded     int64           `json:"refunded"`
-	RefundRate   float64         `json:"refund_rate"`
-	UsedTickets  int64           `json:"used_tickets"`
+	Days             int             `json:"days"`
+	From             time.Time       `json:"from"`
+	EventID          int64           `json:"event_id,string,omitempty"`
+	VisitTracked     bool            `json:"visit_tracked"`
+	Steps            []FunnelStep    `json:"steps"`
+	Leak             *FunnelLeak     `json:"leak,omitempty"`
+	Insight          string          `json:"insight"`
+	Channels         []FunnelChannel `json:"channels"`
+	PendingOpen      int64           `json:"pending_open"`
+	Refunded         int64           `json:"refunded"`
+	RefundRate       float64         `json:"refund_rate"`
+	UsedTickets      int64           `json:"used_tickets"`
+	ValidSoldTickets int64           `json:"valid_sold_tickets"`
+	CheckinRate      float64         `json:"checkin_rate"`
 }
 
 type funnelEventRef struct {
@@ -513,13 +515,8 @@ func (s *TicketCatalogService) loadOrganizerFunnel(
 	}
 	pending += waitlistPending
 
-	var usedTickets int64
-	if err := applyFunnelEventFilter(
-		s.db.WithContext(ctx).Model(&models.AdmissionTicket{}).
-			Where("organizer_id = ? AND status = ? AND used_at >= ? AND delete_time IS NULL",
-				organizerID, models.AdmissionTicketStatusUsed, from),
-		eventID,
-	).Count(&usedTickets).Error; err != nil {
+	usedTickets, validSoldTickets, err := s.loadCheckinProgress(ctx, organizerID, eventID, 0)
+	if err != nil {
 		return nil, err
 	}
 
@@ -550,18 +547,20 @@ func (s *TicketCatalogService) loadOrganizerFunnel(
 	}
 
 	return &OrganizerFunnel{
-		Days:         days,
-		From:         from,
-		EventID:      eventID,
-		VisitTracked: cohort.Browse > 0,
-		Steps:        steps,
-		Leak:         leak,
-		Insight:      funnelInsight(steps, leak, refundRate),
-		Channels:     channels,
-		PendingOpen:  pending,
-		Refunded:     refunded,
-		RefundRate:   refundRate,
-		UsedTickets:  usedTickets,
+		Days:             days,
+		From:             from,
+		EventID:          eventID,
+		VisitTracked:     cohort.Browse > 0,
+		Steps:            steps,
+		Leak:             leak,
+		Insight:          funnelInsight(steps, leak, refundRate),
+		Channels:         channels,
+		PendingOpen:      pending,
+		Refunded:         refunded,
+		RefundRate:       refundRate,
+		UsedTickets:      usedTickets,
+		ValidSoldTickets: validSoldTickets,
+		CheckinRate:      checkinRate(usedTickets, validSoldTickets),
 	}, nil
 }
 

@@ -215,6 +215,173 @@ func (ctrl *TicketCatalogController) CreateVenue(c *gin.Context) {
 	response.Success(c, venue)
 }
 
+func (ctrl *TicketCatalogController) CreateHall(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	organizerID, ok := parseTicketID(c, "organizer_id")
+	if !ok {
+		return
+	}
+	venueID, ok := parseTicketID(c, "venue_id")
+	if !ok {
+		return
+	}
+	var input service.CreateHallInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		return
+	}
+	hall, err := ctrl.service.CreateHall(c.Request.Context(), userID, organizerID, venueID, input)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, hall)
+}
+
+func (ctrl *TicketCatalogController) ListHalls(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	organizerID, ok := parseTicketID(c, "organizer_id")
+	if !ok {
+		return
+	}
+	venueID, ok := parseTicketID(c, "venue_id")
+	if !ok {
+		return
+	}
+	halls, err := ctrl.service.ListHalls(c.Request.Context(), userID, organizerID, venueID)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, halls)
+}
+
+func (ctrl *TicketCatalogController) ListHallLayouts(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	organizerID, ok := parseTicketID(c, "organizer_id")
+	if !ok {
+		return
+	}
+	hallID, ok := parseTicketID(c, "hall_id")
+	if !ok {
+		return
+	}
+	layouts, err := ctrl.service.ListHallLayouts(c.Request.Context(), userID, organizerID, hallID)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, layouts)
+}
+
+func (ctrl *TicketCatalogController) CreateHallLayout(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	organizerID, ok := parseTicketID(c, "organizer_id")
+	if !ok {
+		return
+	}
+	hallID, ok := parseTicketID(c, "hall_id")
+	if !ok {
+		return
+	}
+	var input service.HallLayoutInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		return
+	}
+	layout, err := ctrl.service.CreateHallLayout(c.Request.Context(), userID, organizerID, hallID, input)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, layout)
+}
+
+func (ctrl *TicketCatalogController) UpdateHallLayout(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	organizerID, ok := parseTicketID(c, "organizer_id")
+	if !ok {
+		return
+	}
+	layoutID, ok := parseTicketID(c, "layout_id")
+	if !ok {
+		return
+	}
+	var input service.HallLayoutInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		return
+	}
+	layout, err := ctrl.service.UpdateHallLayout(c.Request.Context(), userID, organizerID, layoutID, input)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, layout)
+}
+
+func (ctrl *TicketCatalogController) PublishHallLayout(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	organizerID, ok := parseTicketID(c, "organizer_id")
+	if !ok {
+		return
+	}
+	layoutID, ok := parseTicketID(c, "layout_id")
+	if !ok {
+		return
+	}
+	layout, err := ctrl.service.PublishHallLayout(c.Request.Context(), userID, organizerID, layoutID)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, layout)
+}
+
+func (ctrl *TicketCatalogController) ConfigureSessionSeatMap(c *gin.Context) {
+	userID, ok := ticketUserID(c)
+	if !ok {
+		return
+	}
+	organizerID, ok := parseTicketID(c, "organizer_id")
+	if !ok {
+		return
+	}
+	sessionID, ok := parseTicketID(c, "session_id")
+	if !ok {
+		return
+	}
+	var input service.SessionSeatMapInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		return
+	}
+	rows, err := ctrl.service.ConfigureSessionSeatMap(c.Request.Context(), userID, organizerID, sessionID, input)
+	if err != nil {
+		writeTicketCatalogError(c, err)
+		return
+	}
+	response.Success(c, rows)
+}
+
 func (ctrl *TicketCatalogController) ListVenues(c *gin.Context) {
 	userID, ok := ticketUserID(c)
 	if !ok {
@@ -311,8 +478,16 @@ func (ctrl *TicketCatalogController) GetOrganizerOverview(c *gin.Context) {
 	if !ok {
 		return
 	}
+	eventID, ok := parseOptionalQueryID(c, "event_id")
+	if !ok {
+		return
+	}
+	sessionID, ok := parseOptionalQueryID(c, "session_id")
+	if !ok {
+		return
+	}
 	overview, err := ctrl.service.GetOrganizerOverview(
-		c.Request.Context(), userID, organizerID,
+		c.Request.Context(), userID, organizerID, eventID, sessionID,
 	)
 	if err != nil {
 		writeTicketCatalogError(c, err)
@@ -347,14 +522,9 @@ func (ctrl *TicketCatalogController) GetOrganizerFunnel(c *gin.Context) {
 		return
 	}
 	days, _ := strconv.Atoi(c.DefaultQuery("days", "7"))
-	var eventID int64
-	if raw := strings.TrimSpace(c.Query("event_id")); raw != "" {
-		parsed, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || parsed < 0 {
-			response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "event_id 格式错误")
-			return
-		}
-		eventID = parsed
+	eventID, ok := parseOptionalQueryID(c, "event_id")
+	if !ok {
+		return
 	}
 	funnel, err := ctrl.service.GetOrganizerFunnel(
 		c.Request.Context(), userID, organizerID, eventID, days,
@@ -725,6 +895,19 @@ func (ctrl *TicketCatalogController) ListSessionSeats(c *gin.Context) {
 func parseTicketID(c *gin.Context, name string) (int64, bool) {
 	id, err := strconv.ParseInt(c.Param(name), 10, 64)
 	if err != nil || id <= 0 {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, name+" 格式错误")
+		return 0, false
+	}
+	return id, true
+}
+
+func parseOptionalQueryID(c *gin.Context, name string) (int64, bool) {
+	raw := strings.TrimSpace(c.Query(name))
+	if raw == "" {
+		return 0, true
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id < 0 {
 		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, name+" 格式错误")
 		return 0, false
 	}

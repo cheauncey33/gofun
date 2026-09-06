@@ -408,7 +408,7 @@ const (
 
 func attachSmallTheaterLayout(tx *gorm.DB, eventID, sessionID, frontTierID, regularTierID int64) error {
 	layout := models.SeatLayout{
-		EventID:  eventID,
+		EventID:  &eventID,
 		Name:     "小剧场",
 		RowCount: theaterRows,
 		ColCount: theaterCols,
@@ -426,9 +426,10 @@ func attachSmallTheaterLayout(tx *gorm.DB, eventID, sessionID, frontTierID, regu
 			if row <= frontRows {
 				tierID = frontTierID
 			}
+			seatTierID := tierID
 			seats = append(seats, models.Seat{
 				LayoutID:     layout.ID,
-				TicketTierID: tierID,
+				TicketTierID: &seatTierID,
 				RowNo:        row,
 				ColNo:        col,
 				Label:        fmt.Sprintf("%c%d", 'A'+row-1, col),
@@ -441,11 +442,14 @@ func attachSmallTheaterLayout(tx *gorm.DB, eventID, sessionID, frontTierID, regu
 	sessionSeats := make([]models.SessionSeat, 0, len(seats))
 	quota := map[int64]int{}
 	for _, seat := range seats {
-		quota[seat.TicketTierID]++
+		if seat.TicketTierID == nil {
+			continue
+		}
+		quota[*seat.TicketTierID]++
 		sessionSeats = append(sessionSeats, models.SessionSeat{
 			SessionID:    sessionID,
 			SeatID:       seat.ID,
-			TicketTierID: seat.TicketTierID,
+			TicketTierID: *seat.TicketTierID,
 			Status:       models.SessionSeatAvailable,
 		})
 	}

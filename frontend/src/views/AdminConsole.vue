@@ -13,6 +13,11 @@ const overview = ref({
   pending_events: 0,
   active_organizers: 0,
   published_events: 0,
+  period_days: 7,
+  paid_orders: 0,
+  payment_failed_orders: 0,
+  timeout_cancelled_orders: 0,
+  payment_success_rate: 0,
   runtime: {},
 })
 const organizerFilter = ref('pending')
@@ -49,6 +54,37 @@ function formatPct(value) {
   if (!Number.isFinite(n)) return '—'
   return `${n.toFixed(n % 1 ? 1 : 0)}%`
 }
+
+const salesHealth = computed(() => {
+  const paid = Number(overview.value.paid_orders || 0)
+  const failed = Number(overview.value.payment_failed_orders || 0)
+  const timeout = Number(overview.value.timeout_cancelled_orders || 0)
+  const rate = Number(overview.value.payment_success_rate || 0)
+  const resolved = paid + timeout
+  return [
+    {
+      key: 'pay-rate',
+      label: '支付成功率',
+      value: resolved ? formatPct(rate) : '—',
+      hint: resolved ? `近 ${overview.value.period_days || 7} 天 · 成交 ${paid} / 关单 ${timeout}` : '近 7 天暂无完结支付',
+      tone: !resolved ? '' : rate < 80 ? 'alert' : rate < 95 ? 'warn' : 'ok',
+    },
+    {
+      key: 'timeout',
+      label: '超时关单',
+      value: String(timeout),
+      hint: '支付窗口内未付款，系统自动取消',
+      tone: timeout > 0 ? 'warn' : 'ok',
+    },
+    {
+      key: 'failed',
+      label: '支付失败',
+      value: String(failed),
+      hint: '窗口内支付回调失败的订单，同一单只计一次',
+      tone: failed > 0 ? 'warn' : 'ok',
+    },
+  ]
+})
 
 const workItems = computed(() => [
   {
@@ -343,7 +379,7 @@ function auditLabel(status) {
         <header class="heading">
           <div>
             <h1>平台工作台</h1>
-            <p>先处理审核事项，再查看近 5 分钟平台健康与票务链路状态</p>
+            <p>先处理审核事项，再看近 7 天全站成交和近 5 分钟平台健康</p>
           </div>
           <el-button @click="loadAll">刷新</el-button>
         </header>
@@ -383,6 +419,22 @@ function auditLabel(status) {
             </div>
           </article>
         </div>
+
+        <header class="section-heading">
+          <div><h2>成交健康</h2><p>全站正式订单，按支付和关单实际发生时间统计近 7 天</p></div>
+        </header>
+        <section class="sre-grid sales-grid" aria-label="成交健康">
+          <article
+            v-for="tile in salesHealth"
+            :key="tile.key"
+            class="sre-tile"
+            :class="tile.tone"
+          >
+            <span>{{ tile.label }}</span>
+            <strong>{{ tile.value }}</strong>
+            <small>{{ tile.hint }}</small>
+          </article>
+        </section>
 
         <header class="section-heading">
           <div><h2>平台健康</h2><p>HTTP 使用近 5 分钟窗口；QPS 使用近 10 秒窗口</p></div>
@@ -620,6 +672,7 @@ main { padding: 32px clamp(24px, 4vw, 56px) 70px; }
 }
 @media (min-width: 1100px) {
   .sre-grid { grid-template-columns: repeat(4, 1fr); }
+  .sre-grid.sales-grid { grid-template-columns: repeat(3, 1fr); }
 }
 .sre-tile {
   border: 1px solid var(--line-strong);

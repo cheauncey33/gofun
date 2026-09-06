@@ -101,14 +101,14 @@ func (e *orderIntegrationEnv) seedSeatedEvent(t *testing.T) *seatedFixture {
 	if err := e.db.Create(&std).Error; err != nil {
 		t.Fatalf("create std tier: %v", err)
 	}
-	layout := models.SeatLayout{EventID: event.ID, Name: "测试厅", RowCount: 1, ColCount: 3}
+	layout := models.SeatLayout{EventID: &event.ID, Name: "测试厅", RowCount: 1, ColCount: 3}
 	if err := e.db.Create(&layout).Error; err != nil {
 		t.Fatalf("create layout: %v", err)
 	}
 	layoutSeats := []models.Seat{
-		{LayoutID: layout.ID, TicketTierID: vip.ID, RowNo: 1, ColNo: 1, Label: "A1"},
-		{LayoutID: layout.ID, TicketTierID: std.ID, RowNo: 1, ColNo: 2, Label: "A2"},
-		{LayoutID: layout.ID, TicketTierID: std.ID, RowNo: 1, ColNo: 3, Label: "A3"},
+		{LayoutID: layout.ID, TicketTierID: &vip.ID, RowNo: 1, ColNo: 1, Label: "A1"},
+		{LayoutID: layout.ID, TicketTierID: &std.ID, RowNo: 1, ColNo: 2, Label: "A2"},
+		{LayoutID: layout.ID, TicketTierID: &std.ID, RowNo: 1, ColNo: 3, Label: "A3"},
 	}
 	if err := e.db.Create(&layoutSeats).Error; err != nil {
 		t.Fatalf("create layout seats: %v", err)
