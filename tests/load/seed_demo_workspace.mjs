@@ -195,6 +195,10 @@ async function main() {
   } else if (live.status === 'pending_review') {
     await req('POST', `/admin/events/${live.id}/approve`, { token: admin })
   }
+  if (pendingEvent.status === 'published') {
+    await req('POST', `/organizers/${org.id}/events/${pendingEvent.id}/unpublish`, { token: organizer })
+    pendingEvent.status = 'draft'
+  }
   if (pendingEvent.status === 'draft') {
     await req('POST', `/organizers/${org.id}/events/${pendingEvent.id}/submit-review`, { token: organizer })
   }
