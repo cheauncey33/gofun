@@ -31,6 +31,13 @@ backend/.gopath/
 node_modules/
 frontend/dist/
 frontend/.npm-cache/
+scripts/node_modules/
+
+# Demo capture scratch (keep the GIF)
+docs/demo/.tmp/
+docs/demo/*.webm
+docs/demo/*.mp4
+
 
 # Local source-preservation snapshots
 .backup/

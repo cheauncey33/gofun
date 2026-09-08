@@ -1,0 +1,8 @@
+{
+  "name": "gofun-demo-record",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "playwright": "^1.55.0"
+  }
+}
