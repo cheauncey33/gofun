@@ -1,9 +1,13 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import { rushStockLabel } from '../utils/display'
+import { useNow } from '../utils/now'
+import { canRush, phaseLabel, salePhase } from '../utils/rush'
 import heroImage from '../assets/fuchang-hero.png'
+import FavoriteButton from '../components/FavoriteButton.vue'
 import SeatPickerDialog from '../components/ticket/SeatPickerDialog.vue'
 
 const route = useRoute()
@@ -26,6 +30,8 @@ const commentsLoading = ref(false)
 const commentDraft = ref('')
 const commentSubmitting = ref(false)
 const likingId = ref(null)
+const rushCampaigns = ref([])
+const nowTs = useNow()
 
 const token = computed(() => localStorage.getItem('access_token') || localStorage.getItem('token'))
 const isSeated = computed(() => event.value?.sale_mode === 'seated')
@@ -39,9 +45,8 @@ function sessionRemaining(session) {
   return (session?.ticket_tiers || []).reduce((sum, tier) => sum + Number(tier.remaining_quota || 0), 0)
 }
 
-function sessionSaleState(session) {
+function sessionSaleState(session, now = nowTs.value) {
   if (!session) return 'unavailable'
-  const now = Date.now()
   const start = session.sale_starts_at ? new Date(session.sale_starts_at).getTime() : 0
   const end = session.sale_ends_at ? new Date(session.sale_ends_at).getTime() : Infinity
   if (start && now < start) return 'not_started'
@@ -50,7 +55,7 @@ function sessionSaleState(session) {
   return 'on_sale'
 }
 
-const saleState = computed(() => sessionSaleState(selectedSession.value))
+const saleState = computed(() => sessionSaleState(selectedSession.value, nowTs.value))
 const canWaitlist = computed(() =>
   selectedTier.value?.status === 'waitlist'
   && !isSeated.value
@@ -75,6 +80,17 @@ const lowestPrice = computed(() => {
   return selectedTier.value?.price_cents
 })
 
+const eventRushSales = computed(() => {
+  const eventId = event.value?.id
+  if (!eventId) return []
+  return rushCampaigns.value.filter(sale => String(sale.event_id) === String(eventId))
+})
+
+const openRushSale = computed(() => {
+  const live = eventRushSales.value.filter(sale => canRush(sale, nowTs.value))
+  return live.slice().sort((a, b) => Number(a.remaining_quota) - Number(b.remaining_quota))[0] || null
+})
+
 function saleStateText(state) {
   return { sold_out: '已售罄', not_started: '未开售', ended: '已停售', on_sale: '售票中' }[state] || ''
 }
@@ -97,7 +113,31 @@ watch(selectedSession, async (session) => {
   }
 })
 
-onMounted(async () => {
+async function loadRushForEvent() {
+  const eventId = event.value?.id
+  if (!eventId) {
+    rushCampaigns.value = []
+    return
+  }
+  try {
+    const res = await api.getRushSales({ event_id: eventId })
+    rushCampaigns.value = res.data || []
+  } catch {
+    rushCampaigns.value = []
+  }
+}
+
+function focusRushFromQuery() {
+  const saleId = route.query.sale
+  if (!saleId) return
+  nextTick(() => {
+    document.getElementById(`event-rush-${saleId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
+}
+
+async function hydrate() {
+  loading.value = true
+  rushCampaigns.value = []
   try {
     const res = await api.getEventDetail(route.params.id)
     event.value = res.data
@@ -105,11 +145,19 @@ onMounted(async () => {
     if (first) selectSession(first)
     api.trackFunnelVisits('detail', [event.value.id])
     await loadComments()
+    await loadRushForEvent()
+    focusRushFromQuery()
   } catch (error) {
+    event.value = null
     ElMessage.error(error.response?.data?.msg || '活动不存在或尚未发布')
   } finally {
     loading.value = false
   }
+}
+
+onMounted(hydrate)
+watch(() => route.params.id, (id, prev) => {
+  if (id && id !== prev) hydrate()
 })
 
 async function loadComments({ append = false } = {}) {
@@ -240,6 +288,11 @@ function confirmSeats(payload) {
   goCheckout({ tierId: payload.tierId, seatIds: payload.seatIds })
 }
 
+function goRushSale(sale = openRushSale.value) {
+  if (!sale?.id) return
+  router.push({ name: 'RushSales', query: { sale: String(sale.id) } })
+}
+
 function confirmCounter() {
   if (!selectedTier.value) return
   buyOpen.value = false
@@ -266,7 +319,10 @@ function onCounterTierChange(event) {
         <img :src="event.cover_url || heroImage" :alt="event.title" />
         <div class="event-summary">
           <p>{{ event.category }} · {{ event.organizer?.name }}</p>
-          <h1>{{ event.title }}</h1>
+          <div class="title-row">
+            <h1>{{ event.title }}</h1>
+            <FavoriteButton type="event" :target-id="event.id" />
+          </div>
           <h2>{{ event.subtitle }}</h2>
           <dl v-if="event.sessions?.length">
             <div><dt>时间</dt><dd>{{ dateTime(selectedSession?.starts_at || event.sessions[0].starts_at) }}</dd></div>
@@ -281,6 +337,32 @@ function onCounterTierChange(event) {
           </dl>
         </div>
       </section>
+
+      <div v-if="eventRushSales.length" class="rush-callout-list">
+        <aside
+          v-for="sale in eventRushSales"
+          :id="`event-rush-${sale.id}`"
+          :key="sale.id"
+          class="rush-callout"
+          :class="[salePhase(sale, nowTs), { focused: String(route.query.sale) === String(sale.id) }]"
+        >
+          <div>
+            <small>{{ phaseLabel(salePhase(sale, nowTs)) || '限时开售' }}</small>
+            <strong>{{ sale.name }}</strong>
+            <p>
+              限时价 {{ money(sale.rush_price_cents) }}
+              <template v-if="sale.original_price_cents > sale.rush_price_cents">
+                · 原档 {{ money(sale.original_price_cents) }}
+              </template>
+              <template v-if="rushStockLabel(sale)"> · {{ rushStockLabel(sale) }}</template>
+            </p>
+          </div>
+          <div class="rush-callout-actions">
+            <FavoriteButton type="rush_sale" :target-id="sale.id" />
+            <button v-if="canRush(sale, nowTs)" type="button" @click="goRushSale(sale)">去限时购票</button>
+          </div>
+        </aside>
+      </div>
 
       <section class="detail-body">
         <div class="session-panel">
@@ -346,6 +428,9 @@ function onCounterTierChange(event) {
             <p>{{ isSeated ? '选座购票' : (isExhibition ? '购买门票' : '购买门票') }}</p>
             <strong>{{ lowestPrice != null ? money(lowestPrice) : '—' }} 起</strong>
           </div>
+          <button v-if="openRushSale" class="rush-jump" type="button" @click="goRushSale">
+            限时价 {{ money(openRushSale.rush_price_cents) }}
+          </button>
           <button class="primary-action" type="button" :disabled="!canBuy" @click="buy">
             {{ buyLabel }}
           </button>
@@ -412,12 +497,86 @@ function onCounterTierChange(event) {
 .event-hero > img { width: 100%; height: 100%; max-height: 390px; object-fit: cover; }
 .event-summary { padding: 42px 46px; }
 .event-summary > p { color: #e36854; letter-spacing: .1em; font-size: 12px; }
-.event-summary h1 { margin: 18px 0 8px; font-family: var(--font-display); font-size: clamp(32px, 4vw, 54px); line-height: 1.12; }
-.event-summary h2 { margin: 0; color: #bdb5ac; font-size: 17px; font-weight: 400; }
+.title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 18px 0 8px;
+}
+.event-summary h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(32px, 4vw, 54px);
+  line-height: 1.12;
+}
+.event-summary h2 { margin: 0 0 14px; color: #bdb5ac; font-size: 17px; font-weight: 400; }
+.event-summary :deep(.fav-btn) {
+  flex-shrink: 0;
+  margin-top: 10px;
+  border-color: rgba(255,255,255,.28);
+  color: #f4e6d8;
+}
+.event-summary :deep(.fav-btn.on) {
+  border-color: rgba(227, 104, 84, .7);
+  color: #ffb3a6;
+  background: rgba(181, 52, 41, .22);
+}
 dl { margin-top: 35px; border-top: 1px solid rgba(255,255,255,.16); }
 dl div { display: grid; grid-template-columns: 52px 1fr; padding: 11px 0; border-bottom: 1px solid rgba(255,255,255,.12); font-size: 13px; }
 dt { color: #9f978f; }
 dd { margin: 0; }
+.rush-callout-list { display: grid; gap: 10px; margin-top: 18px; }
+.rush-callout.focused {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px rgba(181, 52, 41, .12);
+}
+.rush-callout.ended,
+.rush-callout.sold_out,
+.rush-callout.unavailable {
+  opacity: .76;
+  border-color: var(--line-strong);
+  background: linear-gradient(180deg, #f4efe8, #ece4d8);
+}
+.rush-callout.ended small,
+.rush-callout.sold_out small,
+.rush-callout.unavailable small {
+  color: var(--muted);
+}
+.rush-callout {
+  margin-top: 0;
+  padding: 16px 20px;
+  border: 1px solid rgba(181, 52, 41, .4);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, #fff7f0, #f6eee4);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.rush-callout small {
+  display: block;
+  color: var(--red);
+  font-size: 11px;
+  letter-spacing: .14em;
+}
+.rush-callout strong { display: block; margin: 4px 0 6px; font: 700 20px var(--font-display); }
+.rush-callout p { margin: 0; color: var(--muted); font-size: 13px; }
+.rush-callout-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.rush-callout button, .rush-jump {
+  height: 42px;
+  padding: 0 18px;
+  border: 1px solid var(--red);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--red);
+  font-weight: 750;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rush-jump { width: 100%; }
 .detail-body { display: grid; grid-template-columns: 1fr 280px; gap: 50px; padding-top: 44px; }
 .section-title { display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid var(--line); }
 .section-title span { color: var(--red); font-family: var(--font-display); }
@@ -517,6 +676,8 @@ dd { margin: 0; }
     padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
     box-shadow: 0 -8px 24px rgba(43, 32, 24, .08);
   }
-  .buy-bar .primary-action { width: auto; min-width: 148px; }
+  .buy-bar .primary-action,
+  .buy-bar .rush-jump { width: auto; min-width: 118px; }
+  .rush-callout { flex-direction: column; align-items: flex-start; }
 }
 </style>

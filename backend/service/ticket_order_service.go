@@ -639,7 +639,6 @@ func (s *TicketOrderService) CreateOrder(
 	s.invalidateUserOrderQueryCache(ctx, userID)
 	receipt := ticketOrderReceipt(order)
 	s.rememberIdempotentOrder(ctx, userID, idempotencyKey, receipt)
-	metrics.OrdersCreated.Inc()
 	return receipt, nil
 }
 
@@ -772,7 +771,7 @@ func (s *TicketOrderService) processOrderTaskTx(
 
 	var order models.TicketOrder
 	stageStarted := time.Now()
-	orderQuery := tx.Select("id, user_id, status, rush_sale_campaign_id, stock_bucket_no, rush_bucket_no, create_time")
+	orderQuery := tx.Select("id, user_id, status, order_source, rush_sale_campaign_id, stock_bucket_no, rush_bucket_no, create_time")
 	orderQuery = orderQuery.Clauses(clause.Locking{Strength: "UPDATE"})
 	if err = orderQuery.First(&order, message.OrderID).Error; err != nil {
 		metrics.TicketOrderConsumerStageDuration.WithLabelValues("order_lock").Observe(time.Since(stageStarted).Seconds())
@@ -920,6 +919,9 @@ func (s *TicketOrderService) processOrderTaskTx(
 	commitStarted := time.Now()
 	err = tx.Commit().Error
 	metrics.TicketOrderConsumerStageDuration.WithLabelValues("commit").Observe(time.Since(commitStarted).Seconds())
+	if err == nil && *enteredPending {
+		metrics.RecordOrder("pending_payment", string(order.OrderSource))
+	}
 	return err
 }
 
@@ -960,6 +962,10 @@ func (s *TicketOrderService) FinalizeFailedMessage(
 ) {
 	released := 0
 	updated := false
+	failedSource := "normal"
+	if message.RushSaleCampaignID != nil {
+		failedSource = "rush_sale"
+	}
 	err := s.asyncDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&models.TicketOrder{}).
 			Where("id = ? AND status = ?", message.OrderID, models.TicketOrderStatusQueued).
@@ -988,6 +994,7 @@ func (s *TicketOrderService) FinalizeFailedMessage(
 	if !updated {
 		return
 	}
+	metrics.RecordOrder("failed", failedSource)
 	if released == 0 {
 		s.rollbackRedisQuota(ctx, message.TicketTierID, message.Quantity, message.StockBucketNo)
 		if message.RushSaleCampaignID != nil {
@@ -1481,6 +1488,8 @@ func (s *TicketOrderService) HandlePaymentCallback(
 	}
 	payload, _ := json.Marshal(notification)
 	var paid bool
+	var paidSource string
+	var paidAmountCents int64
 	var eventUserID, eventOrderID, funnelOrganizerID int64
 	var eventName, eventMessage string
 	var waitlistAllocateTierID int64
@@ -1615,12 +1624,15 @@ func (s *TicketOrderService) HandlePaymentCallback(
 			return err
 		}
 		paid = true
+		paidSource = string(order.OrderSource)
+		paidAmountCents = order.TotalAmountCents
 		eventUserID, eventOrderID = order.UserID, order.ID
 		funnelOrganizerID = order.OrganizerID
 		eventName, eventMessage = "paid", "支付成功，电子票已生成"
 		return nil
 	})
 	if err == nil && paid {
+		metrics.RecordOrderPaid(paidSource, paidAmountCents)
 		bumpFunnelCacheVersion(ctx, s.rdb, funnelOrganizerID)
 	}
 	if err == nil && eventName != "" {
@@ -1722,6 +1734,8 @@ func (s *TicketOrderService) CancelOrder(
 	var skipRedis bool
 	var divertedTierID int64
 	var organizerID int64
+	var orderSource string
+	var orderAmountCents int64
 	paid := false
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var payment models.PaymentTransaction
@@ -1755,6 +1769,8 @@ func (s *TicketOrderService) CancelOrder(
 		}
 		rushCampaignID = order.RushSaleCampaignID
 		organizerID = order.OrganizerID
+		orderSource = string(order.OrderSource)
+		orderAmountCents = order.TotalAmountCents
 		if order.Status.HasBeenPaid() {
 			if errors.Is(paymentErr, gorm.ErrRecordNotFound) {
 				return ErrPaymentNotFound
@@ -1913,6 +1929,11 @@ func (s *TicketOrderService) CancelOrder(
 		}
 	}
 	if err == nil {
+		if refundCents > 0 {
+			metrics.RecordOrderRefunded(orderSource, orderAmountCents)
+		} else {
+			metrics.RecordOrder("cancelled", orderSource)
+		}
 		message := "订单已取消"
 		if refundCents > 0 {
 			message = "退款完成，电子票已作废"
@@ -2192,6 +2213,7 @@ func (s *TicketOrderService) cancelPendingPaymentOnlyDB(
 	var rushBucketNo *int
 	var skipRedis bool
 	var divertedTierID int64
+	var timeoutSource string
 	txStarted := time.Now()
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var pendingPayment models.PaymentTransaction
@@ -2221,6 +2243,7 @@ func (s *TicketOrderService) cancelPendingPaymentOnlyDB(
 			tierID, quantity = order.Items[0].TicketTierID, order.Items[0].Quantity
 		}
 		rushCampaignID = order.RushSaleCampaignID
+		timeoutSource = string(order.OrderSource)
 		var restoreErr error
 		stockBucketNo, rushBucketNo, skipRedis, restoreErr = s.restoreOrderInventory(tx, &order)
 		if restoreErr != nil {
@@ -2278,6 +2301,7 @@ func (s *TicketOrderService) cancelPendingPaymentOnlyDB(
 		}
 	}
 	if err == nil {
+		metrics.RecordOrder("timeout", timeoutSource)
 		s.publishOrderEvent(
 			userID,
 			orderID,

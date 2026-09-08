@@ -34,10 +34,12 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Host      string `mapstructure:"host"`
-	Port      int    `mapstructure:"port"`
-	Mode      string `mapstructure:"mode"`
-	UploadDir string `mapstructure:"upload_dir"`
+	Host           string   `mapstructure:"host"`
+	Port           int      `mapstructure:"port"`
+	Mode           string   `mapstructure:"mode"`
+	UploadDir      string   `mapstructure:"upload_dir"`
+	DemoAccounts   bool     `mapstructure:"demo_accounts"`
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
 }
 
 type MySQLConfig struct {
@@ -193,6 +195,7 @@ func Load(configPath string) (*Config, error) {
 		"server.port",
 		"server.mode",
 		"server.upload_dir",
+		"server.demo_accounts",
 		"mysql.dsn",
 		"mysql.max_idle_conns",
 		"mysql.max_open_conns",
@@ -275,6 +278,9 @@ func Load(configPath string) (*Config, error) {
 	if origins := os.Getenv("CORS_ALLOW_ORIGINS"); origins != "" {
 		cfg.Cors.AllowOrigins = splitCSV(origins)
 	}
+	if proxies := os.Getenv("SERVER_TRUSTED_PROXIES"); proxies != "" {
+		cfg.Server.TrustedProxies = splitCSV(proxies)
+	}
 	if addrs := os.Getenv("ELASTICSEARCH_ADDRESSES"); addrs != "" {
 		cfg.Elasticsearch.Addresses = splitCSV(addrs)
 	}
@@ -313,6 +319,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("server.mode", "debug")
 	v.SetDefault("server.upload_dir", "uploads")
+	v.SetDefault("server.demo_accounts", false)
+	v.SetDefault("server.trusted_proxies", []string{})
 
 	v.SetDefault("mysql.max_idle_conns", 10)
 	v.SetDefault("mysql.max_open_conns", 100)
@@ -334,7 +342,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("rabbitmq.dlx_name", "fuchang.order.dlx")
 	v.SetDefault("rabbitmq.dlq_name", "fuchang.order.dead")
 
-	v.SetDefault("jwt.expire_secs", 500)
+	v.SetDefault("jwt.expire_secs", 7200)
 	v.SetDefault("jwt.refresh_expire_secs", 7*24*60*60)
 
 	v.SetDefault("snowflake.node_id", 1)

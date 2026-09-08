@@ -37,17 +37,26 @@ type AdminEventReviewRow struct {
 }
 
 type AdminPlatformOverview struct {
-	PendingOrganizers      int64                    `json:"pending_organizers"`
-	PendingEvents          int64                    `json:"pending_events"`
-	ActiveOrganizers       int64                    `json:"active_organizers"`
-	PublishedEvents        int64                    `json:"published_events"`
-	PeriodDays             int                      `json:"period_days"`
-	PeriodFrom             time.Time                `json:"period_from"`
-	PaidOrders             int64                    `json:"paid_orders"`
-	PaymentFailedOrders    int64                    `json:"payment_failed_orders"`
-	TimeoutCancelledOrders int64                    `json:"timeout_cancelled_orders"`
-	PaymentSuccessRate     float64                  `json:"payment_success_rate"`
-	Runtime                metrics.PlatformSnapshot `json:"runtime"`
+	PendingOrganizers       int64                    `json:"pending_organizers"`
+	PendingEvents           int64                    `json:"pending_events"`
+	ActiveOrganizers        int64                    `json:"active_organizers"`
+	PublishedEvents         int64                    `json:"published_events"`
+	PeriodDays              int                      `json:"period_days"`
+	PeriodFrom              time.Time                `json:"period_from"`
+	PaidOrders              int64                    `json:"paid_orders"`
+	PaidTickets             int64                    `json:"paid_tickets"`
+	GrossRevenueCents       int64                    `json:"gross_revenue_cents"`
+	RefundedOrders          int64                    `json:"refunded_orders"`
+	RefundedAmountCents     int64                    `json:"refunded_amount_cents"`
+	NetRevenueCents         int64                    `json:"net_revenue_cents"`
+	PreviousPaidOrders        int64                    `json:"previous_paid_orders"`
+	PreviousPaidTickets       int64                    `json:"previous_paid_tickets"`
+	PreviousGrossRevenueCents int64                    `json:"previous_gross_revenue_cents"`
+	PreviousNetRevenueCents   int64                    `json:"previous_net_revenue_cents"`
+	PaymentFailedOrders     int64                    `json:"payment_failed_orders"`
+	TimeoutCancelledOrders  int64                    `json:"timeout_cancelled_orders"`
+	PaymentSuccessRate      float64                  `json:"payment_success_rate"`
+	Runtime                 metrics.PlatformSnapshot `json:"runtime"`
 }
 
 func (s *TicketCatalogService) ApplyOrganizer(
@@ -224,7 +233,7 @@ func (s *TicketCatalogService) ListPendingEventReviews(
 
 func (s *TicketCatalogService) GetAdminPlatformOverview(ctx context.Context) (*AdminPlatformOverview, error) {
 	const periodDays = 7
-	periodFrom, _, periodTo := rollingCalendarPeriod(time.Now(), periodDays)
+	periodFrom, previousFrom, periodTo := rollingCalendarPeriod(time.Now(), periodDays)
 	out := &AdminPlatformOverview{
 		Runtime:    metrics.Snapshot(),
 		PeriodDays: periodDays,
@@ -254,11 +263,24 @@ func (s *TicketCatalogService) GetAdminPlatformOverview(ctx context.Context) (*A
 	if err != nil {
 		return nil, err
 	}
+	previous, err := s.loadOrganizerPeriodSales(ctx, 0, 0, 0, previousFrom, periodFrom)
+	if err != nil {
+		return nil, err
+	}
 	leaks, err := s.loadOrganizerPeriodLeaks(ctx, 0, 0, 0, periodFrom, periodTo)
 	if err != nil {
 		return nil, err
 	}
 	out.PaidOrders = sales.PaidOrders
+	out.PaidTickets = sales.PaidTickets
+	out.GrossRevenueCents = sales.GrossRevenueCents
+	out.RefundedOrders = sales.RefundedOrders
+	out.RefundedAmountCents = sales.RefundedAmountCents
+	out.NetRevenueCents = sales.GrossRevenueCents - sales.RefundedAmountCents
+	out.PreviousPaidOrders = previous.PaidOrders
+	out.PreviousPaidTickets = previous.PaidTickets
+	out.PreviousGrossRevenueCents = previous.GrossRevenueCents
+	out.PreviousNetRevenueCents = previous.GrossRevenueCents - previous.RefundedAmountCents
 	out.PaymentFailedOrders = leaks.PaymentFailedOrders
 	out.TimeoutCancelledOrders = leaks.TimeoutCancelledOrders
 	out.PaymentSuccessRate = overviewPaymentSuccessRate(sales.PaidOrders, leaks.TimeoutCancelledOrders)

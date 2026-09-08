@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"gofun/container"
-	"gofun/metrics"
 	"gofun/models"
 	"strconv"
 	"strings"
@@ -144,10 +143,16 @@ func (s *RushSaleService) CreateCampaign(
 
 type RushSaleCampaignView struct {
 	models.RushSaleCampaign
-	EventID          int64  `json:"event_id,string"`
-	EventTitle       string `json:"event_title"`
-	CoverURL         string `json:"cover_url"`
-	RealNameRequired bool   `json:"real_name_required"`
+	EventID            int64      `json:"event_id,string"`
+	EventTitle         string     `json:"event_title"`
+	CoverURL           string     `json:"cover_url"`
+	RealNameRequired   bool       `json:"real_name_required"`
+	OriginalPriceCents int64      `json:"original_price_cents"`
+	TierName           string     `json:"tier_name"`
+	City               string     `json:"city"`
+	VenueName          string     `json:"venue_name"`
+	SessionStartsAt    *time.Time `json:"session_starts_at,omitempty"`
+	Category           string     `json:"category"`
 }
 
 func (s *RushSaleService) ListCampaigns(
@@ -160,14 +165,69 @@ func (s *RushSaleService) ListCampaigns(
 	if err != nil {
 		return nil, err
 	}
-	// Always overlay remaining from Redis stock (local + singleflight); never trust
-	// cached RemainingQuota as the live display number.
-	for i := range views {
-		if stock, ok, stockErr := s.loadRushStock(ctx, views[i].ID, views[i].TotalQuota); stockErr == nil && ok {
-			views[i].RemainingQuota = int(stock)
-		}
-	}
+	s.overlayRushRemaining(ctx, views)
 	return views, nil
+}
+
+// ListCampaignsForEvent returns campaigns on one event, including ended/sold-out
+// rows so event-detail deep links still render. It does not use the public list cache.
+func (s *RushSaleService) ListCampaignsForEvent(ctx context.Context, eventID int64) ([]RushSaleCampaignView, error) {
+	if eventID <= 0 {
+		return []RushSaleCampaignView{}, nil
+	}
+	var event models.Event
+	if err := s.db.WithContext(ctx).Select("id", "status").
+		Where("id = ?", eventID).Limit(1).Find(&event).Error; err != nil {
+		return nil, err
+	}
+	if event.ID == 0 || event.Status != models.EventStatusPublished {
+		return []RushSaleCampaignView{}, nil
+	}
+	var sessionIDs []int64
+	if err := s.db.WithContext(ctx).Model(&models.EventSession{}).
+		Where("event_id = ?", eventID).Pluck("id", &sessionIDs).Error; err != nil {
+		return nil, err
+	}
+	if len(sessionIDs) == 0 {
+		return []RushSaleCampaignView{}, nil
+	}
+	var tierIDs []int64
+	if err := s.db.WithContext(ctx).Model(&models.TicketTier{}).
+		Where("session_id IN ?", sessionIDs).Pluck("id", &tierIDs).Error; err != nil {
+		return nil, err
+	}
+	if len(tierIDs) == 0 {
+		return []RushSaleCampaignView{}, nil
+	}
+	var campaigns []models.RushSaleCampaign
+	if err := s.db.WithContext(ctx).
+		Where("ticket_tier_id IN ?", tierIDs).
+		Where("status <> ?", models.RushSaleStatusDraft).
+		Order("starts_at ASC").
+		Find(&campaigns).Error; err != nil {
+		return nil, err
+	}
+	views := s.viewsFromCampaigns(ctx, campaigns)
+	s.overlayRushRemaining(ctx, views)
+	return views, nil
+}
+
+func (s *RushSaleService) overlayRushRemaining(ctx context.Context, views []RushSaleCampaignView) {
+	for i := range views {
+		views[i].RemainingQuota = s.LiveRemaining(ctx, views[i].ID, views[i].TotalQuota, views[i].RemainingQuota)
+	}
+}
+
+// LiveRemaining returns Redis remaining when the stock key is warm; otherwise fallback.
+func (s *RushSaleService) LiveRemaining(ctx context.Context, campaignID int64, totalQuota, fallback int) int {
+	if s == nil {
+		return fallback
+	}
+	stock, ok, err := s.loadRushStock(ctx, campaignID, totalQuota)
+	if err != nil || !ok {
+		return fallback
+	}
+	return int(stock)
 }
 
 // loadRushSalesListMeta builds the list shape from MySQL (campaign + event title).
@@ -184,29 +244,47 @@ func (s *RushSaleService) loadRushSalesListMeta(ctx context.Context) ([]RushSale
 	if err != nil {
 		return nil, err
 	}
+	views := s.viewsFromCampaigns(ctx, campaigns)
+	return views, nil
+}
+
+func (s *RushSaleService) viewsFromCampaigns(ctx context.Context, campaigns []models.RushSaleCampaign) []RushSaleCampaignView {
 	views := make([]RushSaleCampaignView, 0, len(campaigns))
 	for _, campaign := range campaigns {
-		view := RushSaleCampaignView{RushSaleCampaign: campaign}
-		tier, err := s.catalog.repo.FindTicketTierByID(ctx, campaign.TicketTierID)
-		if err == nil {
-			session, sessionErr := s.catalog.repo.FindSessionByID(ctx, tier.SessionID)
-			if sessionErr == nil {
-				event, eventErr := s.catalog.repo.FindEventByID(ctx, session.EventID)
-				if eventErr == nil {
-					view.EventID = event.ID
-					view.EventTitle = event.Title
-					view.CoverURL = event.CoverURL
-					view.RealNameRequired = event.RealNameRequired
-				}
+		views = append(views, s.hydrateCampaignView(ctx, campaign))
+	}
+	return views
+}
+
+func (s *RushSaleService) hydrateCampaignView(ctx context.Context, campaign models.RushSaleCampaign) RushSaleCampaignView {
+	view := RushSaleCampaignView{RushSaleCampaign: campaign}
+	tier, err := s.catalog.repo.FindTicketTierByID(ctx, campaign.TicketTierID)
+	if err == nil {
+		view.OriginalPriceCents = tier.PriceCents
+		view.TierName = tier.Name
+		session, sessionErr := s.catalog.repo.FindSessionByID(ctx, tier.SessionID)
+		if sessionErr == nil {
+			startsAt := session.StartsAt
+			view.SessionStartsAt = &startsAt
+			if session.Venue.Name != "" {
+				view.VenueName = session.Venue.Name
+				view.City = session.Venue.City
+			}
+			event, eventErr := s.catalog.repo.FindEventByID(ctx, session.EventID)
+			if eventErr == nil {
+				view.EventID = event.ID
+				view.EventTitle = event.Title
+				view.CoverURL = event.CoverURL
+				view.RealNameRequired = event.RealNameRequired
+				view.Category = event.Category
 			}
 		}
-		// Prefer Redis for snapshot remaining; avoid MySQL bucket SUM on the hot path.
-		if stock, ok, stockErr := s.loadRushStock(ctx, campaign.ID, campaign.TotalQuota); stockErr == nil && ok {
-			view.RemainingQuota = int(stock)
-		}
-		views = append(views, view)
 	}
-	return views, nil
+	// Prefer Redis for snapshot remaining; avoid MySQL bucket SUM on the hot path.
+	if stock, ok, stockErr := s.loadRushStock(ctx, campaign.ID, campaign.TotalQuota); stockErr == nil && ok {
+		view.RemainingQuota = int(stock)
+	}
+	return view
 }
 
 func (s *RushSaleService) Execute(
@@ -614,7 +692,6 @@ func (s *TicketOrderService) createRushOrderAfterReservation(
 	s.invalidateUserOrderQueryCache(ctx, userID)
 	got := ticketOrderReceipt(order)
 	s.rememberIdempotentOrder(ctx, userID, idempotencyKey, got)
-	metrics.OrdersCreated.Inc()
 	return got, nil
 }
 

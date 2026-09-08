@@ -1,9 +1,15 @@
+# 密钥请用环境变量覆盖，不要把真实 config.yaml 提交进仓库：
+# MYSQL_DSN、REDIS_PASSWORD、RABBITMQ_URL、JWT_SECRET、TICKET_QR_SECRET。
 server:
   host: "127.0.0.1"
   port: 8080
   mode: "debug"  # debug | release | test
   # 活动封面等本地上传目录；相对路径相对进程工作目录。
   upload_dir: "uploads"
+  # 仅在缺失时创建 admin/organizer/user，不会重置已有密码。生产保持 false。
+  demo_accounts: false
+  # 反向代理 CIDR；留空则不信任 X-Forwarded-For。环境变量 SERVER_TRUSTED_PROXIES。
+  trusted_proxies: []
 
 mysql:
   dsn: "gofun:gofun123456@tcp(127.0.0.1:3306)/gofun?charset=utf8mb4&parseTime=True&loc=Local"
@@ -34,7 +40,7 @@ rabbitmq:
 
 jwt:
   secret: "change-me-to-a-random-string"
-  expire_secs: 500
+  expire_secs: 7200
   refresh_expire_secs: 604800
 
 ticket_qr:

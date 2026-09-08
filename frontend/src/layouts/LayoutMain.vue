@@ -1,21 +1,19 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Location, Search, User } from '@element-plus/icons-vue'
 import api from '../api'
 import { useDiscovery } from '../stores/discovery'
 import { connectOrderSocket, disconnectOrderSocket } from '../stores/orderSocket'
+import { hasApprovedOrganizerWorkspace, logoutSession, useSession } from '../stores/session'
 
 const route = useRoute()
 const router = useRouter()
-const token = computed(() => localStorage.getItem('access_token') || localStorage.getItem('token'))
-const username = computed(() => localStorage.getItem('username') || '我的')
-const role = ref(localStorage.getItem('role') || '')
+const { token, username, role, applySession, hasOrganizerWorkspace, setOrganizerWorkspace } = useSession()
 const isAdmin = computed(() => role.value === 'admin')
 const discoverOpen = ref(false)
 const searchDraft = ref('')
 const { state, setCity, setKeyword, applyMeta } = useDiscovery()
-
 const cityLabel = computed(() => state.city || '全国')
 
 function selectCity(city) {
@@ -30,31 +28,44 @@ function submitSearch() {
   if (route.name !== 'Home') router.push('/')
 }
 
-function logout() {
-  disconnectOrderSocket()
-  localStorage.removeItem('access_token')
-  localStorage.removeItem('refresh_token')
-  localStorage.removeItem('token')
-  localStorage.removeItem('username')
-  localStorage.removeItem('role')
-  role.value = ''
-  router.push('/')
+async function logout() {
+  await logoutSession()
+  if (route.path !== '/') router.push('/')
 }
 
 watch(() => state.keyword, (value) => {
   if (searchDraft.value !== value) searchDraft.value = value
 }, { immediate: true })
 
+async function refreshOrganizerWorkspace() {
+  if (!token.value || role.value === 'admin') {
+    setOrganizerWorkspace(false)
+    return
+  }
+  try {
+    const res = await api.organizerGetMine()
+    setOrganizerWorkspace(hasApprovedOrganizerWorkspace(res.data))
+  } catch {
+    setOrganizerWorkspace(false)
+  }
+}
+
+async function refreshUser() {
+  if (!token.value) return
+  const userRes = await api.getUserInfo()
+  applySession({
+    username: userRes.data?.username,
+    role: userRes.data?.role,
+  })
+  await refreshOrganizerWorkspace()
+}
+provide('refreshUser', refreshUser)
+
 onMounted(async () => {
   if (token.value) {
     connectOrderSocket()
     try {
-      const userRes = await api.getUserInfo()
-      if (userRes.data?.username) localStorage.setItem('username', userRes.data.username)
-      if (userRes.data?.role) {
-        localStorage.setItem('role', userRes.data.role)
-        role.value = userRes.data.role
-      }
+      await refreshUser()
     } catch {
       // 登录态失效时拦截器会跳转登录
     }
@@ -121,7 +132,8 @@ onBeforeUnmount(() => {
           <el-dropdown-menu>
             <el-dropdown-item v-if="!isAdmin" @click="router.push('/orders')">我的订单</el-dropdown-item>
             <el-dropdown-item v-if="!isAdmin" @click="router.push('/account')">个人中心</el-dropdown-item>
-            <el-dropdown-item v-if="!isAdmin" @click="router.push('/organizer')">主办方工作台</el-dropdown-item>
+            <el-dropdown-item v-if="!isAdmin" @click="router.push('/account?tab=favorites')">我的收藏</el-dropdown-item>
+            <el-dropdown-item v-if="hasOrganizerWorkspace" @click="router.push('/organizer')">主办方工作台</el-dropdown-item>
             <el-dropdown-item v-if="isAdmin" @click="router.push('/admin')">平台管理</el-dropdown-item>
             <el-dropdown-item divided @click="logout">退出登录</el-dropdown-item>
           </el-dropdown-menu>

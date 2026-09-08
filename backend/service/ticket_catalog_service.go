@@ -145,6 +145,7 @@ type OrganizerOverview struct {
 	NetRevenueCents         int64     `json:"net_revenue_cents"`
 	PreviousPaidOrders      int64     `json:"previous_paid_orders"`
 	PreviousPaidTickets     int64     `json:"previous_paid_tickets"`
+	PreviousGrossRevenueCents int64   `json:"previous_gross_revenue_cents"`
 	PreviousNetRevenueCents int64     `json:"previous_net_revenue_cents"`
 	PaymentFailedOrders     int64     `json:"payment_failed_orders"`
 	TimeoutCancelledOrders  int64     `json:"timeout_cancelled_orders"`
@@ -1527,6 +1528,7 @@ func (s *TicketCatalogService) GetOrganizerOverview(
 	overview.NetRevenueCents = current.GrossRevenueCents - current.RefundedAmountCents
 	overview.PreviousPaidOrders = previous.PaidOrders
 	overview.PreviousPaidTickets = previous.PaidTickets
+	overview.PreviousGrossRevenueCents = previous.GrossRevenueCents
 	overview.PreviousNetRevenueCents = previous.GrossRevenueCents - previous.RefundedAmountCents
 	overview.PaymentFailedOrders = leaks.PaymentFailedOrders
 	overview.TimeoutCancelledOrders = leaks.TimeoutCancelledOrders

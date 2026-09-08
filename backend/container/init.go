@@ -19,7 +19,6 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
@@ -27,7 +26,7 @@ import (
 )
 
 func NewContainer(cfg *config.Config) (*Container, error) {
-	db, workerDB, err := initDB(cfg.MySQL, cfg.Telemetry.Enabled)
+	db, workerDB, err := initDB(cfg.MySQL, cfg.Telemetry.Enabled, cfg.Server.DemoAccounts)
 	if err != nil {
 		return nil, fmt.Errorf("init db: %w", err)
 	}
@@ -94,7 +93,7 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	return c, nil
 }
 
-func initDB(cfg config.MySQLConfig, tracingEnabled bool) (httpDB, workerDB *gorm.DB, err error) {
+func initDB(cfg config.MySQLConfig, tracingEnabled, demoAccounts bool) (httpDB, workerDB *gorm.DB, err error) {
 	httpDB, err = openGormDB(cfg.DSN, tracingEnabled)
 	if err != nil {
 		return nil, nil, err
@@ -112,17 +111,8 @@ func initDB(cfg config.MySQLConfig, tracingEnabled bool) (httpDB, workerDB *gorm
 		}
 	}
 
-	var adminCount int64
-	httpDB.Model(&models.User{}).Where("role = ?", "admin").Count(&adminCount)
-	if adminCount == 0 {
-		hashed, _ := bcrypt.GenerateFromPassword([]byte("admin123"), 12)
-		httpDB.Where(models.User{Username: "admin"}).Assign(models.User{
-			Password:     string(hashed),
-			Balance:      9999,
-			BalanceCents: 999900,
-			Role:         "admin",
-		}).FirstOrCreate(&models.User{})
-		log.Println("默认管理员已创建: admin / admin123")
+	if demoAccounts {
+		EnsureDemoAccounts(httpDB)
 	}
 
 	workerDB = httpDB
@@ -212,6 +202,8 @@ func ticketingSchemaModels() []interface{} {
 		&models.AdmissionTicket{},
 		&models.TicketVerificationRecord{},
 		&models.EventComment{},
+		&models.UserFavorite{},
+		&models.UserAttendee{},
 		&models.SeatLayout{},
 		&models.Seat{},
 		&models.SessionSeat{},

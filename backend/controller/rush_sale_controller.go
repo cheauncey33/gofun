@@ -4,6 +4,8 @@ import (
 	"gofun/pkg/response"
 	"gofun/service"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,7 +19,19 @@ func NewRushSaleController(service *service.RushSaleService) *RushSaleController
 }
 
 func (ctrl *RushSaleController) ListCampaigns(c *gin.Context) {
-	campaigns, err := ctrl.service.ListCampaigns(c.Request.Context())
+	ctx := c.Request.Context()
+	var campaigns []service.RushSaleCampaignView
+	var err error
+	if raw := strings.TrimSpace(c.Query("event_id")); raw != "" {
+		eventID, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil || eventID <= 0 {
+			response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "活动无效")
+			return
+		}
+		campaigns, err = ctrl.service.ListCampaignsForEvent(ctx, eventID)
+	} else {
+		campaigns, err = ctrl.service.ListCampaigns(ctx)
+	}
 	if err != nil {
 		writeTicketOrderError(c, err)
 		return

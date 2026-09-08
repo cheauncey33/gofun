@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+backend/config/config.yaml
 
 # Local image uploads
 backend/uploads/*

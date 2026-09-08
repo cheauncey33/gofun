@@ -86,8 +86,9 @@ func main() {
 		ticketOrderSvc,
 		time.Duration(cfg.RushSale.CampaignCacheTTLMS)*time.Millisecond,
 	)
-	// 活动取消时联动关闭其关联的抢票活动。
+	// 活动取消时联动关闭其关联的抢票活动；收藏状态读同一套 Redis 余票。
 	ticketCatalogSvc.LinkRushSale(rushSaleSvc)
+	userSvc.LinkRushSale(rushSaleSvc)
 	ticketOrderConsumer := service.NewTicketOrderConsumer(
 		cont.NewMQChannel,
 		cont.MQQueueName,
@@ -161,6 +162,9 @@ func main() {
 
 	// 创建路由
 	r := gin.Default()
+	if err := r.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		panic(fmt.Errorf("设置可信代理失败: %v", err))
+	}
 	r.Use(middleware.RequestIDMiddleware())
 	if cfg.Telemetry.Enabled {
 		r.Use(otelgin.Middleware(cfg.Telemetry.ServiceName))
@@ -189,9 +193,9 @@ func main() {
 	// 路由注册
 	v1 := r.Group("/api/v1")
 	{
-		v1.POST("/login", userCtrl.Login)
-		v1.POST("/register", userCtrl.Register)
-		v1.POST("/auth/refresh", userCtrl.Refresh)
+		v1.POST("/login", writeLimit, userCtrl.Login)
+		v1.POST("/register", writeLimit, userCtrl.Register)
+		v1.POST("/auth/refresh", writeLimit, userCtrl.Refresh)
 		v1.POST("/logout", userCtrl.Logout)
 		v1.GET("/ws", orderSocketHandler.Handle)
 		v1.POST("/payments/sandbox/callback", ticketOrderCtrl.PaymentCallback)
@@ -231,6 +235,9 @@ func main() {
 			auth.GET("/user/attendees", userCtrl.ListAttendees)
 			auth.POST("/user/attendees", userCtrl.CreateAttendee)
 			auth.DELETE("/user/attendees/:id", userCtrl.DeleteAttendee)
+			auth.GET("/user/favorites", userCtrl.ListFavorites)
+			auth.POST("/user/favorites", userCtrl.AddFavorite)
+			auth.DELETE("/user/favorites/:id", userCtrl.DeleteFavorite)
 			auth.GET("/organizers/mine", ticketCatalogCtrl.ListMyOrganizers)
 			auth.POST("/organizers/apply", writeLimit, ticketCatalogCtrl.ApplyOrganizer)
 			auth.POST("/uploads", writeLimit, uploadCtrl.Create)

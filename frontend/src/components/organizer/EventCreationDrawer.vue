@@ -435,8 +435,8 @@ function sessionTime(session) {
       </div>
       <label>售卖方式 <b>*</b>
         <el-select v-model="eventForm.sale_mode">
-          <el-option label="计数售卖：展览 / 演唱会分区" value="counter" />
-          <el-option label="必须选座：电影 / 脱口秀" value="seated" :disabled="isExhibition" />
+          <el-option label="门票制：按张数卖，不用厅图" value="counter" />
+          <el-option label="选座制：对号入座，需要厅图" value="seated" :disabled="isExhibition" />
         </el-select>
       </label>
     </section>

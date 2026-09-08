@@ -19,7 +19,6 @@ const routes = [
   {
     path: '/',
     component: () => import('../layouts/LayoutMain.vue'),
-    meta: { blockAdmin: true },
     children: [
       { path: '', name: 'Home', component: () => import('../views/Home.vue'), meta: { title: '发现活动' } },
       { path: 'events/:id', name: 'EventDetail', component: () => import('../views/EventDetail.vue'), meta: { title: '活动详情' } },

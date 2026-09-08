@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import { logoutSession } from '../stores/session'
 
 const router = useRouter()
 const loading = ref(true)
@@ -15,6 +16,15 @@ const overview = ref({
   published_events: 0,
   period_days: 7,
   paid_orders: 0,
+  paid_tickets: 0,
+  gross_revenue_cents: 0,
+  refunded_orders: 0,
+  refunded_amount_cents: 0,
+  net_revenue_cents: 0,
+  previous_paid_orders: 0,
+  previous_paid_tickets: 0,
+  previous_gross_revenue_cents: 0,
+  previous_net_revenue_cents: 0,
   payment_failed_orders: 0,
   timeout_cancelled_orders: 0,
   payment_success_rate: 0,
@@ -28,25 +38,26 @@ const pendingEvents = ref([])
 const runtime = computed(() => overview.value.runtime || {})
 let overviewTimer = 0
 
-function formatNum(value, digits = 1) {
-  const n = Number(value || 0)
-  if (!Number.isFinite(n)) return '—'
-  return Number.isInteger(n) ? String(n) : n.toFixed(digits)
-}
-
 function formatMs(value) {
   const n = Number(value || 0)
-  if (!Number.isFinite(n) || n <= 0) return '—'
+  if (!Number.isFinite(n) || n <= 0) return ''
   if (n < 1) return `${n.toFixed(1)} ms`
   return `${Math.round(n)} ms`
 }
 
 function formatAge(value) {
   const seconds = Number(value || 0)
-  if (!seconds) return '—'
+  if (!Number.isFinite(seconds) || seconds <= 0) return ''
   if (seconds < 60) return `${Math.round(seconds)} 秒`
   if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟`
   return `${(seconds / 3600).toFixed(1)} 小时`
+}
+
+function waitHint(count, ageSeconds) {
+  const n = Math.round(Number(count || 0))
+  if (n <= 0) return '没有积压'
+  const age = formatAge(ageSeconds)
+  return age ? `${n} 笔，已等 ${age}` : `${n} 笔处理中`
 }
 
 function formatPct(value) {
@@ -55,36 +66,36 @@ function formatPct(value) {
   return `${n.toFixed(n % 1 ? 1 : 0)}%`
 }
 
-const salesHealth = computed(() => {
-  const paid = Number(overview.value.paid_orders || 0)
-  const failed = Number(overview.value.payment_failed_orders || 0)
-  const timeout = Number(overview.value.timeout_cancelled_orders || 0)
-  const rate = Number(overview.value.payment_success_rate || 0)
-  const resolved = paid + timeout
-  return [
-    {
-      key: 'pay-rate',
-      label: '支付成功率',
-      value: resolved ? formatPct(rate) : '—',
-      hint: resolved ? `近 ${overview.value.period_days || 7} 天 · 成交 ${paid} / 关单 ${timeout}` : '近 7 天暂无完结支付',
-      tone: !resolved ? '' : rate < 80 ? 'alert' : rate < 95 ? 'warn' : 'ok',
-    },
-    {
-      key: 'timeout',
-      label: '超时关单',
-      value: String(timeout),
-      hint: '支付窗口内未付款，系统自动取消',
-      tone: timeout > 0 ? 'warn' : 'ok',
-    },
-    {
-      key: 'failed',
-      label: '支付失败',
-      value: String(failed),
-      hint: '窗口内支付回调失败的订单，同一单只计一次',
-      tone: failed > 0 ? 'warn' : 'ok',
-    },
-  ]
+function formatMoney(cents) {
+  return `¥${(Number(cents || 0) / 100).toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
+}
+
+function trendMeta(current, previous) {
+  const now = Number(current || 0)
+  const before = Number(previous || 0)
+  if (!before && !now) return { tone: 'flat', label: '与上期持平' }
+  if (!before) return { tone: 'up', label: '上期为 0，本期新增' }
+  const change = ((now - before) / Math.abs(before)) * 100
+  if (Math.abs(change) < 0.05) return { tone: 'flat', label: '与上期持平' }
+  return {
+    tone: change > 0 ? 'up' : 'down',
+    label: `较前 7 天 ${change > 0 ? '↑' : '↓'} ${Math.abs(change).toFixed(1)}%`,
+  }
+}
+
+const revenueTrend = computed(() => trendMeta(overview.value.gross_revenue_cents, overview.value.previous_gross_revenue_cents))
+const refundRateValue = computed(() => {
+  const gross = Number(overview.value.gross_revenue_cents || 0)
+  const refunded = Number(overview.value.refunded_amount_cents || 0)
+  if (gross <= 0) return 0
+  return Math.round((refunded / gross) * 1000) / 10
 })
+const refundRateLabel = computed(() => (
+  Number(overview.value.gross_revenue_cents || 0) > 0 ? formatPct(refundRateValue.value) : '—'
+))
 
 const workItems = computed(() => [
   {
@@ -103,131 +114,95 @@ const workItems = computed(() => [
   },
 ])
 
-const sreTiles = computed(() => {
+const opsTiles = computed(() => {
   const r = runtime.value
   const qps = Number(r.http_qps || 0)
+  const p50 = Number(r.http_p50_ms || 0)
   const p95 = Number(r.http_p95_ms || 0)
   const err = Number(r.http_error_rate || 0)
   const backlog = Number(r.outbox_pending || 0) + Number(r.stock_reservation_pending || 0) + Number(r.mq_work_queue_ready || 0)
   return [
     {
       key: 'qps',
-      label: '请求流量',
-      value: formatNum(qps, 1),
-      hint: `近 10 秒 QPS · 在途 ${Math.round(r.http_in_flight || 0)}`,
-      tone: qps > 80 ? 'warn' : 'ok',
+      label: '当前流量',
+      value: `${Number.isInteger(qps) ? qps : qps.toFixed(1)} /s`,
+      hint: `近 10 秒 · 在途 ${Math.round(r.http_in_flight || 0)}`,
+      tone: qps > 80 ? 'warn' : '',
     },
     {
-      key: 'latency',
-      label: 'HTTP p95',
-      value: formatMs(p95),
-      hint: `近 5 分钟 · p99 ${formatMs(r.http_p99_ms)}`,
-      tone: p95 > 1000 ? 'alert' : p95 > 500 ? 'warn' : 'ok',
+      key: 'avg',
+      label: '平均延迟',
+      value: formatMs(p50) || '暂无请求',
+      hint: p50 > 0 ? `中位 p50 · 尾部 p95 ${formatMs(p95) || '—'}` : '近 5 分钟没有请求',
+      tone: p50 > 400 ? 'warn' : '',
+    },
+    {
+      key: 'p95',
+      label: '尾部延迟',
+      value: formatMs(p95) || '暂无请求',
+      hint: p95 > 0 ? `p95 · p99 ${formatMs(r.http_p99_ms) || '—'}` : '近 5 分钟没有请求',
+      tone: p95 > 1000 ? 'alert' : p95 > 500 ? 'warn' : '',
     },
     {
       key: 'error',
-      label: '服务端错误率',
+      label: '错误率',
       value: formatPct(err),
-      hint: `近 5 分钟 · 5xx ${Math.round(r.http_5xx || 0)} / ${Math.round(r.http_requests || 0)}`,
-      tone: err > 1 ? 'alert' : Number(r.http_5xx || 0) > 0 ? 'warn' : 'ok',
+      hint: `近 5 分钟 5xx ${Math.round(r.http_5xx || 0)} / 4xx ${Math.round(r.http_4xx || 0)}`,
+      tone: err > 1 ? 'alert' : Number(r.http_5xx || 0) > 0 ? 'warn' : '',
     },
     {
       key: 'backlog',
-      label: '待处理积压',
+      label: '积压',
       value: String(Math.round(backlog)),
-      hint: `MQ ${Math.round(r.mq_work_queue_ready || 0)} · Outbox ${Math.round(r.outbox_pending || 0)} · 库存预留 ${Math.round(r.stock_reservation_pending || 0)}`,
-      tone: backlog > 100 ? 'alert' : backlog > 0 ? 'warn' : 'ok',
+      hint: backlog > 0 ? '有未完成的出票或预扣' : '没有积压',
+      tone: backlog > 100 ? 'alert' : backlog > 0 ? 'warn' : '',
     },
   ]
 })
 
-const latencyBars = computed(() => {
+const pipelineRows = computed(() => {
   const r = runtime.value
-  const items = [
-    { label: 'p50', value: Number(r.http_p50_ms || 0) },
-    { label: 'p95', value: Number(r.http_p95_ms || 0) },
-    { label: 'p99', value: Number(r.http_p99_ms || 0) },
-  ]
-  const cap = Math.max(...items.map(item => item.value), 50)
-  return items.map(item => ({
-    ...item,
-    pct: Math.min(100, (item.value / cap) * 100),
-    text: formatMs(item.value),
-  }))
-})
-
-const correctness = computed(() => {
-  const r = runtime.value
-  const mqOk = Number(r.mq_consumed_ok || 0)
-  const mqErr = Number(r.mq_consumed_err || 0)
-  const mqRetry = Number(r.mq_consumed_retry || 0)
-  const mqMalformed = Number(r.mq_consumed_malformed || 0)
-  const mqPermanent = Number(r.mq_consumed_permanent || 0)
-  const mqDeadLetter = Number(r.mq_consumed_dead_letter || 0)
-  const mqFinal = mqOk + mqErr
-  const txTotal = Number(r.consumer_tx_ok || 0) + Number(r.consumer_tx_err || 0)
+  const accept = formatMs(r.order_accept_p95_ms)
+  const consume = formatMs(r.consumer_tx_p95_ms)
+  const recovery = formatAge(r.stock_recovery_last_success_ago_seconds)
   return [
     {
-      label: 'MQ 最终成功率',
-      value: mqFinal ? formatPct(100 - Number(r.mq_error_rate || 0)) : '—',
-      hint: (mqFinal || mqRetry)
-        ? `成功 ${Math.round(mqOk)} · 重试 ${Math.round(mqRetry)} · 永久失败 ${Math.round(mqPermanent)} · 死信 ${Math.round(mqDeadLetter)} · 格式错误 ${Math.round(mqMalformed)} · 本次启动累计`
-        : '暂无数据',
-      alert: mqErr > 0,
-    },
-    {
-      label: '订单落库成功率',
-      value: txTotal ? formatPct(100 - Number(r.consumer_error_rate || 0)) : '—',
-      hint: txTotal ? `异常 ${Math.round(r.consumer_tx_err || 0)} · 本次启动累计` : '暂无数据',
-      alert: Number(r.consumer_tx_err || 0) > 0,
-    },
-    {
-      label: '下单到待支付 p95',
-      value: formatMs(r.order_accept_p95_ms),
-      hint: `消费事务 ${formatMs(r.consumer_tx_p95_ms)} · 本次启动累计`,
-      alert: Number(r.order_accept_p95_ms || 0) > 5000,
-    },
-    {
-      label: '库存恢复心跳',
-      value: formatAge(r.stock_recovery_last_success_ago_seconds),
-      hint: Number(r.stock_recovery_last_success_ago_seconds || 0) ? '距最近一次成功扫描' : '尚无成功记录',
-      alert: Number(r.stock_recovery_last_success_ago_seconds || 0) > 120,
-    },
-  ]
-})
-
-const infrastructure = computed(() => {
-  const r = runtime.value
-  return [
-    {
-      label: 'Outbox 待投递',
+      label: '订单确认积压',
       value: Math.round(r.outbox_pending || 0),
-      hint: `最老 ${formatAge(r.outbox_oldest_age_seconds)}`,
+      hint: waitHint(r.outbox_pending, r.outbox_oldest_age_seconds),
       alert: Number(r.outbox_pending || 0) > 0,
     },
     {
-      label: '库存预留待确认',
+      label: '库存预扣',
       value: Math.round(r.stock_reservation_pending || 0),
-      hint: `最老 ${formatAge(r.stock_reservation_oldest_age_seconds)}`,
+      hint: waitHint(r.stock_reservation_pending, r.stock_reservation_oldest_age_seconds),
       alert: Number(r.stock_reservation_pending || 0) > 0,
     },
     {
-      label: '订单工作队列',
+      label: '订单队列',
       value: Math.round(r.mq_work_queue_ready || 0),
-      hint: `消费者 ${Math.round(r.mq_work_queue_consumers || 0)}`,
+      hint: Number(r.mq_work_queue_ready || 0) > 0
+        ? `${Math.round(r.mq_work_queue_consumers || 0)} 个消费者在消化`
+        : '队列畅通',
       alert: Number(r.mq_work_queue_ready || 0) > 100,
     },
     {
-      label: 'HTTP 数据库连接池',
-      value: formatPct(r.db_pool_usage_rate),
-      hint: `${Math.round(r.db_connections_in_use || 0)} / ${Math.round(r.db_max_open_connections || 0)} 使用中`,
-      alert: Number(r.db_pool_usage_rate || 0) > 80,
+      label: '下单确认耗时',
+      value: accept || '暂无样本',
+      hint: consume ? `落库 p95 ${consume}` : '近窗没有下单样本',
+      alert: Number(r.order_accept_p95_ms || 0) > 5000,
     },
     {
-      label: '限流保护',
-      value: formatPct(r.rate_limit_reject_rate),
-      hint: `拦截 ${Math.round(r.rate_limit_rejected || 0)} · 本次启动累计`,
-      alert: Number(r.rate_limit_reject_rate || 0) > 20,
+      label: '库存恢复',
+      value: recovery ? `${recovery}前` : '尚未扫描',
+      hint: recovery ? '上次成功对账' : '启动后还没有成功扫描',
+      alert: Number(r.stock_recovery_last_success_ago_seconds || 0) > 120,
+    },
+    {
+      label: '数据库连接',
+      value: formatPct(r.db_pool_usage_rate),
+      hint: `${Math.round(r.db_connections_in_use || 0)} / ${Math.round(r.db_max_open_connections || 0)} 在用`,
+      alert: Number(r.db_pool_usage_rate || 0) > 80,
     },
   ]
 })
@@ -243,13 +218,9 @@ onUnmounted(() => {
   window.clearInterval(overviewTimer)
 })
 
-function logout() {
-  localStorage.removeItem('access_token')
-  localStorage.removeItem('refresh_token')
-  localStorage.removeItem('token')
-  localStorage.removeItem('username')
-  localStorage.removeItem('role')
-  router.push('/login')
+async function logout() {
+  await logoutSession()
+  router.push('/')
 }
 
 async function loadAll() {
@@ -359,9 +330,12 @@ function auditLabel(status) {
 <template>
   <div class="admin-shell">
     <header class="admin-topbar">
-      <strong class="brand">Gofun</strong>
+      <button class="brand" type="button" @click="router.push('/')">Gofun</button>
       <span>平台管理</span>
-      <button class="logout" type="button" @click="logout">退出登录</button>
+      <div class="topbar-actions">
+        <button class="store-link" type="button" @click="router.push('/')">查看购票站</button>
+        <button class="logout" type="button" @click="logout">退出登录</button>
+      </div>
     </header>
     <aside>
       <button :class="{ active: section === 'overview' }" type="button" @click="section = 'overview'">工作台</button>
@@ -379,11 +353,37 @@ function auditLabel(status) {
         <header class="heading">
           <div>
             <h1>平台工作台</h1>
-            <p>先处理审核事项，再看近 7 天全站成交和近 5 分钟平台健康</p>
+            <p>先看系统是否正常，再处理审核和全站销售</p>
           </div>
           <el-button @click="loadAll">刷新</el-button>
         </header>
 
+        <header class="section-heading first">
+          <h2>平台健康</h2>
+        </header>
+        <section class="sre-grid" aria-label="平台健康">
+          <article
+            v-for="tile in opsTiles"
+            :key="tile.key"
+            class="sre-tile"
+            :class="tile.tone"
+          >
+            <span>{{ tile.label }}</span>
+            <strong>{{ tile.value }}</strong>
+            <small>{{ tile.hint }}</small>
+          </article>
+        </section>
+        <ul class="pipeline-list">
+          <li v-for="row in pipelineRows" :key="row.label" :class="{ alert: row.alert }">
+            <span>{{ row.label }}</span>
+            <strong>{{ row.value }}</strong>
+            <small>{{ row.hint }}</small>
+          </li>
+        </ul>
+
+        <header class="section-heading">
+          <h2>待办审批</h2>
+        </header>
         <div class="todo-grid">
           <button
             v-for="item in workItems"
@@ -403,7 +403,6 @@ function auditLabel(status) {
           <article v-if="pendingOrganizers[0]">
             <h3>待批主办方</h3>
             <p><b>{{ pendingOrganizers[0].organizer?.name }}</b> · {{ pendingOrganizers[0].owner_username || '未知账号' }}</p>
-            <p class="muted">{{ pendingOrganizers[0].organizer?.description || '未填写简介' }}</p>
             <div class="inbox-actions">
               <button type="button" :disabled="!!acting" @click="approveOrganizer(pendingOrganizers[0])">通过</button>
               <button class="danger" type="button" :disabled="!!acting" @click="rejectOrganizer(pendingOrganizers[0])">驳回</button>
@@ -412,7 +411,6 @@ function auditLabel(status) {
           <article v-if="pendingEvents[0]">
             <h3>待审上架</h3>
             <p><b>{{ pendingEvents[0].event?.title }}</b> · {{ pendingEvents[0].organizer_name }}</p>
-            <p class="muted">{{ pendingEvents[0].event?.category }} · {{ pendingEvents[0].event?.sale_mode === 'seated' ? '选座' : '计数' }}</p>
             <div class="inbox-actions">
               <button type="button" :disabled="!!acting" @click="approveEvent(pendingEvents[0])">上架</button>
               <button class="danger" type="button" :disabled="!!acting" @click="rejectEvent(pendingEvents[0])">驳回</button>
@@ -421,73 +419,30 @@ function auditLabel(status) {
         </div>
 
         <header class="section-heading">
-          <div><h2>成交健康</h2><p>全站正式订单，按支付和关单实际发生时间统计近 7 天</p></div>
+          <h2>销售概览</h2>
         </header>
-        <section class="sre-grid sales-grid" aria-label="成交健康">
-          <article
-            v-for="tile in salesHealth"
-            :key="tile.key"
-            class="sre-tile"
-            :class="tile.tone"
-          >
-            <span>{{ tile.label }}</span>
-            <strong>{{ tile.value }}</strong>
-            <small>{{ tile.hint }}</small>
+        <div class="sell-board">
+          <article class="sell-hero">
+            <span>售出金额</span>
+            <strong>{{ formatMoney(overview.gross_revenue_cents) }}</strong>
+            <i class="trend-chip" :class="revenueTrend.tone">{{ revenueTrend.label }}</i>
           </article>
-        </section>
-
-        <header class="section-heading">
-          <div><h2>平台健康</h2><p>HTTP 使用近 5 分钟窗口；QPS 使用近 10 秒窗口</p></div>
-        </header>
-        <section class="sre-grid" aria-label="平台健康">
-          <article
-            v-for="tile in sreTiles"
-            :key="tile.key"
-            class="sre-tile"
-            :class="tile.tone"
-          >
-            <span>{{ tile.label }}</span>
-            <strong>{{ tile.value }}</strong>
-            <small>{{ tile.hint }}</small>
-          </article>
-        </section>
-
-        <div class="panel-row">
-          <section class="panel">
-            <h2>HTTP 延迟分布</h2>
-            <p class="panel-lead">近 5 分钟请求，按固定耗时桶估算</p>
-            <div v-for="bar in latencyBars" :key="bar.label" class="lat-row">
-              <span>{{ bar.label }}</span>
-              <div class="meter-track"><i :style="{ width: `${bar.pct}%` }"></i></div>
-              <b>{{ bar.text }}</b>
-            </div>
-          </section>
-          <section class="panel">
-            <h2>票务链路</h2>
-            <p class="panel-lead">异步落库、消费与库存恢复</p>
-            <ul class="correct-list">
-              <li v-for="row in correctness" :key="row.label" :class="{ alert: row.alert }">
-                <div>
-                  <span>{{ row.label }}</span>
-                  <small>{{ row.hint }}</small>
-                </div>
-                <strong>{{ row.value }}</strong>
-              </li>
-            </ul>
-          </section>
+          <div class="sell-metrics">
+            <article>
+              <span>已付款订单</span>
+              <strong>{{ overview.paid_orders }}<em>笔</em></strong>
+            </article>
+            <article>
+              <span>售出票数</span>
+              <strong>{{ overview.paid_tickets }}<em>张</em></strong>
+            </article>
+            <article :class="{ warn: refundRateValue >= 10 }">
+              <span>退款率</span>
+              <strong>{{ refundRateLabel }}</strong>
+            </article>
+          </div>
         </div>
 
-        <section class="panel infrastructure-panel">
-          <h2>依赖与积压</h2>
-          <p class="panel-lead">数量是当前值，年龄用于判断是否持续卡住</p>
-          <ul class="infrastructure-list">
-            <li v-for="row in infrastructure" :key="row.label" :class="{ alert: row.alert }">
-              <span>{{ row.label }}</span>
-              <strong>{{ row.value }}</strong>
-              <small>{{ row.hint }}</small>
-            </li>
-          </ul>
-        </section>
       </section>
 
       <section v-else-if="section === 'organizers'">
@@ -550,7 +505,7 @@ function auditLabel(status) {
               <template #default="{ row }">{{ row.event?.category }}</template>
             </el-table-column>
             <el-table-column label="卖法" width="90">
-              <template #default="{ row }">{{ row.event?.sale_mode === 'seated' ? '选座' : '计数' }}</template>
+              <template #default="{ row }">{{ row.event?.sale_mode === 'seated' ? '选座制' : '门票制' }}</template>
             </el-table-column>
             <el-table-column label="操作" width="160" align="right">
               <template #default="{ row }">
@@ -577,9 +532,19 @@ function auditLabel(status) {
   gap: 16px;
   background: rgba(248,244,236,.96);
 }
-.brand { font: 800 26px var(--font-display); letter-spacing: .08em; }
+.brand {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: 800 26px var(--font-display);
+  letter-spacing: .08em;
+}
 .admin-topbar span { color: var(--muted); }
-.logout { margin-left: auto; border: 0; background: transparent; cursor: pointer; font: inherit; }
+.topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+.store-link, .logout { border: 0; background: transparent; cursor: pointer; font: inherit; }
+.store-link { color: var(--ink); }
 aside {
   padding: 24px 12px;
   border-right: 1px solid var(--line);
@@ -615,9 +580,10 @@ main { padding: 32px clamp(24px, 4vw, 56px) 70px; }
 .heading h1 { margin: 0; font: 760 36px var(--font-display); }
 .heading p { margin: 8px 0 0; color: var(--muted); font-size: 13px; max-width: 560px; line-height: 1.7; }
 .section-heading { margin-top: 26px; }
+.section-heading.first { margin-top: 18px; }
 .section-heading h2 { margin: 0; font: 720 21px var(--font-display); }
 .section-heading p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
-.todo-grid { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.todo-grid { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .todo-card {
   text-align: left;
   border: 1px solid var(--line-strong);
@@ -630,6 +596,39 @@ main { padding: 32px clamp(24px, 4vw, 56px) 70px; }
 .todo-card span, .todo-card small, .todo-card em { display: block; color: var(--muted); font-size: 12px; }
 .todo-card strong { display: block; margin: 8px 0 6px; font: 680 40px var(--font-display); }
 .todo-card em { color: var(--red); font-style: normal; margin-top: 10px; }
+.sell-board { margin-top: 12px; display: grid; gap: 16px; }
+.sell-hero {
+  padding: 28px 32px 26px;
+  border-radius: 24px;
+  color: #f4eee4;
+  background: linear-gradient(135deg, #3a241f 0%, #1b1512 72%);
+}
+.sell-hero span { display: block; color: #d2c4b4; font-size: 13px; }
+.sell-hero strong {
+  display: block;
+  margin: 10px 0 12px;
+  font: 760 clamp(40px, 5vw, 56px)/1.05 var(--font-display);
+}
+.sell-hero .trend-chip {
+  display: inline-flex;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(244, 238, 228, .12);
+  color: #f0d2c4;
+  font: 650 12px var(--font-body);
+}
+.sell-hero .trend-chip.up { background: rgba(239, 109, 88, .22); color: #ef6d58; }
+.sell-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.sell-metrics article {
+  padding: 20px 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 18px;
+  background: rgba(255,255,255,.55);
+}
+.sell-metrics span { color: var(--muted); font-size: 13px; }
+.sell-metrics strong { display: block; margin-top: 8px; font: 750 32px/1.1 var(--font-display); }
+.sell-metrics em { margin-left: 4px; color: var(--muted); font: 500 13px var(--font-body); }
+.sell-metrics .warn { border-color: rgba(181,52,41,.4); background: #fbf4ee; }
 .inbox {
   margin-top: 14px;
   display: grid;
@@ -665,14 +664,13 @@ main { padding: 32px clamp(24px, 4vw, 56px) 70px; }
 .panel h2 { margin: 0 0 14px; font: 720 18px var(--font-display); }
 .panel-lead { margin: -8px 0 14px; color: var(--muted); font-size: 12px; }
 .sre-grid {
-  margin-top: 18px;
+  margin-top: 12px;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
 }
 @media (min-width: 1100px) {
-  .sre-grid { grid-template-columns: repeat(4, 1fr); }
-  .sre-grid.sales-grid { grid-template-columns: repeat(3, 1fr); }
+  .sre-grid { grid-template-columns: repeat(5, 1fr); }
 }
 .sre-tile {
   border: 1px solid var(--line-strong);
@@ -685,6 +683,24 @@ main { padding: 32px clamp(24px, 4vw, 56px) 70px; }
 .sre-tile strong { display: block; margin: 8px 0 6px; font: 680 26px var(--font-body); }
 .sre-tile.warn { border-color: #c47a3a; }
 .sre-tile.alert { border-color: #8b1e16; background: rgba(139,30,22,.06); }
+.pipeline-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.pipeline-list li {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255,255,255,.4);
+}
+.pipeline-list li.alert { border-color: rgba(139,30,22,.45); background: rgba(139,30,22,.05); }
+.pipeline-list span, .pipeline-list small { display: block; color: var(--muted); font-size: 12px; }
+.pipeline-list strong { display: block; margin: 6px 0 4px; font: 680 20px var(--font-body); }
+.pipeline-list li.alert strong { color: #8b1e16; }
 .lat-row {
   display: grid;
   grid-template-columns: 36px 1fr 72px;
@@ -721,10 +737,10 @@ main { padding: 32px clamp(24px, 4vw, 56px) 70px; }
 @media (max-width: 900px) {
   .admin-shell { grid-template-columns: 1fr; }
   aside { display: flex; overflow: auto; border-right: 0; border-bottom: 1px solid var(--line); }
-  .todo-grid, .inbox, .panel-row { grid-template-columns: 1fr; }
-  .infrastructure-list { grid-template-columns: repeat(2, 1fr); }
+  .todo-grid, .inbox, .panel-row, .sell-metrics { grid-template-columns: 1fr; }
+  .pipeline-list { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 560px) {
-  .sre-grid, .infrastructure-list { grid-template-columns: 1fr; }
+  .sre-grid, .pipeline-list { grid-template-columns: 1fr; }
 }
 </style>

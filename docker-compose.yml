@@ -19,6 +19,7 @@ services:
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 8080
       SERVER_MODE: release
+      SERVER_TRUSTED_PROXIES: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
       MYSQL_DSN: "gofun:${MYSQL_PASSWORD}@tcp(mysql:3306)/gofun?charset=utf8mb4&parseTime=True&loc=Local"
       REDIS_ADDR: redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}

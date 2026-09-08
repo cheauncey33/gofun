@@ -15,7 +15,7 @@
     <section class="auth-panel">
       <div class="auth-box">
         <h2>创建账号</h2>
-        <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent>
+        <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent="handleRegister">
           <el-form-item prop="username">
             <el-input v-model="form.username" placeholder="用户名，3-20 位" size="large">
               <template #prefix><el-icon><User /></el-icon></template>
@@ -32,7 +32,7 @@
             </el-input>
           </el-form-item>
           <el-form-item>
-            <el-button type="primary" size="large" class="auth-button" :loading="loading" @click="handleRegister">
+            <el-button type="primary" size="large" class="auth-button" native-type="submit" :loading="loading">
               注册
             </el-button>
           </el-form-item>

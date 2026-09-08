@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { getVisitorId } from '../utils/visitor'
+import { applySession, endClientSession, safeRedirectPath } from '../stores/session'
 
 let _router = null
 export function setRouter(r) { _router = r }
@@ -12,12 +13,23 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-function clearAuthStorage() {
-  localStorage.removeItem('access_token')
-  localStorage.removeItem('refresh_token')
-  localStorage.removeItem('token')
-  localStorage.removeItem('username')
-  localStorage.removeItem('role')
+function isAuthCredentialRequest(config) {
+  const url = String(config?.url || '')
+  return /\/(login|register|auth\/refresh|logout)(\?|$)/.test(url)
+}
+
+function redirectToLogin() {
+  const current = _router?.currentRoute?.value?.fullPath || `${window.location.pathname}${window.location.search}`
+  const redirect = safeRedirectPath(current, '/')
+  if (_router) {
+    if (_router.currentRoute.value.path === '/login') return
+    _router.push(redirect && redirect !== '/' ? { path: '/login', query: { redirect } } : '/login')
+    return
+  }
+  if (window.location.pathname === '/login') return
+  window.location.href = redirect && redirect !== '/'
+    ? `/login?redirect=${encodeURIComponent(redirect)}`
+    : '/login'
 }
 
 let refreshPromise = null
@@ -26,8 +38,7 @@ api.interceptors.response.use(
   (res) => res,
   async (err) => {
     const original = err.config
-    const isRefreshRequest = original?.url === '/auth/refresh'
-    if (err.response?.status === 401 && original && !original._retry && !isRefreshRequest) {
+    if (err.response?.status === 401 && original && !original._retry && !isAuthCredentialRequest(original)) {
       const refreshToken = localStorage.getItem('refresh_token')
       if (refreshToken) {
         original._retry = true
@@ -35,11 +46,12 @@ api.interceptors.response.use(
           refreshPromise ||= api.post('/auth/refresh', { refresh_token: refreshToken })
             .then((res) => {
               const data = res.data?.data
-              localStorage.setItem('access_token', data.access_token)
-              localStorage.setItem('refresh_token', data.refresh_token)
-              localStorage.setItem('token', data.access_token)
-              if (data.username) localStorage.setItem('username', data.username)
-              if (data.role) localStorage.setItem('role', data.role)
+              applySession({
+                access_token: data.access_token,
+                refresh_token: data.refresh_token,
+                username: data.username,
+                role: data.role,
+              })
               return data.access_token
             })
             .finally(() => {
@@ -51,10 +63,9 @@ api.interceptors.response.use(
         } catch {}
       }
     }
-    if (err.response?.status === 401) {
-      clearAuthStorage()
-      if (_router) _router.push('/login')
-      else window.location.href = '/login'
+    if (err.response?.status === 401 && !isAuthCredentialRequest(original)) {
+      endClientSession()
+      redirectToLogin()
     }
     return Promise.reject(err)
   }
@@ -88,7 +99,7 @@ export default {
       visitor_id: getVisitorId(),
     }).catch(() => {})
   },
-  getRushSales: () => get('/rush-sales'),
+  getRushSales: (params) => get('/rush-sales', params),
   getEventComments: (eventId, params) => get(`/events/${eventId}/comments`, params),
   createEventComment: (eventId, content) => post(`/events/${eventId}/comments`, { content }),
   deleteEventComment: (commentId) => del(`/comments/${commentId}`),
@@ -131,6 +142,9 @@ export default {
   getUserAttendees: () => get('/user/attendees'),
   createUserAttendee: (data) => post('/user/attendees', data),
   deleteUserAttendee: (id) => del(`/user/attendees/${id}`),
+  getFavorites: (params) => get('/user/favorites', params),
+  addFavorite: (target_type, target_id) => post('/user/favorites', { target_type, target_id: String(target_id) }),
+  removeFavorite: (id) => del(`/user/favorites/${id}`),
 
   // Rush sale — 到点直抢，一次 execute（无需前置 token）
   executeRushSale: (id, quantity, purchaseInfo = {}, idempotencyKey = newIdempotencyKey()) =>

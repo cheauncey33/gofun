@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"gofun/metrics"
 	"gofun/models"
 	"log"
 	"strconv"
@@ -451,6 +452,7 @@ func (s *TicketOrderService) AllocateWaitlist(ctx context.Context, tierID int64)
 	}
 	var leftover int
 	fulfilled := 0
+	var fulfilledAmounts []int64
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var tier models.TicketTier
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -482,6 +484,7 @@ func (s *TicketOrderService) AllocateWaitlist(ctx context.Context, tierID int64)
 			}
 			pending -= entries[index].Quantity
 			fulfilled++
+			fulfilledAmounts = append(fulfilledAmounts, entries[index].AmountCents)
 		}
 		updates := map[string]interface{}{
 			"waitlist_pending": pending,
@@ -503,6 +506,9 @@ func (s *TicketOrderService) AllocateWaitlist(ctx context.Context, tierID int64)
 	})
 	if err != nil {
 		return fulfilled, err
+	}
+	for _, amount := range fulfilledAmounts {
+		metrics.RecordOrderPaid("waitlist", amount)
 	}
 	if leftover > 0 {
 		s.refreshPublicRedisForTier(ctx, tierID)

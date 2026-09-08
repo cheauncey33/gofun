@@ -20,9 +20,14 @@ const EVENT_META = {
   ticket_used: { type: 'success', title: '电子票已使用' },
 }
 
-function buildWsUrl(token) {
+function buildWsUrl() {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${window.location.host}/api/v1/ws?token=${encodeURIComponent(token)}`
+  return `${proto}://${window.location.host}/api/v1/ws`
+}
+
+function sendAuth(socket, token) {
+  if (!socket || socket.readyState !== WebSocket.OPEN || !token) return
+  socket.send(JSON.stringify({ type: 'auth', token }))
 }
 
 // 尝试用 refresh_token 换取新的 access_token，成功返回 true
@@ -38,8 +43,13 @@ async function tryRefreshToken() {
     if (!res.ok) return false
     const data = await res.json()
     if (data?.data?.access_token) {
-      localStorage.setItem('access_token', data.data.access_token)
-      if (data.data.refresh_token) localStorage.setItem('refresh_token', data.data.refresh_token)
+      const { applySession } = await import('./session')
+      applySession({
+        access_token: data.data.access_token,
+        refresh_token: data.data.refresh_token,
+        username: data.data.username,
+        role: data.data.role,
+      })
       return true
     }
     return false
@@ -93,10 +103,11 @@ export function connectOrderSocket() {
   }
 
   manualClose = false
-  socket = new WebSocket(buildWsUrl(token))
+  socket = new WebSocket(buildWsUrl())
 
   socket.onopen = () => {
     retryDelay = 1000 // 连接成功，重置退避
+    sendAuth(socket, token)
   }
   socket.onmessage = (e) => handleMessage(e.data)
   socket.onclose = () => {

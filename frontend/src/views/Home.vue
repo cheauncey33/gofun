@@ -3,6 +3,9 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../api'
 import { useDiscovery } from '../stores/discovery'
+import { rushStockLabel } from '../utils/display'
+import { useNow } from '../utils/now'
+import { canRush, matchesRushFilter, phaseLabel, salePhase } from '../utils/rush'
 import FeaturedCarousel from '../components/home/FeaturedCarousel.vue'
 
 const router = useRouter()
@@ -17,6 +20,14 @@ const featuredEvents = ref([])
 const loadError = ref('')
 const featuredLimit = 8
 const featuredRushPriority = 3
+const rushFilter = ref('all')
+const nowTs = useNow()
+const rushLiveCount = computed(() => rushSales.value.filter(item => canRush(item, nowTs.value)).length)
+const rushSoonCount = computed(() => rushSales.value.filter(item => salePhase(item, nowTs.value) === 'scheduled').length)
+const visibleRushSales = computed(() => {
+  const list = rushSales.value.filter(item => matchesRushFilter(item, rushFilter.value, nowTs.value))
+  return rushFilter.value === 'all' ? list.slice(0, 4) : list
+})
 const {
   state,
   hasActiveFilters,
@@ -138,7 +149,16 @@ function loadMore() {
 
 function openRush(sale) {
   if (sale?.event_id) router.push(`/events/${sale.event_id}`)
+  else if (sale?.id) router.push({ name: 'RushSales', query: { sale: String(sale.id) } })
   else router.push('/rush-sales')
+}
+
+function rushPhase(sale) {
+  return salePhase(sale, nowTs.value)
+}
+
+function rushPhaseLabel(sale) {
+  return phaseLabel(salePhase(sale, nowTs.value)) || '限时开售'
 }
 
 function openSlide(slide) {
@@ -205,24 +225,44 @@ function onCoverError(event) {
           <router-link to="/rush-sales">全部开售 →</router-link>
         </header>
 
+        <div v-if="rushSales.length" class="category-row rush-filters" aria-label="限时开售筛选">
+          <button type="button" class="chip" :class="{ active: rushFilter === 'all' }" @click="rushFilter = 'all'">全部</button>
+          <button type="button" class="chip" :class="{ active: rushFilter === 'live' }" @click="rushFilter = 'live'">抢票中 {{ rushLiveCount }}</button>
+          <button type="button" class="chip" :class="{ active: rushFilter === 'scheduled' }" @click="rushFilter = 'scheduled'">即将开售 {{ rushSoonCount }}</button>
+        </div>
+
         <div v-if="loading" class="state-panel">正在加载…</div>
         <div v-else-if="loadError" class="state-panel error">{{ loadError }}</div>
         <div v-else-if="!rushSales.length" class="state-panel empty">下一场开售正在准备中</div>
-        <div v-else class="rush-list">
+        <div v-else-if="!visibleRushSales.length" class="state-panel empty">这一档暂时没有场次</div>
+        <div v-else class="rush-stack">
           <article
-            v-for="sale in rushSales.slice(0, 4)"
+            v-for="sale in visibleRushSales"
             :key="sale.id"
             class="rush-card"
+            :class="rushPhase(sale)"
             @click="openRush(sale)"
           >
-            <div class="rush-mark">赴<br />场</div>
-            <div class="rush-copy">
-              <small>{{ formatRushTime(sale.starts_at) }} 开售</small>
+            <figure class="rush-cover">
+              <img
+                v-if="sale.cover_url"
+                :src="sale.cover_url"
+                :alt="sale.event_title || sale.name"
+                @error="onCoverError"
+              />
+            </figure>
+            <div class="rush-info">
+              <small>{{ rushPhaseLabel(sale) }} · {{ formatRushTime(sale.starts_at) }}</small>
               <h3>{{ sale.name }}</h3>
-              <p>{{ sale.event_title || '限时票档' }} · 每人限 {{ sale.per_user_limit }} 张</p>
+              <p>{{ sale.event_title || '限时票档' }}<template v-if="sale.city"> · {{ sale.city }}</template></p>
+              <div class="rush-price">
+                <strong>¥{{ (sale.rush_price_cents / 100).toFixed(0) }}</strong>
+                <s v-if="sale.original_price_cents > sale.rush_price_cents">
+                  ¥{{ (sale.original_price_cents / 100).toFixed(0) }}
+                </s>
+              </div>
+              <span>{{ [rushStockLabel(sale), `每人限 ${sale.per_user_limit} 张`].filter(Boolean).join(' · ') }}</span>
             </div>
-            <strong>¥{{ (sale.rush_price_cents / 100).toFixed(0) }}</strong>
-            <span class="rush-stock">余 {{ sale.remaining_quota }}/{{ sale.total_quota }}</span>
           </article>
         </div>
       </section>
@@ -373,47 +413,54 @@ function onCoverError(event) {
   text-decoration: none;
 }
 .rush-block .block-heading h2 { color: var(--red); }
-.rush-list { display: grid; gap: 12px; }
-.rush-card {
-  min-height: 112px;
-  padding: 16px 18px;
-  border: 1px solid rgba(181, 52, 41, .55);
-  border-radius: var(--radius-md);
+.rush-stack {
   display: grid;
-  grid-template-columns: 58px 1fr auto;
-  gap: 10px 18px;
-  align-items: center;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.rush-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 132px 1fr;
+  gap: 18px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 250, 243, .82);
   cursor: pointer;
-  background: rgba(255, 255, 255, .28);
   transition: transform .2s ease, box-shadow .2s ease;
 }
-.rush-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-soft); }
-.rush-mark {
-  width: 52px;
-  height: 68px;
-  border-radius: var(--radius-sm);
-  background: var(--red);
-  color: white;
-  display: grid;
-  place-content: center;
-  text-align: center;
-  font: 700 18px/1.1 var(--font-display);
+.rush-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-soft); }
+.rush-cover {
+  margin: 0;
+  width: 132px;
+  height: 88px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--paper-deep);
+  align-self: start;
 }
-.rush-copy small, .rush-copy p, .rush-stock { color: var(--muted); font-size: 12px; }
-.rush-copy h3 { margin: 6px 0; font: 700 22px var(--font-display); }
-.rush-card > strong {
+.rush-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rush-info { display: grid; align-content: start; gap: 5px; min-width: 0; }
+.rush-info small {
   color: var(--red);
-  font-size: 28px;
-  grid-row: 1 / 3;
-  grid-column: 3;
+  font-size: 11px;
+  font-weight: 700;
 }
-.rush-stock { grid-column: 2; }
+.rush-card.scheduled .rush-info small { color: var(--blue); }
+.rush-card.ending .rush-info small { color: #a14b10; }
+.rush-info h3 { margin: 0; font: 700 20px/1.25 var(--font-display); }
+.rush-info p, .rush-info span { margin: 0; color: var(--muted); font-size: 12px; }
+.rush-price { display: flex; align-items: baseline; gap: 8px; }
+.rush-price strong { color: var(--red); font-size: 22px; }
+.rush-price s { color: var(--muted); font-size: 13px; }
 .event-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
 }
 .event-card {
+  position: relative;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-md);
   overflow: hidden;
@@ -495,8 +542,7 @@ function onCoverError(event) {
 .load-more:disabled { opacity: .6; cursor: wait; }
 @media (max-width: 1000px) {
   .event-grid { grid-template-columns: repeat(2, 1fr); }
-  .rush-card { grid-template-columns: 52px 1fr; }
-  .rush-card > strong { grid-row: auto; grid-column: 2; font-size: 24px; }
+  .rush-stack { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
   .listings { padding: 16px 16px 12px; }

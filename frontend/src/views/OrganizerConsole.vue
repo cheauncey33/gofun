@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { logoutSession } from '../stores/session'
 import {
   Calendar,
   DataAnalysis,
@@ -37,6 +38,7 @@ const overview = ref({
   net_revenue_cents: 0,
   previous_paid_orders: 0,
   previous_paid_tickets: 0,
+  previous_gross_revenue_cents: 0,
   previous_net_revenue_cents: 0,
   payment_failed_orders: 0,
   timeout_cancelled_orders: 0,
@@ -112,16 +114,29 @@ const overviewSessionOptions = computed(() => {
     label: sessionOptionLabel(item),
   }))
 })
-const overviewScoped = computed(() => Boolean(overviewEventId.value || overviewSessionId.value))
-
-function trendLabel(current, previous) {
+function trendMeta(current, previous) {
   const now = Number(current || 0)
   const before = Number(previous || 0)
-  if (!before) return now ? '上期为 0，本期新增' : '与上期持平'
+  if (!before && !now) return { tone: 'flat', label: '较前 7 天持平' }
+  if (!before) return { tone: 'up', label: '较前 7 天新增' }
   const change = ((now - before) / Math.abs(before)) * 100
-  if (Math.abs(change) < 0.05) return '与上期持平'
-  return `较前 7 天 ${change > 0 ? '↑' : '↓'} ${Math.abs(change).toFixed(1)}%`
+  if (Math.abs(change) < 0.05) return { tone: 'flat', label: '较前 7 天持平' }
+  return {
+    tone: change > 0 ? 'up' : 'down',
+    label: `较前 7 天 ${change > 0 ? '↑' : '↓'} ${Math.abs(change).toFixed(1)}%`,
+  }
 }
+
+const revenueTrend = computed(() => trendMeta(overview.value.gross_revenue_cents, overview.value.previous_gross_revenue_cents))
+const refundRateValue = computed(() => {
+  const gross = Number(overview.value.gross_revenue_cents || 0)
+  const refunded = Number(overview.value.refunded_amount_cents || 0)
+  if (gross <= 0) return 0
+  return Math.round((refunded / gross) * 1000) / 10
+})
+const refundRateLabel = computed(() => (
+  Number(overview.value.gross_revenue_cents || 0) > 0 ? formatPct(refundRateValue.value) : '—'
+))
 
 const mobileMedia = window.matchMedia('(max-width: 600px)')
 const updateMobile = event => { isMobile.value = event.matches }
@@ -391,6 +406,11 @@ function scrollTo(id) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
+async function logout() {
+  await logoutSession()
+  router.push('/')
+}
+
 function eventStatus(status) {
   return {
     draft: { label: '待发布', type: 'warning' },
@@ -402,7 +422,7 @@ function eventStatus(status) {
 }
 
 function saleModeLabel(mode) {
-  return mode === 'seated' ? '选座' : '计数'
+  return mode === 'seated' ? '选座制' : '门票制'
 }
 
 function orderStatus(order) {
@@ -470,16 +490,19 @@ function formatPct(value) {
       <button class="console-brand" type="button" @click="router.push('/')">Gofun</button>
       <span></span>
       <button class="back-store" type="button" @click="router.push('/')">返回购票站</button>
-      <div v-if="currentOrganizer" class="organizer-switcher">
-        <i>{{ currentOrganizer.name.slice(0, 1) }}</i>
-        <el-select v-model="organizerId" aria-label="选择主办方">
-          <el-option
-            v-for="membership in memberships"
-            :key="membership.organizer.id"
-            :label="membership.organizer.name"
-            :value="membership.organizer.id"
-          />
-        </el-select>
+      <div class="topbar-actions">
+        <div v-if="currentOrganizer" class="organizer-switcher">
+          <i>{{ currentOrganizer.name.slice(0, 1) }}</i>
+          <el-select v-model="organizerId" aria-label="选择主办方">
+            <el-option
+              v-for="membership in memberships"
+              :key="membership.organizer.id"
+              :label="membership.organizer.name"
+              :value="membership.organizer.id"
+            />
+          </el-select>
+        </div>
+        <button class="console-logout" type="button" @click="logout">退出登录</button>
       </div>
     </header>
 
@@ -543,8 +566,7 @@ function formatPct(value) {
         <section class="overview-block" aria-labelledby="business-overview-title">
           <header class="overview-heading">
             <div>
-              <h2 id="business-overview-title">近 7 天经营结果</h2>
-              <p>按支付和退款实际发生时间统计，与前 7 天对比。可按活动或场次下钻。</p>
+              <h2 id="business-overview-title">销售概览</h2>
             </div>
             <div class="overview-filters">
               <el-select
@@ -577,64 +599,29 @@ function formatPct(value) {
               </el-select>
             </div>
           </header>
-          <div v-loading="overviewLoading" class="metric-band business-metrics">
-            <div>
-              <span>净收款</span>
-              <strong>{{ formatMoney(overview.net_revenue_cents) }}</strong>
-              <small>{{ trendLabel(overview.net_revenue_cents, overview.previous_net_revenue_cents) }}</small>
+          <div v-loading="overviewLoading" class="sell-board">
+            <article class="sell-hero">
+              <span>售出金额</span>
+              <strong>{{ formatMoney(overview.gross_revenue_cents) }}</strong>
+              <i class="trend-chip" :class="revenueTrend.tone">{{ revenueTrend.label }}</i>
+            </article>
+            <div class="sell-metrics">
+              <article>
+                <span>已付款订单</span>
+                <strong>{{ overview.paid_orders }}<em>笔</em></strong>
+              </article>
+              <article>
+                <span>售出票数</span>
+                <strong>{{ overview.paid_tickets }}<em>张</em></strong>
+              </article>
+              <article :class="{ warn: refundRateValue >= 10 }">
+                <span>退款率</span>
+                <strong>{{ refundRateLabel }}</strong>
+              </article>
             </div>
-            <div>
-              <span>支付订单</span>
-              <strong>{{ overview.paid_orders }}</strong><em>笔</em>
-              <small>{{ trendLabel(overview.paid_orders, overview.previous_paid_orders) }}</small>
-            </div>
-            <div>
-              <span>售出票数</span>
-              <strong>{{ overview.paid_tickets }}</strong><em>张</em>
-              <small>{{ trendLabel(overview.paid_tickets, overview.previous_paid_tickets) }}</small>
-            </div>
-            <div>
-              <span>退款</span>
-              <strong>{{ formatMoney(overview.refunded_amount_cents) }}</strong>
-              <small>{{ overview.refunded_orders }} 笔 · 毛收款 {{ formatMoney(overview.gross_revenue_cents) }}</small>
-            </div>
-          </div>
-          <div v-loading="overviewLoading" class="metric-band leak-metrics">
-            <div :class="{ attention: overview.payment_failed_orders > 0 }">
-              <span>支付失败</span>
-              <strong>{{ overview.payment_failed_orders }}</strong><em>笔</em>
-              <small>窗口内支付回调失败的订单，同一单只计一次</small>
-            </div>
-            <div :class="{ attention: overview.timeout_cancelled_orders > 0 }">
-              <span>超时关单</span>
-              <strong>{{ overview.timeout_cancelled_orders }}</strong><em>笔</em>
-              <small>支付窗口内未付款，系统自动取消</small>
-            </div>
-            <div>
-              <span>支付成功率</span>
-              <strong>{{ formatPct(overview.payment_success_rate) }}</strong>
-              <small>成交 / (成交 + 超时关单)，不含仍待支付</small>
-            </div>
-          </div>
-        </section>
-
-        <section class="overview-block" aria-labelledby="operation-overview-title">
-          <header class="overview-heading">
-            <div>
-              <h2 id="operation-overview-title">当前运营状态</h2>
-              <p>{{ overviewScoped ? '实时快照，已按所选活动或场次收窄' : '实时快照，不受上方近 7 天统计周期影响' }}</p>
-            </div>
-          </header>
-          <div class="operation-grid">
-            <div><span>售票中活动</span><strong>{{ overview.on_sale_events }}</strong><small>场</small></div>
-            <div :class="{ attention: overview.pending_payment_orders > 0 }"><span>待支付订单</span><strong>{{ overview.pending_payment_orders }}</strong><small>笔</small></div>
-            <div :class="{ attention: overview.refunding_orders > 0 }"><span>退款处理中</span><strong>{{ overview.refunding_orders }}</strong><small>笔</small></div>
-            <div><span>未来 7 天场次</span><strong>{{ overview.upcoming_sessions }}</strong><small>场</small></div>
-            <div>
-              <span>在售库存占用率</span>
-              <strong>{{ Number(overview.inventory_occupancy_rate || 0).toFixed(1) }}%</strong>
-              <small>{{ overview.inventory_occupied }} / {{ overview.inventory_total }} 张已占用</small>
-            </div>
+            <p v-if="overview.pending_payment_orders > 0" class="sell-note">
+              还有 {{ overview.pending_payment_orders }} 笔订单在等买家付款
+            </p>
           </div>
         </section>
 
@@ -820,7 +807,7 @@ function formatPct(value) {
   z-index: 40;
   background: rgba(248,244,236,.96);
 }
-.console-brand, .back-store, .console-sidebar button {
+.console-brand, .back-store, .console-logout, .console-sidebar button {
   border: 0;
   background: transparent;
   color: inherit;
@@ -828,8 +815,9 @@ function formatPct(value) {
 }
 .console-brand { color: var(--ink); font: 800 26px var(--font-display); letter-spacing: .08em; }
 .console-topbar > span { width: 1px; height: 24px; background: var(--line-strong); }
-.back-store { font-size: 13px; }
-.organizer-switcher { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.back-store, .console-logout { font-size: 13px; }
+.topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+.organizer-switcher { display: flex; align-items: center; gap: 10px; }
 .organizer-switcher i { width: 31px; height: 31px; border-radius: 50%; background: var(--red); color: white; display: grid; place-content: center; font-style: normal; }
 .organizer-switcher :deep(.el-select) { width: 190px; }
 .console-sidebar {
@@ -857,21 +845,57 @@ function formatPct(value) {
 .overview-heading p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
 .overview-filters { display: flex; gap: 10px; }
 .overview-filters :deep(.el-select) { width: 180px; }
-.metric-band { border: 1px solid var(--line-strong); border-radius: var(--radius-lg); overflow: hidden; display: grid; grid-template-columns: repeat(4, 1fr); }
-.metric-band.leak-metrics { margin-top: 10px; grid-template-columns: repeat(3, 1fr); }
-.metric-band div { min-height: 100px; padding: 22px 28px; border-right: 1px solid var(--line); }
-.metric-band div:last-child { border: 0; }
-.metric-band div.attention { background: rgba(181,52,41,.045); }
-.metric-band span { display: block; margin-bottom: 11px; color: var(--muted); font-size: 12px; }
-.metric-band strong { font: 680 29px var(--font-body); }
-.metric-band em { margin-left: 6px; color: var(--muted); font-style: normal; font-size: 12px; }
-.metric-band small { display: block; margin-top: 8px; color: var(--muted); font-size: 11px; }
-.operation-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
-.operation-grid div { min-height: 92px; padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgba(255,255,255,.24); }
-.operation-grid div.attention { border-color: rgba(181,52,41,.46); background: rgba(181,52,41,.045); }
-.operation-grid span, .operation-grid small { display: block; color: var(--muted); font-size: 12px; }
-.operation-grid strong { display: inline-block; margin: 8px 0 5px; font: 680 23px var(--font-body); }
-.operation-grid small { line-height: 1.5; }
+.sell-board { display: grid; gap: 16px; }
+.sell-hero {
+  padding: 28px 32px 26px;
+  border-radius: 24px;
+  color: #f4eee4;
+  background: linear-gradient(135deg, #3a241f 0%, #1b1512 72%);
+}
+.sell-hero span {
+  display: block;
+  color: #d2c4b4;
+  font-size: 13px;
+  letter-spacing: .06em;
+}
+.sell-hero strong {
+  display: block;
+  margin: 10px 0 12px;
+  font: 760 clamp(40px, 5vw, 56px)/1.05 var(--font-display);
+}
+.sell-hero .trend-chip {
+  display: inline-flex;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(244, 238, 228, .12);
+  color: #f0d2c4;
+  font: 650 12px var(--font-body);
+}
+.sell-hero .trend-chip.up { background: rgba(239, 109, 88, .22); color: #ef6d58; }
+.sell-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.sell-metrics article {
+  padding: 20px 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 18px;
+  background: rgba(255,255,255,.55);
+}
+.sell-metrics span { color: var(--muted); font-size: 13px; }
+.sell-metrics strong {
+  display: block;
+  margin-top: 8px;
+  font: 750 32px/1.1 var(--font-display);
+}
+.sell-metrics em { margin-left: 4px; color: var(--muted); font: 500 13px var(--font-body); }
+.sell-metrics .warn { border-color: rgba(181,52,41,.4); background: #fbf4ee; }
+.sell-note {
+  margin: 0;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: rgba(181,52,41,.08);
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 650;
+}
 .console-section { margin-top: 34px; scroll-margin-top: 82px; }
 .console-section > header { margin-bottom: 15px; display: flex; justify-content: space-between; align-items: end; }
 .console-section h2 { margin: 0; font: 720 22px var(--font-display); }
@@ -894,13 +918,7 @@ function formatPct(value) {
   .console-sidebar { display: none; }
   .console-main { margin-left: 0; padding: 24px 18px 60px; }
   .overview-heading { align-items: flex-start; flex-direction: column; }
-  .metric-band { grid-template-columns: repeat(2, 1fr); }
-  .metric-band.leak-metrics { grid-template-columns: 1fr; }
-  .metric-band.business-metrics div:nth-child(2) { border-right: 0; }
-  .metric-band.business-metrics div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
-  .metric-band.leak-metrics div { border-right: 0; border-bottom: 1px solid var(--line); }
-  .metric-band.leak-metrics div:last-child { border-bottom: 0; }
-  .operation-grid { grid-template-columns: repeat(2, 1fr); }
+  .sell-metrics { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
   .console-topbar { padding: 0 16px; }
@@ -910,9 +928,7 @@ function formatPct(value) {
   .heading-actions { flex-direction: column; }
   .overview-filters { width: 100%; flex-wrap: wrap; }
   .overview-filters :deep(.el-select) { width: min(180px, 100%); }
-  .metric-band { grid-template-columns: 1fr; }
-  .metric-band div { border-right: 0; border-bottom: 1px solid var(--line); }
-  .operation-grid { grid-template-columns: 1fr; }
+  .sell-hero { padding: 22px 20px; }
   .venue-grid { grid-template-columns: 1fr; }
 }
 </style>

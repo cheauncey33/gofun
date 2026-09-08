@@ -1,3 +1,5 @@
+import { salePhase } from './rush'
+
 export function isGarbledText(value) {
   if (!value || typeof value !== 'string') return true
   const text = value.trim()
@@ -22,6 +24,27 @@ export function money(value) {
 
 export function moneyCents(cents) {
   return money(Number(cents || 0) / 100)
+}
+
+export function rushStockLevel(sale) {
+  const remaining = Number(sale?.remaining_quota || 0)
+  const total = Number(sale?.total_quota || 0)
+  if (remaining <= 0) return 'gone'
+  const ratio = total > 0 ? remaining / total : 1
+  if (remaining <= 5 || ratio <= 0.15) return 'low'
+  if (ratio <= 0.4) return 'tight'
+  return 'plenty'
+}
+
+export function rushStockLabel(sale, now = Date.now()) {
+  const phase = salePhase(sale, now)
+  if (phase !== 'live' && phase !== 'ending' && phase !== 'scheduled') return ''
+  return {
+    plenty: '余票充足',
+    tight: '余票紧张',
+    low: '所剩不多',
+    gone: '已抢光',
+  }[rushStockLevel(sale)] || '余票充足'
 }
 
 export const eventPlaceholder = '/event-placeholder.svg'

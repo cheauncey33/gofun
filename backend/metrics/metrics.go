@@ -30,18 +30,30 @@ var (
 		[]string{"method", "path"},
 	)
 
-	OrdersCreated = promauto.NewCounter(
+	// status: pending_payment | paid | cancelled | timeout | failed | refunded
+	// source: normal | rush_sale | waitlist
+	TicketOrdersTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "orders_created_total",
-			Help: "Total number of orders created",
+			Name: "ticket_orders_total",
+			Help: "Ticket orders by bounded status and source (not queued accepts)",
 		},
+		[]string{"status", "source"},
 	)
 
-	OrdersCancelled = promauto.NewCounter(
+	TicketPaidAmountCentsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "orders_cancelled_total",
-			Help: "Total number of orders cancelled",
+			Name: "ticket_paid_amount_cents_total",
+			Help: "Paid ticket order amount in cents by source",
 		},
+		[]string{"source"},
+	)
+
+	TicketRefundedAmountCentsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "ticket_refunded_amount_cents_total",
+			Help: "Refunded ticket order amount in cents by source",
+		},
+		[]string{"source"},
 	)
 
 	PaymentCallbacksTotal = promauto.NewCounterVec(
@@ -379,6 +391,38 @@ var (
 		},
 	)
 )
+
+func NormalizeOrderSource(source string) string {
+	switch source {
+	case "rush_sale", "waitlist", "normal":
+		return source
+	default:
+		return "unknown"
+	}
+}
+
+func RecordOrder(status, source string) {
+	if status == "" {
+		return
+	}
+	TicketOrdersTotal.WithLabelValues(status, NormalizeOrderSource(source)).Inc()
+}
+
+func RecordOrderPaid(source string, amountCents int64) {
+	src := NormalizeOrderSource(source)
+	TicketOrdersTotal.WithLabelValues("paid", src).Inc()
+	if amountCents > 0 {
+		TicketPaidAmountCentsTotal.WithLabelValues(src).Add(float64(amountCents))
+	}
+}
+
+func RecordOrderRefunded(source string, amountCents int64) {
+	src := NormalizeOrderSource(source)
+	TicketOrdersTotal.WithLabelValues("refunded", src).Inc()
+	if amountCents > 0 {
+		TicketRefundedAmountCentsTotal.WithLabelValues(src).Add(float64(amountCents))
+	}
+}
 
 // ===== Prometheus Middleware =====
 

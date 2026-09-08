@@ -25,7 +25,7 @@ const (
 	catalogCachePrefix      = "fuchang:catalog:"
 	catalogListVersionKey   = catalogCachePrefix + "events:list:ver"
 	catalogMetaKey          = catalogCachePrefix + "meta"
-	catalogRushSalesListKey = catalogCachePrefix + "rush_sales:list"
+	catalogRushSalesListKey = catalogCachePrefix + "rush_sales:list:v2"
 	catalogEventsListTTL    = 45 * time.Second
 	catalogEventDetailTTL   = 45 * time.Second
 	catalogMetaTTL          = 15 * time.Minute

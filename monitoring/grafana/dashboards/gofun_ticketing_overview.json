@@ -25,22 +25,22 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 100 }, { "color": "red", "value": 500 }] }, "unit": "short" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 30 }, { "color": "red", "value": 60 }] }, "unit": "s" }, "overrides": [] },
       "gridPos": { "h": 7, "w": 6, "x": 12, "y": 0 },
       "id": 3,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto", "wideLayout": true },
-      "targets": [{ "expr": "increase(mysql_innodb_row_lock_waits_total[5m])", "legendFormat": "5m waits", "refId": "A" }],
-      "title": "InnoDB Row Lock Waits / 5m",
+      "targets": [{ "expr": "ticket_order_outbox_oldest_age_seconds", "legendFormat": "outbox age", "refId": "A" }],
+      "title": "Outbox Oldest Age",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1000 }, { "color": "red", "value": 5000 }] }, "unit": "short" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 180 }, { "color": "red", "value": 300 }] }, "unit": "s" }, "overrides": [] },
       "gridPos": { "h": 7, "w": 6, "x": 18, "y": 0 },
       "id": 4,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto", "wideLayout": true },
-      "targets": [{ "expr": "max by (queue) (mq_queue_ready_messages)", "legendFormat": "{{queue}}", "refId": "A" }],
-      "title": "RabbitMQ Ready Backlog",
+      "targets": [{ "expr": "ticket_stock_reservation_oldest_age_seconds", "legendFormat": "reservation age", "refId": "A" }],
+      "title": "Stock Reservation Oldest Age",
       "type": "stat"
     },
     {
@@ -55,12 +55,15 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 12, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 4, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" } }, "unit": "ms" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 12, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 4, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" } }, "unit": "short" }, "overrides": [] },
       "gridPos": { "h": 9, "w": 12, "x": 12, "y": 7 },
       "id": 6,
       "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [{ "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{method=\"POST\",path=\"/api/v1/rush-sales/:id/execute\"}[5m]))) * 1000", "legendFormat": "rush p99", "refId": "A" }],
-      "title": "Rush Execute P99 Trend",
+      "targets": [
+        { "expr": "ticket_order_outbox_pending_rows", "legendFormat": "outbox pending", "refId": "A" },
+        { "expr": "ticket_stock_reservation_pending", "legendFormat": "reservation pending", "refId": "B" }
+      ],
+      "title": "Outbox / Stock Reservation Pending",
       "type": "timeseries"
     },
     {
@@ -79,8 +82,11 @@
       "gridPos": { "h": 9, "w": 12, "x": 12, "y": 16 },
       "id": 8,
       "options": { "legend": { "calcs": ["lastNotNull", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi" } },
-      "targets": [{ "expr": "sum by (result) (rate(ticket_verifications_total[5m]))", "legendFormat": "verification {{result}}", "refId": "A" }],
-      "title": "Ticket Verification Results",
+      "targets": [
+        { "expr": "sum by (source) (rate(ticket_orders_total{status=\"paid\"}[5m]))", "legendFormat": "paid {{source}}", "refId": "A" },
+        { "expr": "sum by (status) (rate(ticket_orders_total{status=~\"cancelled|timeout|failed|refunded\"}[5m]))", "legendFormat": "{{status}}", "refId": "B" }
+      ],
+      "title": "Orders by Status and Source",
       "type": "timeseries"
     }
   ],
@@ -92,5 +98,5 @@
   "timezone": "browser",
   "title": "Gofun 票务核心链路",
   "uid": "gofun-ticketing",
-  "version": 1
+  "version": 2
 }

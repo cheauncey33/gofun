@@ -277,6 +277,8 @@ ticket_qr:
 
 func TestLoad_EnvironmentOverrides(t *testing.T) {
 	t.Setenv("SERVER_HOST", "0.0.0.0")
+	t.Setenv("SERVER_DEMO_ACCOUNTS", "true")
+	t.Setenv("SERVER_TRUSTED_PROXIES", "10.0.0.0/8, 172.16.0.0/12")
 	t.Setenv("MYSQL_DSN", "env:dsn@tcp(mysql)/db")
 	t.Setenv("JWT_SECRET", "env-secret")
 	t.Setenv("CORS_ALLOW_ORIGINS", "https://example.com, http://localhost")
@@ -310,6 +312,12 @@ ticket_qr:
 	}
 	if cfg.JWT.Secret != "env-secret" {
 		t.Errorf("expected env JWT secret, got %s", cfg.JWT.Secret)
+	}
+	if !cfg.Server.DemoAccounts {
+		t.Error("expected env demo accounts to be true")
+	}
+	if len(cfg.Server.TrustedProxies) != 2 || cfg.Server.TrustedProxies[0] != "10.0.0.0/8" {
+		t.Errorf("unexpected trusted proxies: %#v", cfg.Server.TrustedProxies)
 	}
 	if len(cfg.Cors.AllowOrigins) != 2 || cfg.Cors.AllowOrigins[0] != "https://example.com" {
 		t.Errorf("unexpected CORS origins: %#v", cfg.Cors.AllowOrigins)

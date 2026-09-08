@@ -48,6 +48,11 @@ type UserService struct {
 	jwtExpire         int
 	refreshExpireSecs int
 	identityKey       []byte
+	rushSales         *RushSaleService
+}
+
+func (s *UserService) LinkRushSale(rushSales *RushSaleService) {
+	s.rushSales = rushSales
 }
 
 func NewUserService(c *container.Container, jwtExpireSecs, refreshExpireSecs int) *UserService {

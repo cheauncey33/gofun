@@ -187,3 +187,54 @@ func (ctrl *UserController) DeleteAttendee(c *gin.Context) {
 	}
 	response.Success(c, nil)
 }
+
+func (ctrl *UserController) ListFavorites(c *gin.Context) {
+	userID, ok := common.GetUserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "用户信息获取失败")
+		return
+	}
+	rows, err := ctrl.userSvc.ListFavorites(userID, c.Query("type"))
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, response.CodeInternalError, "加载收藏失败")
+		return
+	}
+	response.Success(c, rows)
+}
+
+func (ctrl *UserController) AddFavorite(c *gin.Context) {
+	userID, ok := common.GetUserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "用户信息获取失败")
+		return
+	}
+	var req service.AddFavoriteReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误")
+		return
+	}
+	row, err := ctrl.userSvc.AddFavorite(userID, req)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, err.Error())
+		return
+	}
+	response.Success(c, row)
+}
+
+func (ctrl *UserController) DeleteFavorite(c *gin.Context) {
+	userID, ok := common.GetUserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "用户信息获取失败")
+		return
+	}
+	favoriteID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || favoriteID <= 0 {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误")
+		return
+	}
+	if err := ctrl.userSvc.RemoveFavorite(userID, favoriteID); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, err.Error())
+		return
+	}
+	response.Success(c, nil)
+}
