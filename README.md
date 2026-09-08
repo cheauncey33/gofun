@@ -1,37 +1,25 @@
 # Gofun
 
-多主办方活动票务平台：发现活动、限时开售、门票制 / 选座制购票；主办方看销售和转化，平台看健康、审批和全站销售。
+多主办方活动票务。用户找演出、买票；主办方卖票、看转化；平台审批上架、盯系统是否健康。
 
-![Gofun 产品概览](docs/demo/gofun-overview.gif)
+![Gofun](docs/demo/gofun-overview.gif)
 
-循环 GIF 依次是：购票站 → 选座 → 主办方销售概览 / 购票转化 → 平台健康。
+## 购票
 
-## 栈
+- **发现活动**：按城市、分类、关键词浏览在售场次，首页轮播热门和限时开售。
+- **两种卖法**：门票制按张数买，不用厅图；选座制对号入座，按已发布厅图点座。
+- **限时开售**：独立开售场次和倒计时，热门票档单独放量。
+- **下单到入场**：确认订单、沙箱收银台、售罄候补、订单和电子票；选座活动不走候补。
 
-Go · Gin · Vue 3 · MySQL · Redis · RabbitMQ
+## 主办方
 
-下单热路径用 Redis + Lua 预扣库存，Outbox 投递到队列落单；选座按已发布厅图版本冻结核查。
+- **销售概览**：近 7 天售出金额、已付款订单、售出票数、退款率，金额带较前 7 天对比。
+- **购票转化**：曝光 → 进详情 → 下单数 → 付款数，看顾客卡在哪一步。
+- **活动与库存**：创建/编辑活动，配置场次和票档；厅图按场馆分组，发布后冻结版本，本场对号入座用这一版。
+- **现场**：配置限时开售、核销已付款票。
 
-## 本地跑
+## 平台
 
-需要本机 Docker 里的 MySQL / Redis / RabbitMQ，以及 Node、Go。
-
-```bash
-docker compose up -d mysql redis rabbitmq
-cd backend && go run . -config ./config/config.yaml
-cd frontend && npm install && npm run dev
-```
-
-浏览器打开 http://127.0.0.1:5173/ 。开发环境登录页可点演示账号。
-
-## 重新录 GIF
-
-前端和后端先跑起来，然后：
-
-```bash
-cd scripts
-npm install
-npx playwright install chromium
-node record-demo.mjs
-ffmpeg -y -i ../docs/demo/.tmp/*.webm -filter_complex "[0:v]fps=10,scale=880:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=96:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5" -loop 0 ../docs/demo/gofun-overview.gif
-```
+- **健康**：当前流量、平均延迟、尾部延迟、错误率、积压（订单确认 / 库存预扣 / 队列）。
+- **审批**：主办方入驻、活动上架。
+- **全站销售**：和主办方同一套经营口径，看全平台卖了多少。

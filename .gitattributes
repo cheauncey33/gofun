@@ -1,0 +1,4 @@
+tests/load/** linguist-vendored
+scripts/** linguist-vendored
+*.ps1 linguist-vendored
+docs/demo/*.gif linguist-generated
