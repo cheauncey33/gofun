@@ -99,20 +99,48 @@ async function record() {
     await titleCard(page, '购票站', '发现活动', 1800)
     await page.goto(baseURL, { waitUntil: 'domcontentloaded' })
     await waitReady(page, '.featured .slide')
-    await sleep(1200)
+    await sleep(1100)
     const next = page.locator('.featured .nav.next')
     if (await next.count()) {
       await moveTo(page, next)
       await next.click()
-      await sleep(1000)
+      await sleep(900)
+    }
+    const rushCard = page.locator('.rush-card').first()
+    if (await rushCard.count()) {
+      await rushCard.scrollIntoViewIfNeeded()
+      await moveTo(page, rushCard)
+      await sleep(1400)
     }
     const grid = page.locator('.event-grid')
     await grid.scrollIntoViewIfNeeded()
-    await sleep(1600)
+    await sleep(1400)
     await shot(page, '01-home')
 
-    await titleCard(page, '选座购票', '对号入座', 1800)
-    await openAuthed(page, 'user', 'user123', `/events/${seatedEventId}`)
+    await titleCard(page, '限时开售', '抢票中', 1800)
+    await openAuthed(page, 'user', 'user123', '/rush-sales')
+    await waitReady(page, '.rush-ticket, .rush-state')
+    await sleep(1400)
+    const liveRush = page.locator('.rush-ticket.live, .rush-ticket').first()
+    if (await liveRush.count()) {
+      await moveTo(page, liveRush)
+      const buy = liveRush.getByRole('button', { name: '立即抢票' })
+      if (await buy.count()) {
+        await buy.click()
+        await waitReady(page, '.rush-panel, .rush-modal')
+        await sleep(1600)
+        const cancel = page.locator('.rush-panel .ghost, .rush-modal .ghost')
+        if (await cancel.count()) await cancel.first().click()
+        else await page.keyboard.press('Escape')
+        await sleep(400)
+      } else {
+        await sleep(1200)
+      }
+    }
+    await shot(page, '02-rush')
+
+    await titleCard(page, '选座购票', 'VIP / 前排 / 普通座', 1800)
+    await page.goto(`${baseURL}/events/${seatedEventId}`, { waitUntil: 'domcontentloaded' })
     await waitReady(page, '.detail-page h1')
     await sleep(1200)
     const pick = page.locator('.primary-action')
@@ -120,33 +148,51 @@ async function record() {
     await sleep(400)
     const pickLabel = (await pick.innerText()).trim()
     if (!pickLabel.includes('选座') || await pick.isDisabled()) {
-      await shot(page, '02-detail')
+      await shot(page, '03-detail')
       throw new Error(`选座按钮不可用：${pickLabel}`)
     }
     await pick.click()
     await waitReady(page, '.seat-map')
-    const seat = page.locator('.seat-btn:not([disabled])').nth(3)
-    if (await seat.count()) {
-      await moveTo(page, seat)
-      await seat.click()
+    const vipLegend = page.locator('.legend li').filter({ hasText: 'VIP' }).first()
+    if (await vipLegend.count()) {
+      await moveTo(page, vipLegend)
+      await vipLegend.click()
+      await sleep(700)
+    }
+    const vipSeat = page.locator('.seat-btn:not([disabled])').first()
+    if (await vipSeat.count()) {
+      await moveTo(page, vipSeat)
+      await vipSeat.click()
     }
     await sleep(1800)
-    await shot(page, '02-seats')
+    await shot(page, '03-seats')
     const close = page.getByRole('button', { name: '关闭' })
     if (await close.count()) await close.click()
-    await sleep(600)
+    await sleep(500)
 
-    await titleCard(page, '主办方', '销售与转化', 1800)
+    await titleCard(page, '主办方', '销售、转化、厅图', 1800)
     await openAuthed(page, 'organizer', 'organizer123', '/organizer')
     await waitReady(page, '.sell-hero')
     await page.locator('.sell-hero').scrollIntoViewIfNeeded()
-    await sleep(1800)
+    await sleep(1600)
     const funnel = page.locator('.funnel-board')
     if (await funnel.count()) {
       await funnel.scrollIntoViewIfNeeded()
-      await sleep(1600)
+      await sleep(1400)
     }
-    await shot(page, '03-organizer')
+    const hallsBtn = page.getByRole('button', { name: '厅图资产' })
+    if (await hallsBtn.count()) {
+      await moveTo(page, hallsBtn)
+      await hallsBtn.click()
+      await waitReady(page, '.hall-card, .empty, .el-dialog')
+      if (await page.locator('.hall-card').count()) {
+        await sleep(1800)
+        await shot(page, '04-halls')
+      }
+      await page.keyboard.press('Escape')
+      await sleep(400)
+    }
+    await shot(page, '04-organizer')
 
     await titleCard(page, '平台管理', '健康与审批', 1800)
     await openAuthed(page, 'admin', 'admin123', '/admin')

@@ -308,12 +308,23 @@ func createPublishedEvent(db *gorm.DB, organizerID int64, item seedEvent) error 
 		}
 
 		if saleMode.IsSeated() {
+			vipOrig := item.PriceCents + 12000
 			frontOrig := item.PriceCents + 7000
 			regularOrig := item.PriceCents + 4000
+			vip := models.TicketTier{
+				SessionID:          session.ID,
+				Name:               "VIP",
+				Description:        "第一排，视野最好",
+				PriceCents:         item.PriceCents + 8000,
+				OriginalPriceCents: &vipOrig,
+				PurchaseLimit:      2,
+				AssignPlaceNo:      false,
+				Status:             models.TicketTierStatusOnSale,
+			}
 			front := models.TicketTier{
 				SessionID:          session.ID,
 				Name:               "前排",
-				Description:        "靠近舞台前两排",
+				Description:        "靠近舞台的第二排",
 				PriceCents:         item.PriceCents + 3000,
 				OriginalPriceCents: &frontOrig,
 				PurchaseLimit:      4,
@@ -330,13 +341,16 @@ func createPublishedEvent(db *gorm.DB, organizerID int64, item seedEvent) error 
 				AssignPlaceNo:      false,
 				Status:             models.TicketTierStatusOnSale,
 			}
+			if err := tx.Create(&vip).Error; err != nil {
+				return err
+			}
 			if err := tx.Create(&front).Error; err != nil {
 				return err
 			}
 			if err := tx.Create(&regular).Error; err != nil {
 				return err
 			}
-			return attachSmallTheaterLayout(tx, event.ID, session.ID, front.ID, regular.ID)
+			return attachSmallTheaterLayout(tx, event.ID, session.ID, vip.ID, front.ID, regular.ID)
 		}
 
 		orig := item.PriceCents + 4000
@@ -389,20 +403,34 @@ func convertPublishedToSeated(db *gorm.DB, event *models.Event) error {
 			return err
 		}
 		frontOrig := regular.PriceCents + 7000
+		vipOrig := regular.PriceCents + 12000
 		front := models.TicketTier{
 			SessionID:          session.ID,
 			Name:               "前排",
-			Description:        "靠近舞台前两排",
+			Description:        "靠近舞台的第二排",
 			PriceCents:         regular.PriceCents + 3000,
 			OriginalPriceCents: &frontOrig,
 			PurchaseLimit:      4,
 			AssignPlaceNo:      false,
 			Status:             models.TicketTierStatusOnSale,
 		}
+		vip := models.TicketTier{
+			SessionID:          session.ID,
+			Name:               "VIP",
+			Description:        "第一排，视野最好",
+			PriceCents:         regular.PriceCents + 8000,
+			OriginalPriceCents: &vipOrig,
+			PurchaseLimit:      2,
+			AssignPlaceNo:      false,
+			Status:             models.TicketTierStatusOnSale,
+		}
 		if err := tx.Create(&front).Error; err != nil {
 			return err
 		}
-		return attachSmallTheaterLayout(tx, event.ID, session.ID, front.ID, regular.ID)
+		if err := tx.Create(&vip).Error; err != nil {
+			return err
+		}
+		return attachSmallTheaterLayout(tx, event.ID, session.ID, vip.ID, front.ID, regular.ID)
 	})
 }
 
@@ -410,10 +438,21 @@ const (
 	theaterRows = 6
 	theaterCols = 10
 	aisleCol    = 6
+	vipRows     = 1
 	frontRows   = 2
 )
 
-func attachSmallTheaterLayout(tx *gorm.DB, eventID, sessionID, frontTierID, regularTierID int64) error {
+func layoutTierForRow(row int, vipTierID, frontTierID, regularTierID int64) int64 {
+	if row <= vipRows {
+		return vipTierID
+	}
+	if row <= frontRows {
+		return frontTierID
+	}
+	return regularTierID
+}
+
+func attachSmallTheaterLayout(tx *gorm.DB, eventID, sessionID, vipTierID, frontTierID, regularTierID int64) error {
 	layout := models.SeatLayout{
 		EventID:  &eventID,
 		Name:     "小剧场",
@@ -429,10 +468,7 @@ func attachSmallTheaterLayout(tx *gorm.DB, eventID, sessionID, frontTierID, regu
 			if col == aisleCol {
 				continue
 			}
-			tierID := regularTierID
-			if row <= frontRows {
-				tierID = frontTierID
-			}
+			tierID := layoutTierForRow(row, vipTierID, frontTierID, regularTierID)
 			seatTierID := tierID
 			seats = append(seats, models.Seat{
 				LayoutID:     layout.ID,

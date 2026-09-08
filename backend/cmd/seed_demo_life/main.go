@@ -173,6 +173,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("写候补失败: %v", err)
 	}
+	if err := ensureSeatedVIPZones(db); err != nil {
+		log.Fatalf("补选座 VIP 区失败: %v", err)
+	}
 	bumpCatalogCache(ctx, rdb, organizer.ID, db)
 
 	fmt.Printf("done. users=%d comments=%d rush=%d orders=%d tickets=%d waitlist=%d\n",
@@ -327,6 +330,27 @@ func seedRushSales(ctx context.Context, db *gorm.DB, rdb *redis.Client, settings
 			return created, err
 		}
 		if existing.ID != 0 {
+			existing.StartsAt = now.Add(spec.StartOffset)
+			existing.EndsAt = now.Add(spec.EndOffset)
+			existing.Status = spec.Status
+			if existing.RemainingQuota <= 0 {
+				existing.RemainingQuota = spec.Quota - spec.Sold
+				if existing.RemainingQuota < 8 {
+					existing.RemainingQuota = 8
+				}
+			}
+			if err := db.Save(&existing).Error; err != nil {
+				return created, err
+			}
+			if err := db.Transaction(func(tx *gorm.DB) error {
+				return service.EnsureRushBuckets(tx, &existing, settings)
+			}); err != nil {
+				return created, err
+			}
+			if err := rewriteRushBuckets(ctx, db, rdb, settings, &existing, existing.RemainingQuota); err != nil {
+				return created, err
+			}
+			log.Printf("刷新限时开售: %s / %s 余 %d", spec.EventTitle, spec.Name, existing.RemainingQuota)
 			continue
 		}
 		if spec.PriceCents >= tier.PriceCents || spec.Quota > tier.RemainingQuota {
@@ -364,9 +388,139 @@ func seedRushSales(ctx context.Context, db *gorm.DB, rdb *redis.Client, settings
 		log.Printf("限时开售: %s / %s 余 %d/%d", spec.EventTitle, spec.Name, remaining, spec.Quota)
 	}
 	if rdb != nil {
-		_ = rdb.Del(ctx, "fuchang:catalog:rush_sales:list").Err()
+		_ = rdb.Del(ctx, "fuchang:catalog:rush_sales:list", "fuchang:catalog:rush_sales:list:v2").Err()
 	}
 	return created, nil
+}
+
+func ensureSeatedVIPZones(db *gorm.DB) error {
+	var events []models.Event
+	if err := db.Where("sale_mode = ? AND status = ?", models.EventSaleModeSeated, models.EventStatusPublished).Find(&events).Error; err != nil {
+		return err
+	}
+	for i := range events {
+		if err := ensureEventVIPZone(db, &events[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureEventVIPZone(db *gorm.DB, event *models.Event) error {
+	var session models.EventSession
+	if err := db.Where("event_id = ?", event.ID).Order("starts_at asc").First(&session).Error; err != nil {
+		return err
+	}
+	var tiers []models.TicketTier
+	if err := db.Where("session_id = ?", session.ID).Find(&tiers).Error; err != nil {
+		return err
+	}
+	var vip, front, regular *models.TicketTier
+	for i := range tiers {
+		switch strings.TrimSpace(tiers[i].Name) {
+		case "VIP", "VIP区", "VIP 区":
+			vip = &tiers[i]
+		case "前排":
+			front = &tiers[i]
+		case "普通座":
+			regular = &tiers[i]
+		}
+	}
+	if regular == nil && len(tiers) > 0 {
+		regular = &tiers[0]
+	}
+	if regular == nil {
+		return nil
+	}
+	if vip == nil {
+		base := regular.PriceCents
+		if front != nil {
+			base = front.PriceCents
+		}
+		orig := base + 8000
+		created := models.TicketTier{
+			SessionID:          session.ID,
+			Name:               "VIP",
+			Description:        "第一排，视野最好",
+			PriceCents:         base + 5000,
+			OriginalPriceCents: &orig,
+			PurchaseLimit:      2,
+			AssignPlaceNo:      false,
+			Status:             models.TicketTierStatusOnSale,
+		}
+		if err := db.Create(&created).Error; err != nil {
+			return err
+		}
+		vip = &created
+	}
+	if err := db.Exec(`
+		UPDATE session_seat ss
+		INNER JOIN seat s ON s.id = ss.seat_id
+		SET ss.ticket_tier_id = ?
+		WHERE ss.session_id = ? AND s.row_no = 1
+	`, vip.ID, session.ID).Error; err != nil {
+		return err
+	}
+	if err := db.Exec(`
+		UPDATE seat s
+		INNER JOIN session_seat ss ON ss.seat_id = s.id
+		SET s.ticket_tier_id = ?
+		WHERE ss.session_id = ? AND s.row_no = 1
+	`, vip.ID, session.ID).Error; err != nil {
+		return err
+	}
+	if front != nil {
+		if err := db.Exec(`
+			UPDATE session_seat ss
+			INNER JOIN seat s ON s.id = ss.seat_id
+			SET ss.ticket_tier_id = ?
+			WHERE ss.session_id = ? AND s.row_no = 2
+		`, front.ID, session.ID).Error; err != nil {
+			return err
+		}
+		if err := db.Exec(`
+			UPDATE seat s
+			INNER JOIN session_seat ss ON ss.seat_id = s.id
+			SET s.ticket_tier_id = ?
+			WHERE ss.session_id = ? AND s.row_no = 2
+		`, front.ID, session.ID).Error; err != nil {
+			return err
+		}
+	}
+	for _, tier := range []*models.TicketTier{vip, front, regular} {
+		if tier == nil {
+			continue
+		}
+		if err := recountSeatedTier(db, tier.ID); err != nil {
+			return err
+		}
+	}
+	log.Printf("选座 VIP: %s", event.Title)
+	return nil
+}
+
+func recountSeatedTier(db *gorm.DB, tierID int64) error {
+	var total, available, sold int64
+	if err := db.Model(&models.SessionSeat{}).Where("ticket_tier_id = ?", tierID).Count(&total).Error; err != nil {
+		return err
+	}
+	if err := db.Model(&models.SessionSeat{}).
+		Where("ticket_tier_id = ? AND status = ?", tierID, models.SessionSeatAvailable).
+		Count(&available).Error; err != nil {
+		return err
+	}
+	if err := db.Model(&models.SessionSeat{}).
+		Where("ticket_tier_id = ? AND status = ?", tierID, models.SessionSeatSold).
+		Count(&sold).Error; err != nil {
+		return err
+	}
+	return db.Model(&models.TicketTier{}).Where("id = ?", tierID).Updates(map[string]interface{}{
+		"total_quota":     total,
+		"remaining_quota": available,
+		"sold_count":      sold,
+		"assign_place_no": false,
+		"status":          models.TicketTierStatusOnSale,
+	}).Error
 }
 
 func seedRecentOrders(db *gorm.DB, users map[string]models.User, organizerID int64) (int, int, error) {
@@ -717,7 +871,7 @@ func bumpCatalogCache(ctx context.Context, rdb *redis.Client, organizerID int64,
 	if rdb == nil {
 		return
 	}
-	_ = rdb.Del(ctx, "fuchang:catalog:rush_sales:list", "fuchang:catalog:meta").Err()
+	_ = rdb.Del(ctx, "fuchang:catalog:rush_sales:list", "fuchang:catalog:rush_sales:list:v2", "fuchang:catalog:meta").Err()
 	_ = rdb.Incr(ctx, "fuchang:catalog:events:list:ver").Err()
 	var events []models.Event
 	_ = db.Select("id").Where("organizer_id = ?", organizerID).Find(&events).Error
