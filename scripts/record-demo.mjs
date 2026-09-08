@@ -153,18 +153,13 @@ async function record() {
     }
     await pick.click()
     await waitReady(page, '.seat-map')
-    const vipLegend = page.locator('.legend li').filter({ hasText: 'VIP' }).first()
-    if (await vipLegend.count()) {
-      await moveTo(page, vipLegend)
-      await vipLegend.click()
-      await sleep(700)
-    }
-    const vipSeat = page.locator('.seat-btn:not([disabled])').first()
+    await sleep(1600)
+    const vipSeat = page.locator('.seat-btn[title="A4"], .seat-btn[title="A5"], .seat-btn:not([disabled])').first()
     if (await vipSeat.count()) {
       await moveTo(page, vipSeat)
       await vipSeat.click()
     }
-    await sleep(1800)
+    await sleep(1600)
     await shot(page, '03-seats')
     const close = page.getByRole('button', { name: '关闭' })
     if (await close.count()) await close.click()

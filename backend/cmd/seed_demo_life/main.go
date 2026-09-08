@@ -176,6 +176,9 @@ func main() {
 	if err := ensureSeatedVIPZones(db); err != nil {
 		log.Fatalf("补选座 VIP 区失败: %v", err)
 	}
+	if err := occupySeatedMaps(db); err != nil {
+		log.Fatalf("占用选座库存失败: %v", err)
+	}
 	bumpCatalogCache(ctx, rdb, organizer.ID, db)
 
 	fmt.Printf("done. users=%d comments=%d rush=%d orders=%d tickets=%d waitlist=%d\n",
@@ -497,6 +500,95 @@ func ensureEventVIPZone(db *gorm.DB, event *models.Event) error {
 	}
 	log.Printf("选座 VIP: %s", event.Title)
 	return nil
+}
+
+func occupySeatedMaps(db *gorm.DB) error {
+	var sessions []models.EventSession
+	if err := db.Table("event_session AS es").
+		Select("es.*").
+		Joins("INNER JOIN event e ON e.id = es.event_id").
+		Where("e.sale_mode = ? AND e.status = ?", models.EventSaleModeSeated, models.EventStatusPublished).
+		Find(&sessions).Error; err != nil {
+		return err
+	}
+	for i := range sessions {
+		if err := occupySessionMap(db, sessions[i].ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type seatedCell struct {
+	ID    int64
+	RowNo int
+	ColNo int
+}
+
+func occupySessionMap(db *gorm.DB, sessionID int64) error {
+	var cells []seatedCell
+	if err := db.Raw(`
+		SELECT ss.id, s.row_no AS row_no, s.col_no AS col_no
+		FROM session_seat ss
+		INNER JOIN seat s ON s.id = ss.seat_id
+		WHERE ss.session_id = ?
+	`, sessionID).Scan(&cells).Error; err != nil {
+		return err
+	}
+	if len(cells) == 0 {
+		return nil
+	}
+	for _, cell := range cells {
+		status := mockSeatStatus(cell.RowNo, cell.ColNo)
+		if err := db.Model(&models.SessionSeat{}).Where("id = ?", cell.ID).
+			Update("status", status).Error; err != nil {
+			return err
+		}
+	}
+	var ids []int64
+	if err := db.Model(&models.SessionSeat{}).
+		Where("session_id = ?", sessionID).
+		Distinct("ticket_tier_id").
+		Pluck("ticket_tier_id", &ids).Error; err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := recountSeatedTier(db, id); err != nil {
+			return err
+		}
+	}
+	log.Printf("选座占用: session=%d seats=%d", sessionID, len(cells))
+	return nil
+}
+
+func mockSeatStatus(row, col int) models.SessionSeatStatus {
+	if row == 1 {
+		switch col {
+		case 4, 5, 8:
+			return models.SessionSeatAvailable
+		case 10:
+			return models.SessionSeatHeld
+		default:
+			return models.SessionSeatSold
+		}
+	}
+	if row == 2 {
+		switch col {
+		case 2, 5, 8:
+			return models.SessionSeatAvailable
+		case 1:
+			return models.SessionSeatHeld
+		default:
+			return models.SessionSeatSold
+		}
+	}
+	if (row+col)%3 == 0 {
+		return models.SessionSeatSold
+	}
+	if row == 3 && col%5 == 1 {
+		return models.SessionSeatHeld
+	}
+	return models.SessionSeatAvailable
 }
 
 func recountSeatedTier(db *gorm.DB, tierID int64) error {
