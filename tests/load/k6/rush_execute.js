@@ -13,6 +13,8 @@
  *   VUS            虚拟用户数（默认 50；RATE>0 时仅作预分配参考）
  *   DURATION       持续时间（默认 30s）
  *   RATE           若 >0 则用 constant-arrival-rate，单位 req/s（优先于 VUS/RAMP）
+ *   LOAD_PROFILE   peak：150/s 120s → 500/s 10s → 50/s 60s（优先于 RATE）
+ *                  soak：150/s 10m → 500/s 10s → 150/s 至总时长 25m
  *   PRE_VUS        RATE 模式预分配 VU（默认 max(RATE, 50)）
  *   MAX_VUS        RATE 模式最大 VU（默认 max(RATE*2, PRE_VUS)）
  *   RAMP_VUS       若设置则走阶梯：ramp -> hold -> ramp-down（忽略 DURATION 的恒定 VU）
@@ -21,16 +23,21 @@
  *   RAMP_DOWN      下降时间（默认 10s）
  */
 import http from "k6/http";
+import exec from "k6/execution";
 import { check, sleep } from "k6";
 import { SharedArray } from "k6/data";
 import { Counter, Rate, Trend } from "k6/metrics";
 import { uuidv4 } from "https://jslib.k6.io/k6-utils/1.4.0/index.js";
+import { classifyResponse } from "./business_result.mjs";
 
 // 售罄/限购/限流算业务响应，不计入 http_req_failed。
 http.setResponseCallback(http.expectedStatuses(200, 400, 409, 429));
 
 const fixturePath = __ENV.K6_FIXTURE || "fixtures/rush_execute.json";
-const fixture = JSON.parse(open(fixturePath));
+const fixture = new SharedArray("rush_metadata", () => {
+  const { users, ...metadata } = JSON.parse(open(fixturePath));
+  return [metadata];
+})[0];
 const baseURL = (__ENV.BASE_URL || fixture.base_url || "http://127.0.0.1:18080/api/v1").replace(
   /\/$/,
   "",
@@ -39,10 +46,11 @@ const campaignID = String(__ENV.RUSH_CAMPAIGN_ID || fixture.campaign_id);
 const thinkMs = Number(__ENV.THINK_MS || 0);
 
 const users = new SharedArray("rush_users", () => {
-  if (!Array.isArray(fixture.users) || fixture.users.length === 0) {
+  const data = JSON.parse(open(fixturePath));
+  if (!Array.isArray(data.users) || data.users.length === 0) {
     throw new Error(`fixture has no users: ${fixturePath}`);
   }
-  return fixture.users;
+  return data.users;
 });
 
 const executeLatency = new Trend("rush_execute_latency", true);
@@ -72,7 +80,39 @@ const commonOptions = {
   },
 };
 
-export const options =
+const peakProfile = __ENV.LOAD_PROFILE === "peak";
+const soakProfile = __ENV.LOAD_PROFILE === "soak";
+const phasedProfile = peakProfile || soakProfile;
+const phases = soakProfile ? [
+  { name: "steady_before", rate: 150, seconds: 600, start: 0 },
+  { name: "burst", rate: 500, seconds: 10, start: 600 },
+  { name: "steady_after", rate: 150, seconds: 890, start: 610 },
+] : [
+  { name: "steady", rate: 150, seconds: 120, start: 0 },
+  { name: "burst", rate: 500, seconds: 10, start: 120 },
+  { name: "recovery", rate: 50, seconds: 60, start: 130 },
+];
+const phaseMetrics = Object.fromEntries((phasedProfile ? phases : []).map(({ name }) => [name, {
+  requests: new Counter(`phase_${name}_requests`),
+  accepted: new Counter(`phase_${name}_accepted`),
+  limited: new Counter(`phase_${name}_limited`),
+  acceptedLatency: new Trend(`phase_${name}_accepted_latency`, true),
+}]));
+
+const minuteMetrics = Array.from({ length: soakProfile ? 25 : 0 }, (_, i) => ({
+  accepted: new Counter(`minute_${i}_accepted`),
+  limited: new Counter(`minute_${i}_limited`),
+  latency: new Trend(`minute_${i}_accepted_latency`, true),
+}));
+
+export const options = phasedProfile ? {
+  ...commonOptions,
+  scenarios: Object.fromEntries(phases.map(p => [p.name, {
+    executor: "constant-arrival-rate", rate: p.rate, timeUnit: "1s",
+    duration: `${p.seconds}s`, startTime: `${p.start}s`,
+    preAllocatedVUs: 150, maxVUs: 800, gracefulStop: "10s",
+  }])),
+} :
   rate > 0
     ? {
         ...commonOptions,
@@ -114,12 +154,16 @@ export function setup() {
     baseURL,
     campaignID,
     userCount: users.length,
+    startedAt: Date.now(),
   };
 }
 
-export default function () {
+export default function (data) {
   // 每轮换用户，避免单用户 20 次限购把入口成功率打穿。
-  const user = users[(__VU * 7919 + __ITER) % users.length];
+  const userIndex = soakProfile
+    ? (exec.scenario.iterationInTest + phases.find(p => p.name === exec.scenario.name).start * 150) % users.length
+    : (__VU * 7919 + __ITER) % users.length;
+  const user = users[userIndex];
   const url = `${baseURL}/rush-sales/${campaignID}/execute`;
   const res = http.post(
     url,
@@ -142,15 +186,34 @@ export default function () {
 
   executeLatency.add(res.timings.duration);
 
-  const okBiz = res.status === 200;
-  const soldOut = res.status === 400 || res.status === 409;
+  let body;
+  try { body = res.json(); } catch (_) {}
+  const result = classifyResponse(res.status, body);
+  const okBiz = result === "accepted";
+  const soldOut = result === "sold_out";
   const rejected = res.status === 429 || res.status >= 500;
 
+  if (phasedProfile) {
+    const m = phaseMetrics[exec.scenario.name];
+    m.requests.add(1);
+    m.accepted.add(okBiz ? 1 : 0);
+    m.limited.add(result === "rate_limited" ? 1 : 0);
+    if (okBiz) m.acceptedLatency.add(res.timings.duration);
+  }
+  if (soakProfile) {
+    const minute = Math.min(24, Math.floor((Date.now() - data.startedAt) / 60000));
+    const m = minuteMetrics[minute];
+    m.accepted.add(okBiz ? 1 : 0);
+    m.limited.add(result === "rate_limited" ? 1 : 0);
+    if (okBiz) m.latency.add(res.timings.duration);
+  }
   executeSuccess.add(okBiz);
   if (soldOut) {
     executeSoldOut.add(1);
     executeBusinessRejected.add(1);
-  } else if (res.status === 429) {
+  } else if (result === "business_rejected") {
+    executeBusinessRejected.add(1);
+  } else if (result === "rate_limited") {
     executeRateLimited.add(1);
   } else if (res.status >= 500) {
     executeServerError.add(1);
@@ -166,7 +229,7 @@ export default function () {
         `[rush_execute_transport_error] status=${res.status} error_code=${res.error_code || ""} error=${String(res.error || "")}`,
       );
     }
-  } else if (res.status !== 200) {
+  } else if (result === "unexpected") {
     executeUnexpectedStatus.add(1);
   }
   if (rejected) executeRejected.add(1);
@@ -185,6 +248,17 @@ export function handleSummary(data) {
   const values = httpMetrics.values || {};
   const summary = {
     scenario: "k6_rush_execute",
+    phases: phasedProfile ? phases.map(p => ({ ...p,
+      requests: data.metrics[`phase_${p.name}_requests`]?.values?.count || 0,
+      accepted: data.metrics[`phase_${p.name}_accepted`]?.values?.count || 0,
+      rate_limited: data.metrics[`phase_${p.name}_limited`]?.values?.count || 0,
+      accepted_latency_ms: data.metrics[`phase_${p.name}_accepted_latency`]?.values,
+    })) : undefined,
+    minutes: soakProfile ? minuteMetrics.map((_, minute) => ({ minute,
+      accepted: data.metrics[`minute_${minute}_accepted`]?.values?.count || 0,
+      rate_limited: data.metrics[`minute_${minute}_limited`]?.values?.count || 0,
+      accepted_latency_ms: data.metrics[`minute_${minute}_accepted_latency`]?.values,
+    })) : undefined,
     base_url: baseURL,
     campaign_id: campaignID,
     fixture: fixturePath,
@@ -214,6 +288,7 @@ export function handleSummary(data) {
     rush_execute_unexpected_status:
       data.metrics.rush_execute_unexpected_status?.values?.count || 0,
     http_req_failed_rate: data.metrics.http_req_failed?.values?.rate || 0,
+    dropped_iterations: data.metrics.dropped_iterations?.values?.count || 0,
     checks: data.metrics.checks?.values,
   };
   return {

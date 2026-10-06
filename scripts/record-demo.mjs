@@ -154,7 +154,7 @@ async function record() {
     await pick.click()
     await waitReady(page, '.seat-map')
     await sleep(1600)
-    const vipSeat = page.locator('.seat-btn[title="A4"], .seat-btn[title="A5"], .seat-btn:not([disabled])').first()
+    const vipSeat = page.locator('.seat-btn[title="A5"]')
     if (await vipSeat.count()) {
       await moveTo(page, vipSeat)
       await vipSeat.click()

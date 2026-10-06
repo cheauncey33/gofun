@@ -4,46 +4,19 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-	"time"
 )
 
-func TestTicketTimeoutInfraDefaults(t *testing.T) {
-	s := &TicketOrderService{}
-	infra := s.timeoutInfra()
-	if infra.exchange != defaultTicketTimeoutExchange {
-		t.Fatalf("exchange = %q", infra.exchange)
-	}
-	if infra.delayQueue != defaultTicketDelayQueue {
-		t.Fatalf("delayQueue = %q", infra.delayQueue)
-	}
-	if infra.timeoutQ != defaultTicketTimeoutQueue {
-		t.Fatalf("timeoutQ = %q", infra.timeoutQ)
-	}
-	if infra.routingKey != defaultTicketTimeoutRK {
-		t.Fatalf("routingKey = %q", infra.routingKey)
-	}
-}
-
-func TestPaymentTimeoutExpirationMs(t *testing.T) {
-	if got := paymentTimeoutExpirationMs(15 * time.Minute); got != "900000" {
-		t.Fatalf("15m expiration = %q, want 900000", got)
-	}
-	if got := paymentTimeoutExpirationMs(500 * time.Millisecond); got != "1000" {
-		t.Fatalf("sub-second expiration = %q, want 1000", got)
-	}
-}
-
-func TestShouldRequeuePaymentTimeout(t *testing.T) {
+func TestClassifyPaymentTimeoutError(t *testing.T) {
 	t.Parallel()
-	if shouldRequeuePaymentTimeout(nil) {
-		t.Fatal("nil error must not be requeued")
+	if classifyPaymentTimeoutError(nil) != paymentTimeoutErrorNone {
+		t.Fatal("nil error classification")
 	}
-	if !shouldRequeuePaymentTimeout(errors.New("temporary database error")) {
-		t.Fatal("transient error should be requeued")
+	if classifyPaymentTimeoutError(errors.New("temporary database error")) != paymentTimeoutErrorTransient {
+		t.Fatal("transient error classification")
 	}
 	permanent := fmt.Errorf("%w: 订单明细异常", ErrTicketOrderNonRetryable)
-	if shouldRequeuePaymentTimeout(permanent) {
-		t.Fatal("permanent error must be acknowledged instead of requeued")
+	if classifyPaymentTimeoutError(permanent) != paymentTimeoutErrorPermanent {
+		t.Fatal("permanent error classification")
 	}
 	if got := classifyPaymentTimeoutError(permanent); got != paymentTimeoutErrorPermanent {
 		t.Fatalf("permanent classification = %q", got)

@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go.uber.org/zap"
 	"gofun/config"
 	"gofun/metrics"
+	"gofun/pkg/logger"
 	apptelemetry "gofun/pkg/telemetry"
-	"log"
 	"sync"
 	"time"
 
@@ -45,7 +46,7 @@ func NewTicketOrderConsumer(
 
 func (c *TicketOrderConsumer) Start(ctx context.Context, cfg config.OrderConsumerConfig) {
 	if cfg.WorkerCount <= 0 {
-		cfg.WorkerCount = 6
+		cfg.WorkerCount = 12
 	}
 	if cfg.PrefetchCount <= 0 {
 		cfg.PrefetchCount = 5
@@ -65,7 +66,7 @@ func (c *TicketOrderConsumer) Start(ctx context.Context, cfg config.OrderConsume
 func (c *TicketOrderConsumer) runWorker(ctx context.Context, workerID, prefetch, maxRetries int) {
 	for ctx.Err() == nil {
 		if err := c.consume(ctx, workerID, prefetch, maxRetries); err != nil {
-			log.Printf("ticket order worker %d: %v", workerID, err)
+			logger.FromContext(ctx).Error("Order consumer channel failed", zap.Int("worker_id", workerID), zap.Error(err))
 		}
 		select {
 		case <-ctx.Done():
@@ -140,8 +141,10 @@ func (c *TicketOrderConsumer) handle(
 		metrics.MQMessagesConsumed.WithLabelValues("malformed").Inc()
 		return delivery.Ack(false)
 	}
+	ctx = logger.WithRequestID(ctx, message.RequestID)
 	consumerCtx, span := startTicketOrderConsumerSpan(ctx, delivery, message)
 	defer span.End()
+	log := logger.FromContext(consumerCtx).With(zap.Int64("order_id", message.OrderID), zap.Int64("event_id", message.EventID), zap.Int64("user_id", message.UserID), zap.Int("attempt", readRetryCount(delivery.Headers)+1), zap.String("stage", "consume"))
 	err := c.service.ProcessOrderTask(consumerCtx, message)
 	if err == nil {
 		if faultErr := c.service.injectTicketFault(
@@ -150,19 +153,24 @@ func (c *TicketOrderConsumer) handle(
 			// 不 Ack；consume 返回后 channel 关闭，RabbitMQ 会重新投递该消息。
 			return faultErr
 		}
+		log.Info("Order task committed")
 		metrics.MQMessagesConsumed.WithLabelValues("success").Inc()
 		return delivery.Ack(false)
 	}
 	span.RecordError(err)
 	span.SetStatus(codes.Error, err.Error())
 	if errors.Is(err, ErrTicketOrderNonRetryable) {
-		c.service.FinalizeFailedMessage(consumerCtx, message, err.Error())
+		log.Error("Order permanently failed", zap.Error(err))
+		if finalizeErr := c.service.FinalizeFailedMessage(consumerCtx, message, err.Error()); finalizeErr != nil {
+			return finalizeErr
+		}
 		metrics.MQMessagesConsumed.WithLabelValues("permanent_error").Inc()
 		return delivery.Ack(false)
 	}
 
 	retryCount := readRetryCount(delivery.Headers)
 	if retryCount >= maxRetries {
+		log.Error("Order retries exhausted", zap.Error(err))
 		headers := cloneHeaders(delivery.Headers)
 		headers["x-retry-count"] = retryCount
 		headers["x-dead-reason"] = err.Error()
@@ -181,7 +189,9 @@ func (c *TicketOrderConsumer) handle(
 		); publishErr != nil {
 			return publishErr
 		}
-		c.service.FinalizeFailedMessage(consumerCtx, message, "消息消费超过最大重试次数")
+		if finalizeErr := c.service.FinalizeFailedMessage(consumerCtx, message, "消息消费超过最大重试次数"); finalizeErr != nil {
+			return finalizeErr
+		}
 		metrics.MQMessagesConsumed.WithLabelValues("dead_letter").Inc()
 		return delivery.Ack(false)
 	}
@@ -203,6 +213,7 @@ func (c *TicketOrderConsumer) handle(
 	); err != nil {
 		return err
 	}
+	log.Warn("Order queued for retry", zap.Error(err))
 	metrics.MQMessagesConsumed.WithLabelValues("retry").Inc()
 	return delivery.Ack(false)
 }

@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"errors"
 	"gofun/common"
 	"gofun/pkg/response"
 	"gofun/service"
@@ -64,7 +63,7 @@ func (ctrl *TicketCatalogController) GetPublishedEvent(c *gin.Context) {
 func (ctrl *TicketCatalogController) AdminCreateOrganizer(c *gin.Context) {
 	var input service.CreateOrganizerInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	organizer, err := ctrl.service.CreateOrganizer(c.Request.Context(), input)
@@ -204,7 +203,7 @@ func (ctrl *TicketCatalogController) CreateVenue(c *gin.Context) {
 	}
 	var input service.CreateVenueInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	venue, err := ctrl.service.CreateVenue(c.Request.Context(), userID, organizerID, input)
@@ -230,7 +229,7 @@ func (ctrl *TicketCatalogController) CreateHall(c *gin.Context) {
 	}
 	var input service.CreateHallInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	hall, err := ctrl.service.CreateHall(c.Request.Context(), userID, organizerID, venueID, input)
@@ -298,7 +297,7 @@ func (ctrl *TicketCatalogController) CreateHallLayout(c *gin.Context) {
 	}
 	var input service.HallLayoutInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	layout, err := ctrl.service.CreateHallLayout(c.Request.Context(), userID, organizerID, hallID, input)
@@ -324,7 +323,7 @@ func (ctrl *TicketCatalogController) UpdateHallLayout(c *gin.Context) {
 	}
 	var input service.HallLayoutInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	layout, err := ctrl.service.UpdateHallLayout(c.Request.Context(), userID, organizerID, layoutID, input)
@@ -371,7 +370,7 @@ func (ctrl *TicketCatalogController) ConfigureSessionSeatMap(c *gin.Context) {
 	}
 	var input service.SessionSeatMapInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	rows, err := ctrl.service.ConfigureSessionSeatMap(c.Request.Context(), userID, organizerID, sessionID, input)
@@ -410,7 +409,7 @@ func (ctrl *TicketCatalogController) CreateEvent(c *gin.Context) {
 	}
 	var input service.CreateEventInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	event, err := ctrl.service.CreateEvent(c.Request.Context(), userID, organizerID, input)
@@ -436,7 +435,7 @@ func (ctrl *TicketCatalogController) UpdateEvent(c *gin.Context) {
 	}
 	var input service.CreateEventInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	event, err := ctrl.service.UpdateEvent(c.Request.Context(), userID, organizerID, eventID, input)
@@ -731,7 +730,7 @@ func (ctrl *TicketCatalogController) CreateSession(c *gin.Context) {
 	}
 	var input service.CreateEventSessionInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	session, err := ctrl.service.CreateSession(
@@ -759,7 +758,7 @@ func (ctrl *TicketCatalogController) UpdateSession(c *gin.Context) {
 	}
 	var input service.CreateEventSessionInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	session, err := ctrl.service.UpdateSession(
@@ -787,7 +786,7 @@ func (ctrl *TicketCatalogController) CreateTicketTier(c *gin.Context) {
 	}
 	var input service.CreateTicketTierInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	tier, err := ctrl.service.CreateTicketTier(
@@ -815,7 +814,7 @@ func (ctrl *TicketCatalogController) UpdateTicketTier(c *gin.Context) {
 	}
 	var input service.UpdateTicketTierInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	tier, err := ctrl.service.UpdateTicketTier(
@@ -864,7 +863,7 @@ func (ctrl *TicketCatalogController) SaveSeatLayout(c *gin.Context) {
 	}
 	var input service.SeatLayoutInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	layout, err := ctrl.service.SaveSeatLayout(c.Request.Context(), userID, organizerID, eventID, input)
@@ -929,18 +928,4 @@ func ticketUserID(c *gin.Context) (int64, bool) {
 		return 0, false
 	}
 	return userID, true
-}
-
-func writeTicketCatalogError(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, service.ErrTicketResourceNotFound):
-		response.Error(c, http.StatusNotFound, response.CodeNotFound, err.Error())
-	case errors.Is(err, service.ErrOrganizerForbidden):
-		response.Error(c, http.StatusForbidden, response.CodeForbidden, err.Error())
-	case errors.Is(err, service.ErrInvalidTicketCatalog),
-		errors.Is(err, service.ErrOrganizerUnavailable):
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, err.Error())
-	default:
-		response.Error(c, http.StatusInternalServerError, response.CodeInternalError, "票务服务暂时不可用")
-	}
 }

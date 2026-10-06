@@ -85,8 +85,6 @@ inventory:
 
 delayed_order:
   timeout_minutes: 1
-  lock_timeout_sec: 5
-  worker_count: 2
 
 elasticsearch:
   enabled: true

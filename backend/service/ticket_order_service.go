@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go.uber.org/zap"
 	"gofun/config"
 	"gofun/container"
 	"gofun/metrics"
 	"gofun/models"
+	"gofun/pkg/logger"
 	"gofun/pkg/ws"
+	"gofun/repository"
 	"log"
 	"regexp"
 	"sort"
@@ -93,6 +96,7 @@ type TicketOrderMessage struct {
 	StockBucketNo      *int              `json:"stock_bucket_no,omitempty"`
 	RushBucketNo       *int              `json:"rush_bucket_no,omitempty"`
 	SeatIDs            []int64           `json:"seat_ids,omitempty"`
+	RequestID          string            `json:"request_id,omitempty"`
 	TraceContext       map[string]string `json:"trace_context,omitempty"`
 }
 
@@ -101,22 +105,18 @@ const ticketOrderFinalizeEventType = "ticket.order.finalize"
 type TicketOrderService struct {
 	db *gorm.DB
 	// workerDB 供 Consumer/Outbox/Timeout 等后台路径；未隔离时与 db 相同。
-	workerDB          *gorm.DB
-	rdb               *redis.Client
-	node              *snowflake.Node
-	newMQChannel      func() (*amqp.Channel, error)
-	mqQueueName       string
-	mqQueueType       string
-	localCache        *gocache.Cache
-	paymentTimeout    time.Duration
-	payment           PaymentGateway
-	credentialSigner  *TicketCredentialSigner
-	identityHashKey   []byte
-	timeoutExchange   string
-	timeoutDelayQueue string
-	timeoutQueue      string
-	timeoutRoutingKey string
-	scannerInterval   time.Duration
+	workerDB         *gorm.DB
+	rdb              *redis.Client
+	node             *snowflake.Node
+	newMQChannel     func() (*amqp.Channel, error)
+	mqQueueName      string
+	mqQueueType      string
+	localCache       *gocache.Cache
+	paymentTimeout   time.Duration
+	payment          PaymentGateway
+	credentialSigner *TicketCredentialSigner
+	identityHashKey  []byte
+	scannerInterval  time.Duration
 	// outboxNotify 在写入 pending outbox 后唤醒发布循环；容量 1，合并突发通知。
 	outboxNotify chan struct{}
 	inventory    InventoryBucketSettings
@@ -124,10 +124,23 @@ type TicketOrderService struct {
 	queryCacheSF singleflight.Group
 	// faultInjector 仅由同包集成测试设置，运行时默认 nil。
 	faultInjector TicketFaultInjector
+	// inventoryConfig 提供库存归还的重试参数。
+	inventoryConfig config.InventoryConfig
+	// orders 是订单链纯数据访问入口；构造时初始化，测试字面量场景由 orderRepo() 兜底。
+	orderRepoRef *repository.TicketOrderRepository
+}
+
+// orderRepo 返回持久化入口，nil 时按需补建，保证测试直构的 service 也可用。
+func (s *TicketOrderService) orderRepo() *repository.TicketOrderRepository {
+	if s.orderRepoRef == nil {
+		s.orderRepoRef = repository.NewTicketOrderRepository(s.db)
+	}
+	return s.orderRepoRef
 }
 
 func (s *TicketOrderService) ConfigureInventory(cfg config.InventoryConfig) {
 	s.inventory = NewInventoryBucketSettings(cfg)
+	s.inventoryConfig = cfg
 }
 
 type orderEventPublisher interface {
@@ -139,11 +152,13 @@ func (s *TicketOrderService) ConfigureOrderEvents(hub *ws.Hub) {
 }
 
 func (s *TicketOrderService) publishOrderEvent(
+	ctx context.Context,
 	userID, orderID int64,
 	event string,
 	status models.TicketOrderStatus,
 	message string,
 ) {
+	logger.FromContext(ctx).Info("Order state changed", zap.Int64("order_id", orderID), zap.Int64("user_id", userID), zap.String("event", event), zap.String("state", string(status)))
 	// List/detail cache: bump only on terminal states. Create paths already
 	// invalidate; pending/queued churn can wait for short TTL.
 	switch status {
@@ -224,7 +239,8 @@ func NewTicketOrderService(c *container.Container, timeoutMinutes int, paymentCf
 		payment:          NewSandboxPaymentGateway(paymentCfg.SandboxSecret, time.Duration(paymentCfg.SandboxCallbackDelayMS)*time.Millisecond),
 		credentialSigner: NewTicketCredentialSigner(c.TicketQRSecrets...),
 		identityHashKey:  append([]byte(nil), c.TicketQRSecret...),
-		scannerInterval:  2 * time.Minute,
+		orderRepoRef:     repository.NewTicketOrderRepository(c.DB),
+		scannerInterval:  10 * time.Second,
 		outboxNotify:     make(chan struct{}, 1),
 	}
 	if gateway, ok := s.payment.(*SandboxPaymentGateway); ok {
@@ -409,7 +425,7 @@ func (s *TicketOrderService) WarmTicketQuota(ctx context.Context) error {
 	for _, row := range purchasedRows {
 		values[rushUserCountKey(row.CampaignID, row.UserID)] = row.Quantity
 	}
-	pendingKeys, err := s.pendingStockReservationKeys(ctx)
+	pendingKeys, err := s.pendingInventoryKeys(ctx)
 	if err != nil {
 		return fmt.Errorf("读取在途库存预扣: %w", err)
 	}
@@ -426,7 +442,12 @@ func (s *TicketOrderService) WarmTicketQuota(ctx context.Context) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return s.rdb.MSet(ctx, values).Err()
+	pipe := s.rdb.Pipeline()
+	for key, value := range values {
+		pipe.SetNX(ctx, key, value, 0)
+	}
+	_, err = pipe.Exec(ctx)
+	return err
 }
 
 func (s *TicketOrderService) notifyOutboxPublisher() {
@@ -449,6 +470,18 @@ func (s *TicketOrderService) CreateOrder(
 	if userID <= 0 || input.TicketTierID <= 0 ||
 		len(idempotencyKey) < 8 || len(idempotencyKey) > 64 {
 		return nil, ErrInvalidTicketCatalog
+	}
+	if len(input.SeatIDs) > 0 {
+		input.Quantity = len(input.SeatIDs)
+	}
+	if err := s.expandAttendeeProfiles(ctx, userID, &input); err != nil {
+		return nil, err
+	}
+	requestHash := orderRequestHash(ticketOrderOperationNormal, input)
+	if receipt, err := s.lookupIdempotentOrder(ctx, userID, idempotencyKey, requestHash); err != nil {
+		return nil, err
+	} else if receipt != nil {
+		return receipt, nil
 	}
 
 	tier, session, event, venue, err := s.loadPurchasableTier(ctx, input.TicketTierID)
@@ -496,15 +529,14 @@ func (s *TicketOrderService) CreateOrder(
 	if !event.SaleMode.IsSeated() && input.Quantity > tier.PurchaseLimit {
 		return nil, fmt.Errorf("%w: 超过限购数量", ErrTicketOrderUnavailable)
 	}
+	// 快速失败预检查：仅在事务内行锁校验（preCommit）之前省一次预约开销，
+	// 真正的限购判定在落库事务内由 enforceUserEventPurchaseLimit 原子完成。
 	used, err := s.countUserEventTickets(ctx, userID, event.ID)
 	if err != nil {
 		return nil, err
 	}
 	if used+input.Quantity > event.MaxTicketsPerOrder {
 		return nil, fmt.Errorf("%w: 本场每账号限购 %d 张", ErrTicketOrderUnavailable, event.MaxTicketsPerOrder)
-	}
-	if err := s.expandAttendeeProfiles(ctx, userID, &input); err != nil {
-		return nil, err
 	}
 	if err := validatePurchaseInfo(input.PurchaseInfoInput, input.Quantity, event.RealNameRequired); err != nil {
 		return nil, err
@@ -514,12 +546,6 @@ func (s *TicketOrderService) CreateOrder(
 	}
 	if !event.SaleMode.IsSeated() && tier.RemainingQuota-tier.WaitlistPending < input.Quantity {
 		return nil, ErrTicketQuotaInsufficient
-	}
-	requestHash := orderRequestHash(ticketOrderOperationNormal, input)
-	if receipt, err := s.lookupIdempotentOrder(ctx, userID, idempotencyKey, requestHash); err != nil {
-		return nil, err
-	} else if receipt != nil {
-		return receipt, nil
 	}
 
 	proposedOrderID := s.node.Generate().Int64()
@@ -591,9 +617,11 @@ func (s *TicketOrderService) CreateOrder(
 	if s.inventory.Enabled && !event.SaleMode.IsSeated() {
 		message.StockBucketNo = intPtr(bucketNo)
 	}
-	if err := s.createOrderAndOutbox(ctx, order, message); err != nil {
+	if err := s.createOrderAndOutbox(ctx, order, message, func(tx *gorm.DB) error {
+		return enforceUserEventPurchaseLimit(tx, userID, event.ID, input.Quantity, event.MaxTicketsPerOrder)
+	}); err != nil {
 		// COMMIT 结果可能因连接中断而未知：先用独立 Context 查幂等订单，
-		// 查不到时还必须先竞争 MySQL 恢复栅栏，不能直接回滚 Redis。
+		// 查不到时写入恢复标记订单，通过订单主键与在途提交竞争。
 		recoveryCtx, cancel := detachedReservationContext(ctx)
 		defer cancel()
 		var existing models.TicketOrder
@@ -688,13 +716,7 @@ func (s *TicketOrderService) ProcessOrderTask(
 			break
 		}
 		delay := time.Duration(attempt*10+int(message.OrderID%7)) * time.Millisecond
-		log.Printf(
-			"ticket order consumer transaction retry: order=%d attempt=%d delay=%s err=%v",
-			message.OrderID,
-			attempt,
-			delay,
-			err,
-		)
+		logger.FromContext(ctx).Warn("Order transaction retry", zap.Int64("order_id", message.OrderID), zap.String("stage", "mysql_transaction"), zap.Int("attempt", attempt), zap.Duration("retry_delay", delay), zap.Error(err))
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
@@ -708,7 +730,7 @@ func (s *TicketOrderService) ProcessOrderTask(
 		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
-	// 进入待支付后投递延时关单；失败由扫描器兜底，不阻塞消费 ack。
+	// 事务提交后发布待支付状态。
 	if enteredPending {
 		if !pendingAcceptedAt.IsZero() {
 			latency := time.Since(pendingAcceptedAt).Seconds()
@@ -716,10 +738,8 @@ func (s *TicketOrderService) ProcessOrderTask(
 				metrics.TicketOrderAcceptedToPendingPaymentDuration.Observe(latency)
 			}
 		}
-		if pubErr := s.PublishPaymentTimeout(ctx, pendingOrderID, pendingUserID); pubErr != nil {
-			log.Printf("ticket payment timeout publish order %d: %v", pendingOrderID, pubErr)
-		}
-		s.publishOrderEvent(
+
+		s.publishOrderEvent(ctx,
 			pendingUserID,
 			pendingOrderID,
 			"pending_payment",
@@ -782,49 +802,42 @@ func (s *TicketOrderService) processOrderTaskTx(
 	}
 	metrics.TicketOrderConsumerStageDuration.WithLabelValues("order_lock").Observe(time.Since(stageStarted).Seconds())
 	if order.Status != models.TicketOrderStatusQueued {
+		// 幂等重投：订单已被先前投递推进到后续状态，直接提交跳过。
 		commitStarted := time.Now()
 		err = tx.Commit().Error
 		metrics.TicketOrderConsumerStageDuration.WithLabelValues("commit").Observe(time.Since(commitStarted).Seconds())
 		return err
 	}
-
-	var orderItems []models.TicketOrderItem
+	var detail struct {
+		ItemCount    int64
+		Quantity     int
+		TicketTierID int64
+		SeatedCount  int64
+	}
 	stageStarted = time.Now()
-	if err = tx.Select("ticket_tier_id, quantity").
+	seats := tx.Model(&models.SessionSeat{}).Select("COUNT(*)").
+		Where("order_id = ? AND status IN ?", order.ID, []models.SessionSeatStatus{models.SessionSeatHeld, models.SessionSeatSold})
+	if err = tx.Model(&models.TicketOrderItem{}).
+		Select("COUNT(*) AS item_count, COALESCE(SUM(quantity), 0) AS quantity, COALESCE(MIN(ticket_tier_id), 0) AS ticket_tier_id, (?) AS seated_count", seats).
 		Where("order_id = ?", order.ID).
-		Find(&orderItems).Error; err != nil {
+		Scan(&detail).Error; err != nil {
 		metrics.TicketOrderConsumerStageDuration.WithLabelValues("order_items_read").Observe(time.Since(stageStarted).Seconds())
 		return err
 	}
 	metrics.TicketOrderConsumerStageDuration.WithLabelValues("order_items_read").Observe(time.Since(stageStarted).Seconds())
-	if order.UserID != message.UserID || len(orderItems) == 0 {
+	if order.UserID != message.UserID || detail.ItemCount == 0 || detail.Quantity != message.Quantity {
 		return fmt.Errorf("%w: 消息与订单凭据不一致", ErrTicketOrderNonRetryable)
 	}
-	itemQty := 0
-	for _, item := range orderItems {
-		itemQty += item.Quantity
-	}
-	if itemQty != message.Quantity {
+	if len(message.SeatIDs) == 0 && (detail.ItemCount != 1 || detail.TicketTierID != message.TicketTierID) {
 		return fmt.Errorf("%w: 消息与订单凭据不一致", ErrTicketOrderNonRetryable)
 	}
-	if len(message.SeatIDs) == 0 && (len(orderItems) != 1 ||
-		orderItems[0].TicketTierID != message.TicketTierID) {
-		return fmt.Errorf("%w: 消息与订单凭据不一致", ErrTicketOrderNonRetryable)
-	}
-	if (order.RushSaleCampaignID == nil) != (message.RushSaleCampaignID == nil) {
-		return fmt.Errorf("%w: 消息与订单凭据不一致", ErrTicketOrderNonRetryable)
-	}
-	if order.RushSaleCampaignID != nil &&
-		*order.RushSaleCampaignID != *message.RushSaleCampaignID {
+	if (order.RushSaleCampaignID == nil) != (message.RushSaleCampaignID == nil) ||
+		(order.RushSaleCampaignID != nil && *order.RushSaleCampaignID != *message.RushSaleCampaignID) {
 		return fmt.Errorf("%w: 消息与订单凭据不一致", ErrTicketOrderNonRetryable)
 	}
 
-	seatedCount, seatedErr := sessionSeatsHeldOrSold(tx, order.ID)
-	if seatedErr != nil {
-		return seatedErr
-	}
-	if seatedCount > 0 {
-		if seatedCount != int64(message.Quantity) {
+	if detail.SeatedCount > 0 {
+		if detail.SeatedCount != int64(message.Quantity) {
 			return fmt.Errorf("%w: 座位占用与订单数量不一致", ErrTicketOrderNonRetryable)
 		}
 	} else if s.inventory.Enabled {
@@ -955,71 +968,51 @@ func classifyRushQuotaUpdateMiss(tx *gorm.DB, campaignID, tierID int64, quantity
 	return fmt.Errorf("%w: 限时开售票额不足", ErrTicketOrderNonRetryable)
 }
 
-func (s *TicketOrderService) FinalizeFailedMessage(
-	ctx context.Context,
-	message TicketOrderMessage,
-	reason string,
-) {
-	released := 0
-	updated := false
-	failedSource := "normal"
-	if message.RushSaleCampaignID != nil {
-		failedSource = "rush_sale"
+func (s *TicketOrderService) finalizeFailedMessageTx(tx *gorm.DB, message TicketOrderMessage, reason string) (bool, error) {
+	var order models.TicketOrder
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Items").First(&order, message.OrderID).Error; err != nil {
+		return false, err
 	}
+	if order.Status != models.TicketOrderStatusQueued {
+		return false, nil
+	}
+	if err := tx.Model(&order).Updates(map[string]interface{}{"status": models.TicketOrderStatusFailed, "cancel_reason": reason}).Error; err != nil {
+		return false, err
+	}
+	released, err := releaseSessionSeats(tx, order.ID)
+	if err != nil {
+		return false, err
+	}
+	var rushBucket *int
+	if s.inventory.Enabled && order.RushSaleCampaignID != nil {
+		bucket := resolveMessageRushBucket(message, s.inventory)
+		rushBucket = &bucket
+	}
+	if err := s.enqueueOrderStockReturn(tx, &order, order.StockBucketNo, rushBucket, released > 0 || len(message.SeatIDs) > 0, "order_failed"); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *TicketOrderService) FinalizeFailedMessage(ctx context.Context, message TicketOrderMessage, reason string) error {
+	var updated bool
 	err := s.asyncDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&models.TicketOrder{}).
-			Where("id = ? AND status = ?", message.OrderID, models.TicketOrderStatusQueued).
-			Updates(map[string]interface{}{
-				"status":        models.TicketOrderStatusFailed,
-				"cancel_reason": reason,
-			})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return nil
-		}
-		updated = true
-		count, releaseErr := releaseSessionSeats(tx, message.OrderID)
-		if releaseErr != nil {
-			return releaseErr
-		}
-		released = count
-		return nil
+		var txErr error
+		updated, txErr = s.finalizeFailedMessageTx(tx, message, reason)
+		return txErr
 	})
 	if err != nil {
-		log.Printf("ticket order finalize failed message: order=%d err=%v", message.OrderID, err)
-		return
+		return err
 	}
-	if !updated {
-		return
-	}
-	metrics.RecordOrder("failed", failedSource)
-	if released == 0 {
-		s.rollbackRedisQuota(ctx, message.TicketTierID, message.Quantity, message.StockBucketNo)
+	if updated {
+		source := "normal"
 		if message.RushSaleCampaignID != nil {
-			pipe := s.rdb.TxPipeline()
-			if s.inventory.Enabled {
-				rushBucket := resolveMessageRushBucket(message, s.inventory)
-				pipe.IncrBy(ctx, RushStockBucketKey(*message.RushSaleCampaignID, rushBucket), int64(message.Quantity))
-			} else {
-				pipe.IncrBy(ctx, rushStockKey(*message.RushSaleCampaignID), int64(message.Quantity))
-			}
-			pipe.DecrBy(
-				ctx,
-				rushUserCountKey(*message.RushSaleCampaignID, message.UserID),
-				int64(message.Quantity),
-			)
-			_, _ = pipe.Exec(ctx)
+			source = "rush_sale"
 		}
+		metrics.RecordOrder("failed", source)
+		s.publishOrderEvent(ctx, message.UserID, message.OrderID, "failed", models.TicketOrderStatusFailed, "订单未能确认，库存正在释放")
 	}
-	s.publishOrderEvent(
-		message.UserID,
-		message.OrderID,
-		"failed",
-		models.TicketOrderStatusFailed,
-		"订单未能确认，门票已退回",
-	)
+	return nil
 }
 
 func (s *TicketOrderService) GetOrder(
@@ -1072,37 +1065,27 @@ func (s *TicketOrderService) loadOrderDetail(
 	ctx context.Context,
 	userID, orderID int64,
 ) (*models.TicketOrder, error) {
-	var order models.TicketOrder
-	err := s.db.WithContext(ctx).
-		Preload("Items").
-		Preload("Attendees").
-		Where("id = ? AND user_id = ?", orderID, userID).
-		First(&order).Error
+	order, err := s.orderRepo().LoadOrderDetail(ctx, userID, orderID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrTicketOrderNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	var seats []models.SessionSeat
-	if err := s.db.WithContext(ctx).Preload("Seat").
-		Where("order_id = ?", order.ID).
-		Order("id ASC").Find(&seats).Error; err != nil {
+	seats, err := s.orderRepo().ListOrderSeats(ctx, order.ID)
+	if err != nil {
 		return nil, err
 	}
 	order.SessionSeats = seats
 	// Tickets only exist after payment; skip the join on unpaid detail views.
 	if order.Status.HasBeenPaid() {
-		var tickets []models.AdmissionTicket
-		if err := s.db.WithContext(ctx).
-			Preload("OrderItem").
-			Where("order_id = ?", order.ID).
-			Find(&tickets).Error; err != nil {
+		tickets, err := s.orderRepo().ListPaidTicketsByOrder(ctx, order.ID)
+		if err != nil {
 			return nil, err
 		}
 		order.Tickets = tickets
 	}
-	return &order, nil
+	return order, nil
 }
 
 // ListOrders returns a lightweight page for the order list UI: order summary
@@ -1163,19 +1146,11 @@ func (s *TicketOrderService) ListUserTickets(
 	if pageSize < 1 || pageSize > 50 {
 		pageSize = 20
 	}
-	query := s.db.WithContext(ctx).Model(&models.AdmissionTicket{}).Where("user_id = ?", userID)
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	total, err := s.orderRepo().CountUserTickets(ctx, userID)
+	if err != nil {
 		return nil, 0, err
 	}
-	var tickets []models.AdmissionTicket
-	err := s.db.WithContext(ctx).
-		Preload("OrderItem").
-		Where("user_id = ?", userID).
-		Order("issued_at DESC, id DESC").
-		Limit(pageSize).
-		Offset((page - 1) * pageSize).
-		Find(&tickets).Error
+	tickets, err := s.orderRepo().ListUserTickets(ctx, userID, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1192,11 +1167,8 @@ func (s *TicketOrderService) ListUserTickets(
 	}
 	attendeesByOrder := map[int64][]models.TicketOrderAttendee{}
 	if len(orderIDs) > 0 {
-		var attendees []models.TicketOrderAttendee
-		if err := s.db.WithContext(ctx).
-			Where("order_id IN ?", orderIDs).
-			Order("sequence_no ASC").
-			Find(&attendees).Error; err != nil {
+		attendees, err := s.orderRepo().ListAttendeesByOrders(ctx, orderIDs)
+		if err != nil {
 			return nil, 0, err
 		}
 		for index := range attendees {
@@ -1587,6 +1559,11 @@ func (s *TicketOrderService) HandlePaymentCallback(
 				Update("processed_at", &now).Error
 		}
 		now := time.Now()
+		// 状态机哨兵：pending_payment -> paid 之外的到达（如重复成功回调打到已支付订单）
+		// 一律拒绝，防止重复签发电子票。
+		if err := assertTransition(order.Status, models.TicketOrderStatusPaid); err != nil {
+			return err
+		}
 		if err := s.issueAdmissionTickets(tx, &order, now); err != nil {
 			return err
 		}
@@ -1598,20 +1575,7 @@ func (s *TicketOrderService) HandlePaymentCallback(
 			}).Error; err != nil {
 			return err
 		}
-		if order.OrderSource != models.TicketOrderSourceWaitlist {
-			if err := upsertFunnelVisitorStage(
-				tx, order.EventID, order.OrganizerID, order.FunnelVisitorKey,
-				models.FunnelStagePaid, now,
-			); err != nil {
-				return err
-			}
-			if err := bumpFunnelOrderDaily(
-				tx, order.EventID, order.OrganizerID, string(order.OrderSource),
-				0, 1, 0, now,
-			); err != nil {
-				return err
-			}
-		}
+
 		if err := tx.Model(&models.PaymentTransaction{}).Where("id = ?", payment.ID).
 			Updates(map[string]interface{}{
 				"status":  models.PaymentTransactionSuccess,
@@ -1645,7 +1609,7 @@ func (s *TicketOrderService) HandlePaymentCallback(
 		if paid {
 			status = models.TicketOrderStatusPaid
 		}
-		s.publishOrderEvent(eventUserID, eventOrderID, eventName, status, eventMessage)
+		s.publishOrderEvent(ctx, eventUserID, eventOrderID, eventName, status, eventMessage)
 	}
 	if err == nil && eventName == "" {
 		callbackResult = "duplicate_or_ignored"
@@ -1719,16 +1683,23 @@ func (s *TicketOrderService) BatchRefundEvent(
 	return result, nil
 }
 
+// assertTransition 在状态流转决策点调用 models 的 CanTransitionTo，
+// 让 models/ticket_order.go 里的状态机真正参与生产判定：新增流转而忘记更新
+// 状态机映射时，这里会 fail-closed 报错而不是静默写出非法状态。
+func assertTransition(from, to models.TicketOrderStatus) error {
+	if !from.CanTransitionTo(to) {
+		return fmt.Errorf("%w: 不允许的状态流转 %s -> %s", ErrTicketOrderState, from, to)
+	}
+	return nil
+}
+
 func (s *TicketOrderService) CancelOrder(
 	ctx context.Context,
 	userID, orderID int64,
 	reason string,
 ) error {
-	var tierID int64
-	var quantity int
 	var refundCents int64
 	var refundPaymentNo string
-	var rushCampaignID *int64
 	var stockBucketNo *int
 	var rushBucketNo *int
 	var skipRedis bool
@@ -1761,13 +1732,12 @@ func (s *TicketOrderService) CancelOrder(
 			order.Status != models.TicketOrderStatusPaid {
 			return ErrTicketOrderState
 		}
+		if err := assertTransition(order.Status, models.TicketOrderStatusCancelled); err != nil {
+			return err
+		}
 		if len(order.Items) == 0 {
 			return fmt.Errorf("订单明细异常")
 		}
-		if len(order.Items) == 1 {
-			tierID, quantity = order.Items[0].TicketTierID, order.Items[0].Quantity
-		}
-		rushCampaignID = order.RushSaleCampaignID
 		organizerID = order.OrganizerID
 		orderSource = string(order.OrderSource)
 		orderAmountCents = order.TotalAmountCents
@@ -1819,12 +1789,12 @@ func (s *TicketOrderService) CancelOrder(
 				return err
 			}
 		}
-		return tx.Model(&models.TicketOrder{}).Where("id = ?", orderID).
-			Updates(map[string]interface{}{
-				"status":        models.TicketOrderStatusCancelled,
-				"cancelled_at":  &now,
-				"cancel_reason": strings.TrimSpace(reason),
-			}).Error
+		if err := tx.Model(&models.TicketOrder{}).Where("id = ?", orderID).Updates(map[string]interface{}{
+			"status": models.TicketOrderStatusCancelled, "cancelled_at": &now, "cancel_reason": strings.TrimSpace(reason),
+		}).Error; err != nil {
+			return err
+		}
+		return s.enqueueOrderStockReturn(tx, &order, stockBucketNo, rushBucketNo, skipRedis, "order_cancelled")
 	})
 	if err != nil {
 		return err
@@ -1839,70 +1809,11 @@ func (s *TicketOrderService) CancelOrder(
 		}
 
 		err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			var payment models.PaymentTransaction
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-				Where("payment_no = ?", refundPaymentNo).First(&payment).Error; err != nil {
-				return err
+			completion, txErr := s.completePaidRefundTx(tx, orderID, userID, refundPaymentNo, reason)
+			if txErr != nil {
+				return txErr
 			}
-			var order models.TicketOrder
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-				Preload("Items").Where("id = ? AND user_id = ?", orderID, userID).
-				First(&order).Error; err != nil {
-				return err
-			}
-			if order.Status != models.TicketOrderStatusPaid ||
-				(order.PaymentStatus != models.PaymentStatusRefunding &&
-					order.PaymentStatus != models.PaymentStatusPaid) {
-				return ErrTicketOrderState
-			}
-			var restoreErr error
-			stockBucketNo, rushBucketNo, skipRedis, restoreErr = s.restoreOrderInventory(tx, &order)
-			if restoreErr != nil {
-				return restoreErr
-			}
-			var divertErr error
-			skipRedis, divertedTierID, divertErr = s.maybeDivertRestoredQuota(tx, &order, skipRedis)
-			if divertErr != nil {
-				return divertErr
-			}
-			now := time.Now()
-			if err := tx.Model(&models.PaymentTransaction{}).
-				Where("id = ? AND status IN ?", payment.ID, []models.PaymentTransactionStatus{
-					models.PaymentTransactionSuccess,
-					models.PaymentTransactionRefunded,
-				}).Updates(map[string]interface{}{
-				"status":      models.PaymentTransactionRefunded,
-				"refunded_at": &now,
-			}).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&models.AdmissionTicket{}).
-				Where("order_id = ? AND status = ?", order.ID, models.AdmissionTicketStatusValid).
-				Updates(map[string]interface{}{
-					"status":        models.AdmissionTicketStatusRevoked,
-					"revoked_at":    &now,
-					"revoke_reason": strings.TrimSpace(reason),
-				}).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&models.TicketOrder{}).
-				Where("id = ? AND status = ?", order.ID, models.TicketOrderStatusPaid).
-				Updates(map[string]interface{}{
-					"status":         models.TicketOrderStatusCancelled,
-					"payment_status": models.PaymentStatusRefunded,
-					"cancelled_at":   &now,
-					"cancel_reason":  strings.TrimSpace(reason),
-				}).Error; err != nil {
-				return err
-			}
-			if order.OrderSource != models.TicketOrderSourceWaitlist {
-				if err := bumpFunnelOrderDaily(
-					tx, order.EventID, order.OrganizerID, string(order.OrderSource),
-					0, 0, 1, now,
-				); err != nil {
-					return err
-				}
-			}
+			divertedTierID = completion.divertedTierID
 			return nil
 		})
 		if err != nil {
@@ -1911,23 +1822,6 @@ func (s *TicketOrderService) CancelOrder(
 		bumpFunnelCacheVersion(ctx, s.rdb, organizerID)
 	}
 
-	if err == nil && !skipRedis {
-		s.rollbackRedisQuota(ctx, tierID, quantity, stockBucketNo)
-		if rushCampaignID != nil {
-			pipe := s.rdb.TxPipeline()
-			if s.inventory.Enabled && rushBucketNo != nil {
-				pipe.IncrBy(ctx, RushStockBucketKey(*rushCampaignID, *rushBucketNo), int64(quantity))
-			} else {
-				pipe.IncrBy(ctx, rushStockKey(*rushCampaignID), int64(quantity))
-			}
-			pipe.DecrBy(
-				ctx,
-				rushUserCountKey(*rushCampaignID, userID),
-				int64(quantity),
-			)
-			_, _ = pipe.Exec(ctx)
-		}
-	}
 	if err == nil {
 		if refundCents > 0 {
 			metrics.RecordOrderRefunded(orderSource, orderAmountCents)
@@ -1938,7 +1832,7 @@ func (s *TicketOrderService) CancelOrder(
 		if refundCents > 0 {
 			message = "退款完成，电子票已作废"
 		}
-		s.publishOrderEvent(
+		s.publishOrderEvent(ctx,
 			userID,
 			orderID,
 			"cancelled",
@@ -1950,6 +1844,172 @@ func (s *TicketOrderService) CancelOrder(
 		_, _ = s.AllocateWaitlist(ctx, divertedTierID)
 	}
 	return err
+}
+
+// refundCompletionResult 汇总退款收尾事务中确定的库存归还参数。
+type refundCompletionResult struct {
+	stockBucketNo  *int
+	rushBucketNo   *int
+	skipRedis      bool
+	divertedTierID int64
+}
+
+// completePaidRefundTx 在事务内完成已支付订单的退款收尾：库存归还登记、电子票作废、
+// 订单置为已退款。网关退款必须在调用本方法之前于事务外完成，避免跨事务调用外部服务。
+func (s *TicketOrderService) completePaidRefundTx(
+	tx *gorm.DB,
+	orderID, userID int64,
+	refundPaymentNo, reason string,
+) (*refundCompletionResult, error) {
+	var payment models.PaymentTransaction
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("payment_no = ?", refundPaymentNo).First(&payment).Error; err != nil {
+		return nil, err
+	}
+	var order models.TicketOrder
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Preload("Items").Where("id = ? AND user_id = ?", orderID, userID).
+		First(&order).Error; err != nil {
+		return nil, err
+	}
+	if err := assertTransition(order.Status, models.TicketOrderStatusCancelled); err != nil {
+		return nil, err
+	}
+	if order.PaymentStatus != models.PaymentStatusRefunding &&
+		order.PaymentStatus != models.PaymentStatusPaid {
+		return nil, ErrTicketOrderState
+	}
+	result := &refundCompletionResult{}
+	var restoreErr error
+	result.stockBucketNo, result.rushBucketNo, result.skipRedis, restoreErr = s.restoreOrderInventory(tx, &order)
+	if restoreErr != nil {
+		return nil, restoreErr
+	}
+	var divertErr error
+	result.skipRedis, result.divertedTierID, divertErr = s.maybeDivertRestoredQuota(tx, &order, result.skipRedis)
+	if divertErr != nil {
+		return nil, divertErr
+	}
+	now := time.Now()
+	if err := tx.Model(&models.PaymentTransaction{}).
+		Where("id = ? AND status IN ?", payment.ID, []models.PaymentTransactionStatus{
+			models.PaymentTransactionSuccess,
+			models.PaymentTransactionRefunded,
+		}).Updates(map[string]interface{}{
+		"status":      models.PaymentTransactionRefunded,
+		"refunded_at": &now,
+	}).Error; err != nil {
+		return nil, err
+	}
+	if err := tx.Model(&models.AdmissionTicket{}).
+		Where("order_id = ? AND status = ?", order.ID, models.AdmissionTicketStatusValid).
+		Updates(map[string]interface{}{
+			"status":        models.AdmissionTicketStatusRevoked,
+			"revoked_at":    &now,
+			"revoke_reason": strings.TrimSpace(reason),
+		}).Error; err != nil {
+		return nil, err
+	}
+	if err := tx.Model(&models.TicketOrder{}).
+		Where("id = ? AND status = ?", order.ID, models.TicketOrderStatusPaid).
+		Updates(map[string]interface{}{
+			"status":         models.TicketOrderStatusCancelled,
+			"payment_status": models.PaymentStatusRefunded,
+			"cancelled_at":   &now,
+			"cancel_reason":  strings.TrimSpace(reason),
+		}).Error; err != nil {
+		return nil, err
+	}
+
+	if err := s.enqueueOrderStockReturn(tx, &order, result.stockBucketNo, result.rushBucketNo, result.skipRedis, "order_cancelled"); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+const (
+	stuckRefundGrace      = 2 * time.Minute
+	stuckRefundBatchLimit = 50
+)
+
+// RecoverStuckRefunds 重驱动卡在 refunding 的已支付订单。
+//
+// CancelOrder 先提交 refunding 再在事务外调用网关退款；进程在两步之间崩溃会把订单
+// 永久留在 refunding。沙箱网关的 Refund 以 payment_no 幂等（已退款直接成功），因此
+// 周期性重放是安全的。update_time 宽限期避免与刚置位的在途取消请求竞争。
+func (s *TicketOrderService) RecoverStuckRefunds(ctx context.Context) (int, error) {
+	cutoff := time.Now().Add(-stuckRefundGrace)
+	var orders []models.TicketOrder
+	if err := s.asyncDB().WithContext(ctx).
+		Where("status = ? AND payment_status = ? AND update_time < ?",
+			models.TicketOrderStatusPaid, models.PaymentStatusRefunding, cutoff).
+		Order("id ASC").Limit(stuckRefundBatchLimit).Find(&orders).Error; err != nil {
+		return 0, err
+	}
+	recovered := 0
+	for i := range orders {
+		if err := s.recoverSingleRefund(ctx, &orders[i]); err != nil {
+			log.Printf("退款悬挂恢复失败 order=%d: %v", orders[i].ID, err)
+			metrics.PaymentRefundRecoveryTotal.WithLabelValues("error").Inc()
+			continue
+		}
+		recovered++
+	}
+	return recovered, nil
+}
+
+func (s *TicketOrderService) recoverSingleRefund(ctx context.Context, order *models.TicketOrder) error {
+	var payment models.PaymentTransaction
+	if err := s.db.WithContext(ctx).
+		Where("order_id = ? AND status IN ?", order.ID, []models.PaymentTransactionStatus{
+			models.PaymentTransactionSuccess,
+			models.PaymentTransactionRefunded,
+		}).Order("id DESC").First(&payment).Error; err != nil {
+		return fmt.Errorf("查找退款支付单: %w", err)
+	}
+	reason := "退款中断自动恢复"
+	if err := s.payment.Refund(ctx, payment.PaymentNo, order.TotalAmountCents); err != nil {
+		if errors.Is(err, ErrPaymentNotRefundable) || errors.Is(err, ErrPaymentNotFound) {
+			// 网关侧退款从未成功：回退 refunding，让用户可以重新发起取消。
+			if uerr := s.db.WithContext(ctx).Model(&models.TicketOrder{}).
+				Where("id = ? AND status = ? AND payment_status = ?", order.ID,
+					models.TicketOrderStatusPaid, models.PaymentStatusRefunding).
+				Update("payment_status", models.PaymentStatusPaid).Error; uerr != nil {
+				return uerr
+			}
+			metrics.PaymentRefundRecoveryTotal.WithLabelValues("reverted").Inc()
+			return fmt.Errorf("网关拒绝退款，已回退 payment_status: %w", err)
+		}
+		return err
+	}
+	var completion *refundCompletionResult
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var txErr error
+		completion, txErr = s.completePaidRefundTx(tx, order.ID, order.UserID, payment.PaymentNo, reason)
+		return txErr
+	})
+	if err != nil {
+		if errors.Is(err, ErrTicketOrderState) {
+			// 已被并发路径（如用户重试取消）收尾，不算失败。
+			metrics.PaymentRefundRecoveryTotal.WithLabelValues("already_done").Inc()
+			return nil
+		}
+		return err
+	}
+
+	metrics.RecordOrderRefunded(string(order.OrderSource), order.TotalAmountCents)
+	s.publishOrderEvent(ctx,
+		order.UserID,
+		order.ID,
+		"cancelled",
+		models.TicketOrderStatusCancelled,
+		"退款完成，电子票已作废",
+	)
+	if completion.divertedTierID > 0 {
+		_, _ = s.AllocateWaitlist(ctx, completion.divertedTierID)
+	}
+	metrics.PaymentRefundRecoveryTotal.WithLabelValues("recovered").Inc()
+	return nil
 }
 
 func (s *TicketOrderService) issueAdmissionTickets(
@@ -2161,33 +2221,44 @@ func (s *TicketOrderService) BackfillPaidAdmissionTickets(ctx context.Context) e
 	return nil
 }
 
+// CancelExpiredOrders 按到期时间分页处理待支付订单。
 func (s *TicketOrderService) CancelExpiredOrders(ctx context.Context) error {
 	db := s.asyncDB()
-	var orders []models.TicketOrder
-	if err := db.WithContext(ctx).Preload("Items").
-		Where("status = ? AND expires_at <= ?",
-			models.TicketOrderStatusPendingPayment, time.Now()).
-		Limit(100).Find(&orders).Error; err != nil {
-		return err
+	cutoff := time.Now()
+	var cursorTime time.Time
+	var cursorID int64
+	var failures []error
+	for {
+		var orders []models.TicketOrder
+		query := db.WithContext(ctx).Select("id", "user_id", "status", "expires_at", "create_time").
+			Where("status = ? AND expires_at <= ?", models.TicketOrderStatusPendingPayment, cutoff)
+		if cursorID != 0 {
+			query = query.Where("expires_at > ? OR (expires_at = ? AND id > ?)", cursorTime, cursorTime, cursorID)
+		}
+		if err := query.Order("expires_at ASC, id ASC").Limit(100).Find(&orders).Error; err != nil {
+			return errors.Join(append(failures, err)...)
+		}
+		for _, order := range orders {
+			cursorTime, cursorID = order.ExpiresAt, order.ID
+			if s.paymentWindowOpen(&order) {
+				continue
+			}
+			err := s.cancelPendingPaymentOnlyDB(ctx, db, order.UserID, order.ID, "支付超时自动取消")
+			if errors.Is(err, ErrTicketOrderState) || errors.Is(err, ErrTicketOrderNotFound) {
+				continue
+			}
+			result := "success"
+			if err != nil {
+				result = string(classifyPaymentTimeoutError(err))
+				failures = append(failures, fmt.Errorf("order %d: %w", order.ID, err))
+				logger.FromContext(ctx).Error("Payment timeout processing failed", zap.Int64("order_id", order.ID), zap.Error(err))
+			}
+			metrics.TicketTimeoutOrders.WithLabelValues(result).Inc()
+		}
+		if len(orders) < 100 {
+			return errors.Join(failures...)
+		}
 	}
-	for _, order := range orders {
-		if s.paymentWindowOpen(&order) {
-			continue
-		}
-		err := s.cancelPendingPaymentOnlyDB(ctx, db, order.UserID, order.ID, "支付超时自动取消")
-		if err == nil || errors.Is(err, ErrTicketOrderState) || errors.Is(err, ErrTicketOrderNotFound) {
-			continue
-		}
-		switch classifyPaymentTimeoutError(err) {
-		case paymentTimeoutErrorPermanent:
-			metrics.TicketTimeoutMessages.WithLabelValues("scanner_permanent_discard").Inc()
-			log.Printf("ticket timeout scanner order %d permanent failure: %v", order.ID, err)
-		case paymentTimeoutErrorTransient:
-			metrics.TicketTimeoutMessages.WithLabelValues("scanner_error").Inc()
-			log.Printf("ticket timeout scanner order %d transient failure: %v", order.ID, err)
-		}
-	}
-	return nil
 }
 
 // cancelPendingPaymentOnly 仅取消仍为 pending_payment 的订单（超时/扫描专用）。
@@ -2206,9 +2277,6 @@ func (s *TicketOrderService) cancelPendingPaymentOnlyDB(
 	userID, orderID int64,
 	reason string,
 ) error {
-	var tierID int64
-	var quantity int
-	var rushCampaignID *int64
 	var stockBucketNo *int
 	var rushBucketNo *int
 	var skipRedis bool
@@ -2236,13 +2304,12 @@ func (s *TicketOrderService) cancelPendingPaymentOnlyDB(
 		if order.Status != models.TicketOrderStatusPendingPayment {
 			return ErrTicketOrderState
 		}
+		if s.paymentWindowOpen(&order) {
+			return ErrTicketOrderState
+		}
 		if len(order.Items) == 0 {
 			return fmt.Errorf("%w: 订单明细异常", ErrTicketOrderNonRetryable)
 		}
-		if len(order.Items) == 1 {
-			tierID, quantity = order.Items[0].TicketTierID, order.Items[0].Quantity
-		}
-		rushCampaignID = order.RushSaleCampaignID
 		timeoutSource = string(order.OrderSource)
 		var restoreErr error
 		stockBucketNo, rushBucketNo, skipRedis, restoreErr = s.restoreOrderInventory(tx, &order)
@@ -2275,7 +2342,7 @@ func (s *TicketOrderService) cancelPendingPaymentOnlyDB(
 				return err
 			}
 		}
-		return nil
+		return s.enqueueOrderStockReturn(tx, &order, stockBucketNo, rushBucketNo, skipRedis, "order_timeout")
 	})
 	txResult := "success"
 	if err != nil {
@@ -2283,26 +2350,10 @@ func (s *TicketOrderService) cancelPendingPaymentOnlyDB(
 	}
 	metrics.TicketPaymentTimeoutTransactionDuration.WithLabelValues(txResult).Observe(time.Since(txStarted).Seconds())
 	metrics.TicketPaymentTimeoutTransactions.WithLabelValues(txResult).Inc()
-	if err == nil && !skipRedis {
-		s.rollbackRedisQuota(ctx, tierID, quantity, stockBucketNo)
-		if rushCampaignID != nil {
-			pipe := s.rdb.TxPipeline()
-			if s.inventory.Enabled && rushBucketNo != nil {
-				pipe.IncrBy(ctx, RushStockBucketKey(*rushCampaignID, *rushBucketNo), int64(quantity))
-			} else {
-				pipe.IncrBy(ctx, rushStockKey(*rushCampaignID), int64(quantity))
-			}
-			pipe.DecrBy(
-				ctx,
-				rushUserCountKey(*rushCampaignID, userID),
-				int64(quantity),
-			)
-			_, _ = pipe.Exec(ctx)
-		}
-	}
+
 	if err == nil {
 		metrics.RecordOrder("timeout", timeoutSource)
-		s.publishOrderEvent(
+		s.publishOrderEvent(ctx,
 			userID,
 			orderID,
 			"timeout_cancelled",
@@ -2314,23 +2365,6 @@ func (s *TicketOrderService) cancelPendingPaymentOnlyDB(
 		_, _ = s.AllocateWaitlist(ctx, divertedTierID)
 	}
 	return err
-}
-
-func (s *TicketOrderService) StartTimeoutScanner(ctx context.Context) {
-	interval := s.scannerInterval
-	if interval <= 0 {
-		interval = 2 * time.Minute
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			_ = s.CancelExpiredOrders(ctx)
-		}
-	}
 }
 
 func (s *TicketOrderService) loadPurchasableTier(
@@ -2352,23 +2386,24 @@ func (s *TicketOrderService) loadPurchasableTier(
 		}
 	}
 
-	var tier models.TicketTier
-	if err := s.db.WithContext(ctx).First(&tier, tierID).Error; err != nil {
+	repo := s.orderRepo()
+	tier, err := repo.FirstTier(ctx, tierID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil, nil, nil, ErrTicketOrderUnavailable
 		}
 		return nil, nil, nil, nil, err
 	}
-	var session models.EventSession
-	if err := s.db.WithContext(ctx).First(&session, tier.SessionID).Error; err != nil {
+	session, err := repo.FirstSession(ctx, tier.SessionID)
+	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	var event models.Event
-	if err := s.db.WithContext(ctx).First(&event, session.EventID).Error; err != nil {
+	event, err := repo.FirstEvent(ctx, session.EventID)
+	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	var venue models.Venue
-	if err := s.db.WithContext(ctx).First(&venue, session.VenueID).Error; err != nil {
+	venue, err := repo.FirstVenue(ctx, session.VenueID)
+	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 	now := time.Now()
@@ -2380,10 +2415,10 @@ func (s *TicketOrderService) loadPurchasableTier(
 	}
 	if s.localCache != nil {
 		s.localCache.Set(cacheKey, purchasableContext{
-			Tier: tier, Session: session, Event: event, Venue: venue,
+			Tier: *tier, Session: *session, Event: *event, Venue: *venue,
 		}, purchasableContextLocalTTL)
 	}
-	return &tier, &session, &event, &venue, nil
+	return tier, session, event, venue, nil
 }
 
 func (s *TicketOrderService) markQueuedOrderFailed(
@@ -2391,24 +2426,7 @@ func (s *TicketOrderService) markQueuedOrderFailed(
 	orderID int64,
 	reason string,
 ) error {
-	return s.db.WithContext(ctx).Model(&models.TicketOrder{}).
-		Where("id = ? AND status = ?", orderID, models.TicketOrderStatusQueued).
-		Updates(map[string]interface{}{
-			"status":        models.TicketOrderStatusFailed,
-			"cancel_reason": reason,
-		}).Error
-}
-
-func (s *TicketOrderService) rollbackRedisQuota(ctx context.Context, tierID int64, quantity int, bucketNo *int) {
-	if s.inventory.Enabled {
-		b := 0
-		if bucketNo != nil {
-			b = *bucketNo
-		}
-		_ = s.rdb.IncrBy(ctx, TicketStockBucketKey(tierID, b), int64(quantity)).Err()
-		return
-	}
-	_ = s.rdb.IncrBy(ctx, ticketStockKey(tierID), int64(quantity)).Err()
+	return s.orderRepo().MarkQueuedOrderFailed(ctx, orderID, reason)
 }
 
 // reserveTicketStock Redis 预扣；分桶开启时按 userID%N 选桶并环形重试。
@@ -2581,8 +2599,12 @@ func (s *TicketOrderService) buildSeatedItems(
 }
 
 func (s *TicketOrderService) countUserEventTickets(ctx context.Context, userID, eventID int64) (int, error) {
+	return countUserEventTicketsOn(s.db.WithContext(ctx), userID, eventID)
+}
+
+func countUserEventTicketsOn(db *gorm.DB, userID, eventID int64) (int, error) {
 	var total int
-	err := s.db.WithContext(ctx).Model(&models.TicketOrderItem{}).
+	err := db.Model(&models.TicketOrderItem{}).
 		Joins("JOIN ticket_order ON ticket_order.id = ticket_order_item.order_id AND ticket_order.delete_time IS NULL").
 		Where("ticket_order.user_id = ? AND ticket_order.event_id = ?", userID, eventID).
 		Where("ticket_order.status IN ?", []models.TicketOrderStatus{
@@ -2593,6 +2615,35 @@ func (s *TicketOrderService) countUserEventTickets(ctx context.Context, userID, 
 		Select("COALESCE(SUM(ticket_order_item.quantity), 0)").
 		Scan(&total).Error
 	return total, err
+}
+
+// enforceUserEventPurchaseLimit 是普通票限购的权威校验，必须在落库事务内执行。
+// 先 FOR UPDATE 锁住 user 行串行化同一用户的并发下单，再统计已购数量：
+// 裸的 SELECT SUM 在并发下存在 check-then-act 竞态，可突破 MaxTicketsPerOrder。
+// 返回的错误会使事务回滚，调用方（CreateOrder 错误路径）随后释放 Redis 预扣。
+func enforceUserEventPurchaseLimit(
+	tx *gorm.DB,
+	userID, eventID int64,
+	quantity, maxPerOrder int,
+) error {
+	var lockedID int64
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Model(&models.User{}).Select("id").
+		Where("id = ?", userID).
+		Scan(&lockedID).Error; err != nil {
+		return err
+	}
+	if lockedID == 0 {
+		return fmt.Errorf("%w: 用户不存在", ErrTicketOrderUnavailable)
+	}
+	used, err := countUserEventTicketsOn(tx, userID, eventID)
+	if err != nil {
+		return err
+	}
+	if used+quantity > maxPerOrder {
+		return fmt.Errorf("%w: 本场每账号限购 %d 张", ErrTicketOrderUnavailable, maxPerOrder)
+	}
+	return nil
 }
 
 func (s *TicketOrderService) expandAttendeeProfiles(
@@ -2792,29 +2843,8 @@ func isVolatileOrderStatus(status models.TicketOrderStatus) bool {
 	return status == models.TicketOrderStatusQueued || status == models.TicketOrderStatusPendingPayment
 }
 
-func snowflakeCreatedAt(id int64) time.Time {
-	if id <= 0 {
-		return time.Time{}
-	}
-	return time.UnixMilli(snowflake.ID(id).Time())
-}
-
 func (s *TicketOrderService) paymentDeadline(order *models.TicketOrder) time.Time {
-	if order == nil {
-		return time.Time{}
-	}
-	deadline := order.ExpiresAt
-	if created := snowflakeCreatedAt(order.ID); !created.IsZero() {
-		if byID := created.Add(s.paymentTimeout); byID.After(deadline) {
-			deadline = byID
-		}
-	}
-	if !order.CreateTime.IsZero() {
-		if byCreate := order.CreateTime.Add(s.paymentTimeout); byCreate.After(deadline) {
-			deadline = byCreate
-		}
-	}
-	return deadline
+	return order.ExpiresAt
 }
 
 func (s *TicketOrderService) paymentWindowOpen(order *models.TicketOrder) bool {

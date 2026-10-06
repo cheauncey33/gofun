@@ -37,7 +37,7 @@
 | `ticket_order_attendee` | `order_id + sequence_no`（唯一）；姓名、证件掩码、哈希和 `identity_key` | 随订单写；实名限购、出票读取。 |
 | `ticket_order_outbox` | `id=event_id`（主键）；`order_id,event_type,payload,status,attempts,last_error,published_at`；索引 `(status,create_time)` | 与订单同事务插入 `pending`；Outbox worker 认领、发布、标记结果。 |
 | `ticket_order_consumer_inbox` | 主键 `(consumer_name,event_id)`，另有 `order_id` 索引 | Consumer 和库存扣减在同一事务插入；重复投递唯一键冲突即视为已处理。 |
-| `ticket_stock_recovery_fence` | 主键 `order_id`；`owner=order/recovery` | 下单事务先插入 `order`；过期 reservation 恢复任务争抢 `recovery`，解决“订单尚未提交却被误回滚”的竞态。 |
+| `ticket_order.recovery_only` | 恢复标记订单使用原订单主键并设置软删除 | 恢复与正常下单通过同一主键竞争；标记和库存归还 Outbox 事件在同一事务提交。 |
 | `ticket_tier` | `session_id,name,price_cents,total_quota,remaining_quota,sold_count,purchase_limit,status,version,waitlist_pending` | 管理端维护；计数票档 `status=on_sale/waitlist` 决定公开购票或候补模式；consumer 正式扣总库存或配合分桶。 |
 | `ticket_tier_bucket` | 主键 `(tier_id,bucket_no)`；`remaining_quota,sold_count,version` | 目前配置已开启分桶：consumer 在事务中扣此表；取消/超时在事务中归还此表。 |
 | `rush_sale_campaign` | `ticket_tier_id,rush_price_cents,total_quota,remaining_quota,per_user_limit,starts_at,ends_at,status` | 秒杀活动配置；consumer 扣活动库存（分桶开启时实际扣下一表）。 |
@@ -134,7 +134,7 @@ queued
 
 pending_payment
   ├─ 支付回调 success → paid
-  └─ 用户取消 / 延时队列或扫描器超时 → cancelled
+  └─ 用户取消 / 扫描器超时 → cancelled
 
 paid
   └─ 退款成功且电子票未核销 → cancelled
@@ -180,15 +180,15 @@ unpaid → paid → refunding → refunded
 
 ## 补偿：当前代码的三个真实窗口
 
-1. **Redis Lua 已预扣，MySQL 下单事务失败或进程中断。** reservation 仍为 `pending`；恢复任务扫描 ZSET。它先查订单，再通过 `ticket_stock_recovery_fence(order_id)` 与下单事务竞争：`owner=order` 则确认 reservation；`owner=recovery` 才执行回滚 Lua。回滚 Lua 同时回加库存、删除 reservation、从 ZSET 移除、删除 order-idem 映射；秒杀还回加活动库存并回退用户限购计数。
+1. **Redis Lua 已预扣，MySQL 下单事务失败或进程中断。** reservation 仍为 `pending`；恢复任务扫描 ZSET。先查订单，存在则确认凭证；不存在则事务写入隐藏的恢复标记订单和 `ticket.stock.return` 事件。恢复标记与正常下单通过同一订单主键竞争。库存 Worker 执行回滚 Lua，原子归还库存、删除 reservation、从 ZSET 移除、删除 order-idem 映射；秒杀还回加活动库存并回退用户限购计数。
 2. **订单已提交，但 reservation 尚未来得及 confirm。** 恢复任务查到订单，调用 confirm Lua：`pending → committed`，不回加库存。故 confirm 失败不影响正确性，只会留下可恢复的 pending。
-3. **MQ/Outbox 永久失败，或 consumer 发现不可恢复的 MySQL 库存异常。** `FinalizeFailedMessage` 条件把 `queued → failed`；若不是选座订单则回加 Redis 热库存（秒杀还回退限购计数）。已经成功进入 `pending_payment` 的取消/超时会在 MySQL 事务里先恢复分桶库存，再回加 Redis。
+3. **MQ/Outbox 永久失败，或 consumer 发现不可恢复的 MySQL 库存异常。** `FinalizeFailedMessage` 在同一事务里把 `queued → failed` 并登记库存归还事件。取消、超时和退款同样在业务事务里恢复数据库库存、登记事件。选座释放数据库座位；分配给候补的库存留给候补。库存 Worker 统一处理 Redis 归还与重试。
 
-这里没有一个“统一 Saga 表”。补偿凭证是 Redis reservation Hash；“谁有权回滚”的并发裁决是 MySQL recovery fence；消息重复由 MySQL Inbox 消除。
+预扣凭证保存在 Redis Hash；恢复动作保存在现有 MySQL Outbox；并发裁决使用订单主键，消息重复由 MySQL Inbox 消除。
 
 ## 建议你亲自走读的顺序
 
-1. 先只读 `models/ticket_order.go`，牢记订单、Outbox、Inbox、Fence 四张表与三个状态机。
+1. 先读 `models/ticket_order.go`，理解订单、Outbox、Inbox 三张表及其状态。
 2. 读 `ticket_stock_reservation.go` 的四段 Lua：reserve normal、reserve rush、confirm、rollback。
 3. 回到 `CreateOrder` / `RushSaleService.Execute`，看 Lua 成功后如何与 `createOrderAndOutbox` 接上。
 4. 读 `ProcessOrderTask`：先 Inbox，后 `FOR UPDATE` 订单，扣 MySQL bucket，最后变 `pending_payment`。

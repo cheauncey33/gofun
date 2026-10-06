@@ -3,6 +3,7 @@ package middleware
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gofun/pkg/logger"
 )
 
 func RequestIDMiddleware() gin.HandlerFunc {
@@ -12,6 +13,7 @@ func RequestIDMiddleware() gin.HandlerFunc {
 			rid = uuid.New().String()
 		}
 		c.Set("request_id", rid)
+		c.Request = c.Request.WithContext(logger.WithRequestID(c.Request.Context(), rid))
 		c.Header("X-Request-ID", rid)
 		c.Next()
 	}

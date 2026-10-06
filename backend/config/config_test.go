@@ -35,6 +35,10 @@ jwt:
   expire_secs: 3600
 ticket_qr:
   secret: "test-ticket-qr-secret"
+payment:
+  provider: "sandbox"
+  # release 模式下该密钥为必填：支付回调路由公开且依赖此密钥做 HMAC 验签。
+  sandbox_secret: "test-payment-sandbox-secret"
 snowflake:
   node_id: 2
 log:
@@ -89,11 +93,14 @@ cors:
 	if !cfg.RateLimit.DistributedWriteEnabled || cfg.RateLimit.WriteMaxPerWindow != 10 {
 		t.Errorf("unexpected distributed rate limit defaults: %#v", cfg.RateLimit)
 	}
+	if cfg.RateLimit.OrderRate != 150 || cfg.RateLimit.OrderBurst != 50 {
+		t.Errorf("unexpected order rate limit defaults: %#v", cfg.RateLimit)
+	}
 	if !cfg.Inventory.BucketsEnabled || cfg.Inventory.BucketCount != 32 ||
 		cfg.Inventory.MinQuotaToBucket != 64 || cfg.Inventory.BucketRetry != 4 {
 		t.Errorf("unexpected inventory defaults: %#v", cfg.Inventory)
 	}
-	if cfg.OrderConsumer.WorkerCount != 6 || cfg.OrderConsumer.PrefetchCount != 5 {
+	if cfg.OrderConsumer.WorkerCount != 12 || cfg.OrderConsumer.PrefetchCount != 5 {
 		t.Errorf("unexpected order consumer defaults: %#v", cfg.OrderConsumer)
 	}
 	if cfg.OrderOutbox.PublishWorkers != 4 {

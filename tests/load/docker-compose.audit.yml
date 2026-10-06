@@ -1,0 +1,19 @@
+services:
+  backend:
+    environment:
+      SERVER_DEMO_ACCOUNTS: "true"
+      DELAYED_ORDER_TIMEOUT_MINUTES: "15"
+    cpus: 2
+    mem_limit: 1g
+  mysql:
+    cpus: 2
+    mem_limit: 2g
+  redis:
+    cpus: 1
+    mem_limit: 512m
+  rabbitmq:
+    cpus: 1
+    mem_limit: 1g
+  elasticsearch:
+    cpus: 1
+    mem_limit: 1g

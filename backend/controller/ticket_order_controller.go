@@ -1,10 +1,8 @@
 package controller
 
 import (
-	"errors"
 	"gofun/pkg/response"
 	"gofun/service"
-	"log"
 	"net/http"
 	"strconv"
 
@@ -31,7 +29,7 @@ func (ctrl *TicketOrderController) CreateOrder(c *gin.Context) {
 	}
 	var input service.CreateTicketOrderInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	requestID, _ := c.Get("request_id")
@@ -166,7 +164,7 @@ func (ctrl *TicketOrderController) CreateWaitlist(c *gin.Context) {
 	}
 	var input service.CreateTicketOrderInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	requestID, _ := c.Get("request_id")
@@ -261,36 +259,4 @@ func stringifyRequestID(value interface{}) string {
 		return requestID
 	}
 	return ""
-}
-
-func writeTicketOrderError(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, service.ErrTicketOrderNotFound),
-		errors.Is(err, service.ErrTicketResourceNotFound),
-		errors.Is(err, service.ErrWaitlistNotFound):
-		response.Error(c, http.StatusNotFound, response.CodeOrderNotFound, err.Error())
-	case errors.Is(err, service.ErrOrganizerForbidden):
-		response.Error(c, http.StatusForbidden, response.CodeForbidden, err.Error())
-	case errors.Is(err, service.ErrTicketQuotaInsufficient):
-		response.Error(c, http.StatusConflict, response.CodeInsufficientStock, err.Error())
-	case errors.Is(err, service.ErrTicketBalance):
-		response.Error(c, http.StatusConflict, response.CodeInsufficientBalance, err.Error())
-	case errors.Is(err, service.ErrTicketOrderState),
-		errors.Is(err, service.ErrTicketAlreadyUsed),
-		errors.Is(err, service.ErrTicketOrderUnavailable),
-		errors.Is(err, service.ErrWaitlistUnavailable),
-		errors.Is(err, service.ErrWaitlistState),
-		errors.Is(err, service.ErrWaitlistSeated),
-		errors.Is(err, service.ErrInvalidTicketCatalog),
-		errors.Is(err, service.ErrPaymentSignature),
-		errors.Is(err, service.ErrPaymentAmountMismatch),
-		errors.Is(err, service.ErrPaymentInvalidNotification):
-		response.Error(c, http.StatusBadRequest, response.CodeInvalidOrderStatus, err.Error())
-	case errors.Is(err, service.ErrPaymentNotFound),
-		errors.Is(err, service.ErrPaymentNotRefundable):
-		response.Error(c, http.StatusConflict, response.CodeInvalidOrderStatus, err.Error())
-	default:
-		log.Printf("ticket order request failed: %v", err)
-		response.Error(c, http.StatusInternalServerError, response.CodeOrderCreateFailed, "票务订单处理失败")
-	}
 }

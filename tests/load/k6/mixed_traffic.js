@@ -27,7 +27,10 @@ import { uuidv4 } from "https://jslib.k6.io/k6-utils/1.4.0/index.js";
 http.setResponseCallback(http.expectedStatuses(200, 201, 400, 401, 409, 429));
 
 const fixturePath = __ENV.K6_FIXTURE || "fixtures/rush_execute.json";
-const fixture = JSON.parse(String(open(fixturePath)).replace(/^\uFEFF/, ""));
+const fixture = new SharedArray("mixed_metadata", () => {
+  const { users, ...metadata } = JSON.parse(String(open(fixturePath)).replace(/^\uFEFF/, ""));
+  return [metadata];
+})[0];
 const baseURL = (__ENV.BASE_URL || fixture.base_url || "http://127.0.0.1:18080/api/v1").replace(
   /\/$/,
   "",
@@ -40,10 +43,11 @@ const thinkMs = Number(__ENV.THINK_MS || 0);
 const password = __ENV.LOAD_PASSWORD || "123456";
 
 const users = new SharedArray("mixed_users", () => {
-  if (!Array.isArray(fixture.users) || fixture.users.length === 0) {
+  const data = JSON.parse(String(open(fixturePath)).replace(/^\uFEFF/, ""));
+  if (!Array.isArray(data.users) || data.users.length === 0) {
     throw new Error(`fixture has no users: ${fixturePath}`);
   }
-  return fixture.users;
+  return data.users;
 });
 
 const actionLatency = new Trend("mixed_action_latency", true);
@@ -75,8 +79,14 @@ const maxVUs = Number(__ENV.MAX_VUS || Math.max(rate * 2, preVUs));
 export const options = {
   summaryTrendStats: ["avg", "min", "med", "p(90)", "p(95)", "p(99)", "max"],
   thresholds: {
-    http_req_failed: ["rate<0.15"],
+    http_req_failed: ["rate<0.01"],
+    mixed_action_ok: ["rate==1"],
     mixed_action_latency: ["p(99)<2000"],
+    ...Object.fromEntries(ACTIONS.flatMap(({ name }) => [
+      [`mixed_action_count{action:${name}}`, ["count>0"]],
+      [`mixed_action_ok{action:${name}}`, ["rate==1"]],
+      [`mixed_action_latency{action:${name}}`, ["p(99)<5000"]],
+    ])),
   },
   scenarios: {
     mixed_rate: {
@@ -205,7 +215,7 @@ function doRushExecuteOK() {
       tags: { name: "rush_execute_ok" },
     },
   );
-  record("rush_execute_ok", res, [200, 400, 409, 429].includes(res.status));
+  record("rush_execute_ok", res, res.status === 200 && res.json().code === 0);
 }
 
 function doRushExecuteBad() {
@@ -249,7 +259,7 @@ function doNormalOrder() {
       tags: { name: "normal_order" },
     },
   );
-  record("normal_order", res, [200, 400, 409, 429].includes(res.status));
+  record("normal_order", res, res.status === 200 && res.json().code === 0);
 }
 
 function doLogin() {
@@ -260,9 +270,7 @@ function doLogin() {
     JSON.stringify({ username, password }),
     { headers: { "Content-Type": "application/json" }, tags: { name: "login" } },
   );
-  // fast-fixture users use a non-bcrypt placeholder hash; login may fail.
-  // Treat 200 as success; 401 still counts as "handled" for traffic shape.
-  record("login", res, [200, 401].includes(res.status));
+  record("login", res, res.status === 200 && res.json().code === 0);
 }
 
 function doRegister() {
@@ -272,7 +280,7 @@ function doRegister() {
     JSON.stringify({ username, password }),
     { headers: { "Content-Type": "application/json" }, tags: { name: "register" } },
   );
-  record("register", res, [200, 201, 400, 409].includes(res.status));
+  record("register", res, [200, 201].includes(res.status) && res.json().code === 0);
 }
 
 export default function () {
@@ -325,20 +333,21 @@ export function handleSummary(data) {
   const values = httpMetrics.values || {};
   const byAction = {};
   const actionLatency = {};
+  const actionSuccess = {};
   for (const [name, metric] of Object.entries(data.metrics || {})) {
-    // Prefer explicit action counter; fall back to http_reqs name tags.
+    if (name.startsWith("mixed_action_ok{")) {
+      const match = name.match(/action[:=]"?([^}",]+)"?/);
+      if (match) actionSuccess[match[1]] = metric.values?.rate;
+    }
     let key = null;
     if (name.startsWith("mixed_action_count{")) {
-      const m = name.match(/action="([^"]+)"/);
-      if (m) key = m[1];
-    } else if (name.startsWith("http_reqs{") && name.includes("name=")) {
-      const m = name.match(/name="([^"]+)"/);
+      const m = name.match(/action[:=]"?([^}",]+)"?/);
       if (m) key = m[1];
     }
     if (key) byAction[key] = (byAction[key] || 0) + (metric.values?.count || 0);
 
-    if (name.startsWith("http_req_duration{") && name.includes("name=")) {
-      const m = name.match(/name="([^"]+)"/);
+    if (name.startsWith("mixed_action_latency{")) {
+      const m = name.match(/action[:=]"?([^}",]+)"?/);
       if (m) {
         const v = metric.values || {};
         actionLatency[m[1]] = {
@@ -346,7 +355,6 @@ export function handleSummary(data) {
           p95_ms: v["p(95)"],
           p99_ms: v["p(99)"],
           avg_ms: v.avg,
-          count: data.metrics[`http_reqs{name="${m[1]}"}`]?.values?.count,
         };
       }
     }
@@ -370,7 +378,9 @@ export function handleSummary(data) {
     mixed_action_ok_rate: data.metrics.mixed_action_ok?.values?.rate,
     action_counts: byAction,
     action_latency: actionLatency,
+    action_success_rate: actionSuccess,
     http_req_failed_rate: data.metrics.http_req_failed?.values?.rate || 0,
+    dropped_iterations: data.metrics.dropped_iterations?.values?.count || 0,
   };
   return {
     stdout: `${JSON.stringify(summary, null, 2)}\n`,

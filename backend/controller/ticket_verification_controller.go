@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"errors"
 	"gofun/pkg/response"
 	"gofun/service"
 	"net/http"
@@ -42,7 +41,7 @@ func (ctrl *TicketVerificationController) Verify(c *gin.Context) {
 		input.SessionID,
 	)
 	if err != nil {
-		ctrl.writeError(c, err)
+		writeVerificationError(c, err)
 		return
 	}
 	response.Success(c, result)
@@ -71,16 +70,8 @@ func (ctrl *TicketVerificationController) ListRecords(c *gin.Context) {
 		pageSize,
 	)
 	if err != nil {
-		ctrl.writeError(c, err)
+		writeVerificationError(c, err)
 		return
 	}
 	response.Success(c, view)
-}
-
-func (ctrl *TicketVerificationController) writeError(c *gin.Context, err error) {
-	if errors.Is(err, service.ErrTicketAccessDenied) {
-		response.Error(c, http.StatusForbidden, response.CodeForbidden, err.Error())
-		return
-	}
-	response.Error(c, http.StatusInternalServerError, response.CodeInternalError, "核销处理失败")
 }

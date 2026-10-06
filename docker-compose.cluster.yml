@@ -16,12 +16,14 @@ x-backend-environment: &backend-environment
   JWT_SECRET: ${JWT_SECRET}
   TICKET_QR_SECRET: ${TICKET_QR_SECRET}
   CORS_ALLOW_ORIGINS: ${APP_ORIGIN}
-  RATELIMIT_GLOBAL_RATE: 100000
-  RATELIMIT_GLOBAL_BURST: 100000
-  RATELIMIT_IP_RATE: 100000
-  RATELIMIT_IP_BURST: 100000
-  RATELIMIT_WRITE_RATE: 100000
-  RATELIMIT_WRITE_BURST: 100000
+  # 集群编排用于压测，限流刻意放宽以免限流器扭曲压力曲线。
+  # 但不得写成「等于关闭」的量级：生产环境请按默认基线收紧（全局 1000/1200、单 IP 10/20、写操作 5/10）。
+  RATELIMIT_GLOBAL_RATE: 5000
+  RATELIMIT_GLOBAL_BURST: 6000
+  RATELIMIT_IP_RATE: 200
+  RATELIMIT_IP_BURST: 400
+  RATELIMIT_WRITE_RATE: 100
+  RATELIMIT_WRITE_BURST: 200
   RATELIMIT_DISTRIBUTED_WRITE_ENABLED: "false"
   ORDER_CONSUMER_WORKER_COUNT: 2
   ORDER_CONSUMER_PREFETCH_COUNT: 5
@@ -111,7 +113,7 @@ services:
     image: mysql:8.0
     restart: unless-stopped
     ports:
-      - "3310:3306"
+      - "127.0.0.1:3310:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_ROOT_HOST: "%"
@@ -137,7 +139,7 @@ services:
     image: mysql:8.0
     restart: unless-stopped
     ports:
-      - "3311:3306"
+      - "127.0.0.1:3311:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_ROOT_HOST: "%"
@@ -314,7 +316,7 @@ services:
     image: haproxy:3.0-alpine
     restart: unless-stopped
     ports:
-      - "5678:5672"
+      - "127.0.0.1:5678:5672"
     volumes:
       - ./deploy/cluster/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
     depends_on:

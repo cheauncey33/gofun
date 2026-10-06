@@ -1,7 +1,10 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strings"
@@ -122,6 +125,8 @@ type TelemetryConfig struct {
 }
 
 type RateLimitConfig struct {
+	OrderRate               float64 `mapstructure:"order_rate"`
+	OrderBurst              int     `mapstructure:"order_burst"`
 	GlobalRate              float64 `mapstructure:"global_rate"`
 	GlobalBurst             int     `mapstructure:"global_burst"`
 	IPRate                  float64 `mapstructure:"ip_rate"`
@@ -153,8 +158,6 @@ type OrderOutboxConfig struct {
 
 type OrderDelayConfig struct {
 	TimeoutMinutes int `mapstructure:"timeout_minutes"`
-	LockTimeoutSec int `mapstructure:"lock_timeout_sec"`
-	WorkerCount    int `mapstructure:"worker_count"`
 }
 
 type RushSaleConfig struct {
@@ -168,12 +171,21 @@ type PaymentConfig struct {
 }
 
 // InventoryConfig 票档/抢票 Redis+MySQL 同构分桶。
-// 生产基线固定使用分桶；关闭仅用于兼容性测试或迁移场景。
+// BucketCount 设置单票档的并行库存桶数量。
 type InventoryConfig struct {
 	BucketsEnabled   bool `mapstructure:"buckets_enabled"`
 	BucketCount      int  `mapstructure:"bucket_count"`
 	MinQuotaToBucket int  `mapstructure:"min_quota_to_bucket"`
 	BucketRetry      int  `mapstructure:"bucket_retry"`
+
+	// 归还重试：Redis 归还失败后入延时队列重放，避免票被永久吞掉。
+	ReturnRetryMaxAttempts int `mapstructure:"return_retry_max_attempts"`
+	ReturnRetryBaseDelayMS int `mapstructure:"return_retry_base_delay_ms"`
+	ReturnRetryMaxDelayMS  int `mapstructure:"return_retry_max_delay_ms"`
+	ReturnDedupTTLSec      int `mapstructure:"return_dedup_ttl_sec"`
+
+	// 对账偏少自动上调：Redis 余量低于 MySQL 安全可用量且无在途预扣可解释时，
+	// 连续确认若干轮后按 MySQL 口径补回，避免历史泄漏退化成永久少卖。
 }
 
 func Load(configPath string) (*Config, error) {
@@ -238,6 +250,8 @@ func Load(configPath string) (*Config, error) {
 		"telemetry.otlp_endpoint",
 		"telemetry.insecure",
 		"telemetry.sample_ratio",
+		"ratelimit.order_rate",
+		"ratelimit.order_burst",
 		"ratelimit.global_rate",
 		"ratelimit.global_burst",
 		"ratelimit.ip_rate",
@@ -255,13 +269,15 @@ func Load(configPath string) (*Config, error) {
 		"order_outbox.publish_batch",
 		"order_outbox.tick_interval_ms",
 		"delayed_order.timeout_minutes",
-		"delayed_order.lock_timeout_sec",
-		"delayed_order.worker_count",
 		"rush_sale.campaign_cache_ttl_ms",
 		"inventory.buckets_enabled",
 		"inventory.bucket_count",
 		"inventory.min_quota_to_bucket",
 		"inventory.bucket_retry",
+		"inventory.return_retry_max_attempts",
+		"inventory.return_retry_base_delay_ms",
+		"inventory.return_retry_max_delay_ms",
+		"inventory.return_dedup_ttl_sec",
 		"payment.provider",
 		"payment.sandbox_secret",
 		"payment.sandbox_callback_delay_ms",
@@ -300,6 +316,39 @@ func bindEnvs(v *viper.Viper, keys ...string) {
 	for _, key := range keys {
 		_ = v.BindEnv(key)
 	}
+}
+
+// serverModeRelease 与 gin.ReleaseMode 取值一致；这里不引入 gin，
+// 让配置层保持零框架依赖。
+const serverModeRelease = "release"
+
+// generateTemporarySecret 为缺失的敏感配置生成一次性随机值。
+// 仅供本地开发：release 模式会直接拒绝启动，不会走到这里。
+func generateTemporarySecret() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}
+
+// placeholderSecretPrefixes 是配置文件示例里常见的占位前缀。
+var placeholderSecretPrefixes = []string{
+	"change-me", "change_me", "changeme", "change-this", "change_this",
+	"your-", "your_", "placeholder", "example", "todo", "xxx",
+}
+
+func isPlaceholderSecret(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if lower == "" {
+		return true
+	}
+	for _, prefix := range placeholderSecretPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func splitCSV(value string) []string {
@@ -363,6 +412,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("telemetry.insecure", true)
 	v.SetDefault("telemetry.sample_ratio", 0.05)
 
+	v.SetDefault("ratelimit.order_rate", 150.0)
+	v.SetDefault("ratelimit.order_burst", 50)
 	v.SetDefault("ratelimit.global_rate", 1000.0)
 	v.SetDefault("ratelimit.global_burst", 1200)
 	v.SetDefault("ratelimit.ip_rate", 10.0)
@@ -374,7 +425,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("ratelimit.write_max_per_window", 10)
 	v.SetDefault("ratelimit.write_fail_open", false)
 
-	v.SetDefault("order_consumer.worker_count", 6)
+	v.SetDefault("order_consumer.worker_count", 12)
 	v.SetDefault("order_consumer.prefetch_count", 5)
 	v.SetDefault("order_consumer.max_retries", 3)
 	v.SetDefault("order_outbox.publish_workers", 4)
@@ -382,14 +433,17 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("order_outbox.tick_interval_ms", 200)
 
 	v.SetDefault("delayed_order.timeout_minutes", 15)
-	v.SetDefault("delayed_order.lock_timeout_sec", 10)
-	v.SetDefault("delayed_order.worker_count", 2)
 	v.SetDefault("rush_sale.campaign_cache_ttl_ms", 3000)
 
 	v.SetDefault("inventory.buckets_enabled", true)
 	v.SetDefault("inventory.bucket_count", 32)
 	v.SetDefault("inventory.min_quota_to_bucket", 64)
 	v.SetDefault("inventory.bucket_retry", 4)
+
+	v.SetDefault("inventory.return_retry_max_attempts", 12)
+	v.SetDefault("inventory.return_retry_base_delay_ms", 1000)
+	v.SetDefault("inventory.return_retry_max_delay_ms", 300000)
+	v.SetDefault("inventory.return_dedup_ttl_sec", 7*24*3600)
 
 	v.SetDefault("payment.provider", "sandbox")
 	v.SetDefault("payment.sandbox_callback_delay_ms", 500)
@@ -454,6 +508,9 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("telemetry.sample_ratio 必须在0到1之间")
 		}
 	}
+	if c.RateLimit.OrderRate == 0 && c.RateLimit.OrderBurst == 0 {
+		c.RateLimit.OrderRate, c.RateLimit.OrderBurst = 150, 50
+	}
 	if c.RateLimit.GlobalRate == 0 && c.RateLimit.GlobalBurst == 0 {
 		c.RateLimit.GlobalRate, c.RateLimit.GlobalBurst = 1000, 1200
 	}
@@ -463,7 +520,8 @@ func (c *Config) Validate() error {
 	if c.RateLimit.WriteRate == 0 && c.RateLimit.WriteBurst == 0 {
 		c.RateLimit.WriteRate, c.RateLimit.WriteBurst = 5, 10
 	}
-	if c.RateLimit.GlobalRate <= 0 || c.RateLimit.GlobalBurst <= 0 ||
+	if c.RateLimit.OrderRate <= 0 || c.RateLimit.OrderBurst <= 0 ||
+		c.RateLimit.GlobalRate <= 0 || c.RateLimit.GlobalBurst <= 0 ||
 		c.RateLimit.IPRate <= 0 || c.RateLimit.IPBurst <= 0 ||
 		c.RateLimit.WriteRate <= 0 || c.RateLimit.WriteBurst <= 0 {
 		return fmt.Errorf("ratelimit 速率和 burst 必须大于0")
@@ -497,7 +555,19 @@ func (c *Config) Validate() error {
 	if c.Payment.Provider != "sandbox" {
 		return fmt.Errorf("payment.provider 当前仅支持 sandbox")
 	}
-	if c.Payment.SandboxSecret != "" && len(c.Payment.SandboxSecret) < 16 {
+	if strings.TrimSpace(c.Payment.SandboxSecret) == "" {
+		// /payments/sandbox/callback 是无需登录的公开路由，空密钥意味着任何人都能
+		// 用空串算出合法 HMAC 并伪造「已支付」回调。release 模式必须显式配置。
+		if c.Server.Mode == serverModeRelease {
+			return fmt.Errorf("release 模式必须显式配置 payment.sandbox_secret，否则支付回调验签可被任意伪造")
+		}
+		generated, err := generateTemporarySecret()
+		if err != nil {
+			return fmt.Errorf("payment.sandbox_secret 未配置且无法生成临时密钥: %w", err)
+		}
+		c.Payment.SandboxSecret = generated
+		log.Printf("[warn] payment.sandbox_secret 未配置，已为本次运行生成临时随机密钥；release 模式将拒绝启动")
+	} else if len(c.Payment.SandboxSecret) < 16 {
 		return fmt.Errorf("payment.sandbox_secret 至少需要 16 个字符")
 	}
 	if c.Payment.SandboxCallbackDelayMS <= 0 {
@@ -506,8 +576,26 @@ func (c *Config) Validate() error {
 	if c.Payment.SandboxCallbackDelayMS > 60000 {
 		return fmt.Errorf("payment.sandbox_callback_delay_ms 不能超过 60000")
 	}
+	// Docker 镜像会把 config.example.yaml 复制为默认配置，
+	// 若部署时没有用环境变量覆盖，示例里的占位密钥会被当成真实密钥带上生产。
+	// 这条检查让「忘了改配置」在启动阶段就失败，而不是运行到支付回调时才发现。
+	if c.Server.Mode == serverModeRelease {
+		secrets := []struct {
+			name  string
+			value string
+		}{
+			{"jwt.secret", c.JWT.Secret},
+			{"ticket_qr.secret", c.TicketQR.Secret},
+			{"payment.sandbox_secret", c.Payment.SandboxSecret},
+		}
+		for _, secret := range secrets {
+			if isPlaceholderSecret(secret.value) {
+				return fmt.Errorf("release 模式下 %s 仍是示例占位值，必须替换为随机密钥", secret.name)
+			}
+		}
+	}
 	if c.OrderConsumer.WorkerCount == 0 {
-		c.OrderConsumer.WorkerCount = 6
+		c.OrderConsumer.WorkerCount = 12
 	}
 	if c.OrderConsumer.PrefetchCount == 0 {
 		c.OrderConsumer.PrefetchCount = 5
@@ -524,12 +612,7 @@ func (c *Config) Validate() error {
 	if c.OrderConsumer.MaxRetries < 0 {
 		return fmt.Errorf("order_consumer.max_retries 必须大于等于0")
 	}
-	if c.DelayedOrder.WorkerCount == 0 {
-		c.DelayedOrder.WorkerCount = 2
-	}
-	if c.DelayedOrder.WorkerCount < 0 {
-		return fmt.Errorf("delayed_order.worker_count 必须大于0")
-	}
+
 	if c.OrderOutbox.PublishWorkers == 0 {
 		c.OrderOutbox.PublishWorkers = 4
 	}

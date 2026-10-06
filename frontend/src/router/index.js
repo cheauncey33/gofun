@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import api from '../api'
+import { resolveIdentity, resolveOrganizerAccess, invalidateIdentity, isAdmin } from '../utils/auth'
+import { endClientSession } from '../stores/session'
 
 const routes = [
   { path: '/login', name: 'Login', component: () => import('../views/Login.vue'), meta: { title: '登录' } },
@@ -8,7 +9,7 @@ const routes = [
     path: '/organizer',
     name: 'OrganizerConsole',
     component: () => import('../views/OrganizerConsole.vue'),
-    meta: { title: '主办方工作台', requiresAuth: true, blockAdmin: true },
+    meta: { title: '主办方工作台', requiresAuth: true, requiresOrganizer: true, blockAdmin: true },
   },
   {
     path: '/admin',
@@ -37,40 +38,68 @@ const routes = [
 
 const router = createRouter({ history: createWebHistory(), routes })
 
+function metaFlag(to, flag) {
+  return !!(to.meta?.[flag] || to.matched.some(record => record.meta?.[flag]))
+}
+
 router.beforeEach(async (to, from, next) => {
   const token = localStorage.getItem('access_token') || localStorage.getItem('token')
   const isAuthPage = to.path === '/login' || to.path === '/register'
-  const blockedForAdmin = !!(to.meta.blockAdmin || to.matched.some(record => record.meta.blockAdmin))
+  const needsAuth = metaFlag(to, 'requiresAuth')
+  const needsAdmin = metaFlag(to, 'requiresAdmin')
+  const needsOrganizer = metaFlag(to, 'requiresOrganizer')
+  const blockedForAdmin = metaFlag(to, 'blockAdmin')
 
-  if (!token && to.meta.requiresAuth) {
+  // 需要登录的页面：本地没有任何 token 时不必打扰后端，直接拦。
+  if (!token && (needsAuth || needsAdmin || needsOrganizer)) {
     next({ path: '/login', query: { redirect: to.fullPath } })
     return
   }
 
-  let role = localStorage.getItem('role') || ''
-  if (token && to.meta.requiresAdmin && role !== 'admin') {
-    try {
-      const res = await api.getUserInfo()
-      role = res.data?.role || ''
-      if (res.data?.username) localStorage.setItem('username', res.data.username)
-      if (role) localStorage.setItem('role', role)
-    } catch {
-      role = ''
+  // 只要本次导航涉及身份判断，就一律向后端确认。
+  // 不再读取 localStorage 的 role 做放行决策 —— 那个值用户可以在浏览器里直接改写。
+  let identity = { authenticated: false, role: '', organizer: false }
+  if (token && (needsAuth || needsAdmin || needsOrganizer || isAuthPage)) {
+    identity = needsOrganizer ? await resolveOrganizerAccess() : await resolveIdentity()
+
+    if (!identity.authenticated) {
+      // token 已失效（过期或被吊销）：清掉本地会话并要求重新登录。
+      endClientSession()
+      invalidateIdentity()
+      next({ path: '/login', query: { redirect: to.fullPath } })
+      return
     }
+
+    // 后端确认过的身份可以回写本地，供首屏渲染使用；它不参与下面的放行判断。
+    if (identity.username) localStorage.setItem('username', identity.username)
+    if (identity.role) localStorage.setItem('role', identity.role)
   }
 
-  if (token && isAuthPage) {
-    next(role === 'admin' ? '/admin' : '/')
+  if (isAuthPage) {
+    if (identity.authenticated) {
+      next(isAdmin(identity) ? '/admin' : '/')
+      return
+    }
+    // 未登录时正常展示登录/注册页。
+    document.title = `${to.meta.title || '登录'} · Gofun`
+    next()
     return
   }
-  if (role === 'admin' && blockedForAdmin) {
-    next('/admin')
-    return
-  }
-  if (to.meta.requiresAdmin && role !== 'admin') {
+
+  if (needsAdmin && !isAdmin(identity)) {
     next('/')
     return
   }
+  if (blockedForAdmin && isAdmin(identity)) {
+    next('/admin')
+    return
+  }
+  if (needsOrganizer && !identity.organizer) {
+    // 已登录但没有可用主办方工作台：引导去首页而不是放行。
+    next('/')
+    return
+  }
+
   document.title = `${to.meta.title || to.matched.find(record => record.meta.title)?.meta.title || '发现活动'} · Gofun`
   next()
 })

@@ -12,10 +12,15 @@ FROM debian:bookworm-slim
 WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl tzdata \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system gofun \
+    && useradd --system --gid gofun --home-dir /app --shell /usr/sbin/nologin gofun
 
 COPY --from=build /out/gofun-server /app/gofun-server
 COPY backend/config/config.example.yaml /app/config/config.yaml
+RUN chown -R gofun:gofun /app && chmod 0550 /app/gofun-server
+
+USER gofun
 
 EXPOSE 8080
 CMD ["/app/gofun-server", "-config", "/app/config/config.yaml"]

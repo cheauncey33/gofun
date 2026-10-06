@@ -1,4 +1,6 @@
 import { computed, reactive } from 'vue'
+import api from '../api'
+import { hasApprovedOrganizerWorkspace, invalidateIdentity } from '../utils/auth'
 
 const state = reactive({
   token: localStorage.getItem('access_token') || localStorage.getItem('token') || '',
@@ -7,12 +9,7 @@ const state = reactive({
   hasOrganizerWorkspace: false,
 })
 
-export function hasApprovedOrganizerWorkspace(list) {
-  return (Array.isArray(list) ? list : []).some((item) => {
-    const organizer = item?.organizer || item
-    return organizer?.status === 'active' && organizer?.audit_status === 'approved'
-  })
-}
+export { hasApprovedOrganizerWorkspace }
 
 export function setOrganizerWorkspace(value) {
   state.hasOrganizerWorkspace = Boolean(value)
@@ -34,6 +31,8 @@ export function applySession(data = {}) {
     localStorage.setItem('role', data.role)
     state.role = data.role
   }
+  // 账号刚变化，下一次路由导航必须重新向后端确认身份，不能复用旧缓存。
+  invalidateIdentity()
 }
 
 export function clearSession() {
@@ -46,6 +45,7 @@ export function clearSession() {
   state.username = ''
   state.role = ''
   state.hasOrganizerWorkspace = false
+  invalidateIdentity()
 }
 
 export function isSafeAppPath(path) {
@@ -71,7 +71,6 @@ export async function logoutSession() {
   const refreshToken = localStorage.getItem('refresh_token')
   try {
     if (refreshToken) {
-      const { default: api } = await import('../api')
       await api.logout(refreshToken)
     }
   } catch {}

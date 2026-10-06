@@ -20,6 +20,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -120,6 +121,7 @@ func main() {
 		time.Duration(cfg.Elasticsearch.SyncIntervalMinutes)*time.Minute,
 		time.Duration(cfg.Elasticsearch.SyncLockTimeoutSec)*time.Second,
 	)
+	orderLimit := common.GlobalRateLimitMiddleware(rate.Limit(cfg.RateLimit.OrderRate), cfg.RateLimit.OrderBurst)
 	var writeLimit gin.HandlerFunc
 	if cfg.RateLimit.DistributedWriteEnabled {
 		writeLimit = common.DistributedWriteRateLimitMiddleware(
@@ -140,28 +142,29 @@ func main() {
 
 	// 先恢复超过宽限期的遗留 pending 预扣；宽限期内凭证可能属于其他实例，留给周期 Worker。
 	// WarmTicketQuota 会跳过仍有 pending 的库存 key，避免覆盖在途预扣。
-	if _, err := ticketOrderSvc.RecoverAllStockReservations(context.Background()); err != nil {
+	// 预热带 deadline：DB/Redis 不可用时快速失败退出，而不是无限期挂起阻塞编排系统。
+	startupCtx, startupCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer startupCancel()
+	if _, err := ticketOrderSvc.RecoverAllStockReservations(startupCtx); err != nil {
 		logger.Log.Fatal("Redis 预扣凭证恢复失败", zap.Error(err))
 	}
 	// MySQL 是最终票额来源，启动时将票档剩余量写入 Gofun 独立 Redis 命名空间。
-	if err := ticketOrderSvc.WarmTicketQuota(context.Background()); err != nil {
+	if err := ticketOrderSvc.WarmTicketQuota(startupCtx); err != nil {
 		logger.Log.Fatal("票档预热 Redis 失败", zap.Error(err))
 	}
-	if err := ticketOrderSvc.BackfillPaidAdmissionTickets(context.Background()); err != nil {
+	if err := ticketOrderSvc.BackfillPaidAdmissionTickets(startupCtx); err != nil {
 		logger.Log.Fatal("历史已支付订单补签电子票失败", zap.Error(err))
 	}
-	if err := ticketOrderSvc.RecoverPaymentState(context.Background()); err != nil {
+	if err := ticketOrderSvc.RecoverPaymentState(startupCtx); err != nil {
 		logger.Log.Fatal("支付状态恢复失败", zap.Error(err))
 	}
-	if err := ticketOrderSvc.SetupPaymentTimeoutInfrastructure(); err != nil {
-		logger.Log.Fatal("票务支付超时延时队列初始化失败", zap.Error(err))
-	}
-	if err := ticketCatalogSvc.ReindexPublishedEvents(context.Background()); err != nil {
+
+	if err := ticketCatalogSvc.ReindexPublishedEvents(startupCtx); err != nil {
 		logger.Log.Warn("活动 ES 索引重建失败（已忽略，检索可降级 MySQL）", zap.Error(err))
 	}
 
 	// 创建路由
-	r := gin.Default()
+	r := gin.New()
 	if err := r.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
 		panic(fmt.Errorf("设置可信代理失败: %v", err))
 	}
@@ -169,6 +172,7 @@ func main() {
 	if cfg.Telemetry.Enabled {
 		r.Use(otelgin.Middleware(cfg.Telemetry.ServiceName))
 	}
+	r.Use(middleware.AccessLogMiddleware(), middleware.RecoveryMiddleware())
 	r.Use(metrics.PrometheusMiddleware())
 	r.Use(common.GlobalRateLimitMiddleware(
 		rate.Limit(cfg.RateLimit.GlobalRate),
@@ -213,7 +217,7 @@ func main() {
 		auth := v1.Group("/")
 		auth.Use(common.AuthMiddleware())
 		{
-			auth.POST("/orders", writeLimit, ticketOrderCtrl.CreateOrder)
+			auth.POST("/orders", writeLimit, orderLimit, ticketOrderCtrl.CreateOrder)
 			auth.GET("/orders", ticketOrderCtrl.ListOrders)
 			auth.GET("/tickets", ticketOrderCtrl.ListTickets)
 			auth.GET("/orders/:id", ticketOrderCtrl.GetOrder)
@@ -224,7 +228,7 @@ func main() {
 			auth.GET("/waitlists/:id", ticketOrderCtrl.GetWaitlist)
 			auth.POST("/waitlists/:id/pay", ticketOrderCtrl.PayWaitlist)
 			auth.POST("/waitlists/:id/cancel", ticketOrderCtrl.CancelWaitlist)
-			auth.POST("/rush-sales/:id/execute", writeLimit, rushSaleCtrl.Execute)
+			auth.POST("/rush-sales/:id/execute", writeLimit, orderLimit, rushSaleCtrl.Execute)
 			auth.POST("/events/:id/comments", writeLimit, eventCommentCtrl.Create)
 			auth.DELETE("/comments/:id", eventCommentCtrl.Delete)
 			auth.POST("/comments/:id/like", writeLimit, eventCommentCtrl.Like)
@@ -294,28 +298,35 @@ func main() {
 
 	metrics.RegisterHandler(r)
 
-	// 后台 goroutine
+	// 后台 goroutine：全部纳入 bgWg，关机时等待其退出（带超时上限）。
+	// 各 Start 内部会在 ctx 取消后排空在途任务再返回。
 	mainCtx, cancel := context.WithCancel(context.Background())
-	go orderHub.Run(mainCtx)
-	go ticketOrderConsumer.Start(mainCtx, cfg.OrderConsumer)
-	go ticketOrderSvc.StartPaymentTimeoutConsumer(mainCtx, cfg.DelayedOrder.WorkerCount)
-	go ticketOrderSvc.StartTimeoutScanner(mainCtx)
-	go ticketOrderSvc.StartWaitlistWorker(mainCtx)
-	go ticketOrderSvc.StartOutboxPublisher(mainCtx, cfg.OrderOutbox)
-	go ticketCompensationSvc.Start(mainCtx)
-	go eventSearchCompensationSvc.Start(mainCtx)
-	go eventCommentSvc.StartLikeCountFlusher(mainCtx)
-	go metrics.StartRuntimeCollector(
-		mainCtx,
-		cont.DB,
-		cont.WorkerDB,
-		cont.NewMQChannel,
-		cont.MQQueueName,
-		cont.MQRetryQueueName,
-		"fuchang.order.delay",
-		"fuchang.order.timeout",
-		cont.MQDLQName,
-	)
+	var bgWg sync.WaitGroup
+	runBg := func(name string, fn func(ctx context.Context)) {
+		bgWg.Add(1)
+		go func() {
+			defer bgWg.Done()
+			fn(mainCtx)
+		}()
+	}
+	runBg("order-hub", orderHub.Run)
+	runBg("order-consumer", func(ctx context.Context) { ticketOrderConsumer.Start(ctx, cfg.OrderConsumer) })
+	runBg("waitlist-worker", ticketOrderSvc.StartWaitlistWorker)
+	runBg("outbox-publisher", func(ctx context.Context) { ticketOrderSvc.StartOutboxPublisher(ctx, cfg.OrderOutbox) })
+	runBg("order-recovery", ticketCompensationSvc.Start)
+	runBg("search-compensation", eventSearchCompensationSvc.Start)
+	runBg("comment-like-flusher", eventCommentSvc.StartLikeCountFlusher)
+	runBg("runtime-collector", func(ctx context.Context) {
+		metrics.StartRuntimeCollector(
+			ctx,
+			cont.DB,
+			cont.WorkerDB,
+			cont.NewMQChannel,
+			cont.MQQueueName,
+			cont.MQRetryQueueName,
+			cont.MQDLQName,
+		)
+	})
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
@@ -343,27 +354,28 @@ func main() {
 		}
 	}()
 
-	go func() {
+	runBg("ip-limiter-cleanup", func(ctx context.Context) {
 		ticker := time.NewTicker(30 * time.Minute)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-mainCtx.Done():
+			case <-ctx.Done():
 				return
 			case <-ticker.C:
 				common.CleanupIPLimiters()
 			}
 		}
-	}()
+	})
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	logger.Log.Info("收到关机信号，开始收尾...")
 
+	// 第一步：先停消费者与周期任务，不再接新消息/新任务。
 	cancel()
-	time.Sleep(time.Second * 2)
 
+	// 第二步：排空 HTTP 在途请求（不再靠盲等 sleep 起算）。
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 
@@ -375,6 +387,20 @@ func main() {
 			logger.Log.Error("pprof Shutdown Error", zap.Error(err))
 		}
 	}
+
+	// 第三步：等待后台 goroutine 真正退出；超时则放行，避免个别任务卡死拖住整个进程。
+	bgDone := make(chan struct{})
+	go func() {
+		bgWg.Wait()
+		close(bgDone)
+	}()
+	select {
+	case <-bgDone:
+		logger.Log.Info("后台任务已全部退出")
+	case <-time.After(10 * time.Second):
+		logger.Log.Warn("等待后台任务退出超时，继续关机流程")
+	}
+
 	traceShutdownCtx, traceShutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer traceShutdownCancel()
 	if err := shutdownTelemetry(traceShutdownCtx); err != nil {

@@ -50,7 +50,7 @@ func (ctrl *RushSaleController) CreateCampaign(c *gin.Context) {
 	}
 	var input service.CreateRushSaleInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	campaign, err := ctrl.service.CreateCampaign(
@@ -82,7 +82,7 @@ func (ctrl *RushSaleController) Execute(c *gin.Context) {
 		service.PurchaseInfoInput
 	}
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	requestID, _ := c.Get("request_id")

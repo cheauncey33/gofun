@@ -8,26 +8,20 @@ import (
 	"gofun/container"
 	"gofun/metrics"
 	"gofun/models"
+	"gofun/pkg/logger"
 	"log"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
 const stockFullReconciliationInterval = 5 * time.Minute
 
-var lowerRedisStockIfUnchangedScript = redis.NewScript(`
-if redis.call('GET', KEYS[1]) ~= ARGV[1] then
-  return 0
-end
-redis.call('SET', KEYS[1], ARGV[2])
-return 1
-`)
-
-// TicketCompensationService 是统一的库存恢复 Worker：高频处理单笔 Redis 预扣，
-// 低频按 MySQL 可用量做全量库存对账。
+// TicketCompensationService 统一管理订单超时、预扣恢复、退款恢复、库存归还与对账。
 type TicketCompensationService struct {
 	db        *gorm.DB
 	rdb       *redis.Client
@@ -50,12 +44,12 @@ func (s *TicketCompensationService) ConfigureInventory(cfg config.InventoryConfi
 	s.inventory = NewInventoryBucketSettings(cfg)
 }
 
-// RunCompensation 对 on_sale / sold_out 票档做一次对账，返回修复的异常数。
+// RunCompensation 检查在售票档库存，返回发现的差异数。
 func (s *TicketCompensationService) RunCompensation(ctx context.Context) (int, error) {
 	pendingKeys := make(map[string]struct{})
 	if s.order != nil {
 		var err error
-		pendingKeys, err = s.order.pendingStockReservationKeys(ctx)
+		pendingKeys, err = s.order.pendingInventoryKeys(ctx)
 		if err != nil {
 			return 0, fmt.Errorf("读取在途库存预扣: %w", err)
 		}
@@ -85,16 +79,9 @@ func (s *TicketCompensationService) reconcileRedisStock(
 			metrics.StockReconciliationMismatchTotal.WithLabelValues("pending_missing").Inc()
 			return true, nil
 		}
-		created, setErr := s.rdb.SetNX(ctx, key, expected, 0).Result()
-		if setErr != nil {
-			return false, setErr
-		}
-		if created {
-			log.Printf("%s Redis 库存缺失，已按安全可用量%d重建", description, expected)
-			metrics.StockReconciliationMismatchTotal.WithLabelValues("missing").Inc()
-			return true, nil
-		}
-		return false, nil
+		log.Printf("%s Redis stock missing: expected=%d", description, expected)
+		metrics.StockReconciliationMismatchTotal.WithLabelValues("missing").Inc()
+		return true, nil
 	}
 	if err != nil {
 		return false, err
@@ -106,23 +93,12 @@ func (s *TicketCompensationService) reconcileRedisStock(
 		return true, nil
 	}
 	if redisStock > int64(expected) {
-		changed, err := lowerRedisStockIfUnchangedScript.Run(
-			ctx, s.rdb, []string{key}, redisStockStr, expected,
-		).Int64()
-		if err != nil {
-			return false, err
-		}
-		if changed != 1 {
-			log.Printf("%s 对账期间库存发生并发变化，本轮不覆盖", description)
-			return false, nil
-		}
-		log.Printf("%s Redis 库存偏多，已从%d下调为%d", description, redisStock, expected)
+		log.Printf("%s Redis stock drift: expected=%d actual=%d", description, expected, redisStock)
 		metrics.StockReconciliationMismatchTotal.WithLabelValues("too_high").Inc()
 		return true, nil
 	}
 	if redisStock < int64(expected) && !hasPendingReservation {
-		// 偏少可能来自历史泄漏；没有单笔凭证能够解释时只告警，不猜测性加库存。
-		log.Printf("%s Redis 库存偏少:安全可用量=%d,Redis=%d，本轮不自动上调", description, expected, redisStock)
+		log.Printf("%s Redis stock drift: expected=%d actual=%d", description, expected, redisStock)
 		metrics.StockReconciliationMismatchTotal.WithLabelValues("too_low").Inc()
 		return true, nil
 	}
@@ -322,8 +298,41 @@ func (s *TicketCompensationService) runBucketCompensation(
 	return anomalies, nil
 }
 
-// Start 每 30 秒执行单笔恢复，并在同一个 Worker 内每 5 分钟执行一次全量对账。
+// Start 管理恢复任务的生命周期；超时扫描独立执行，避免被退款查询阻塞。
 func (s *TicketCompensationService) Start(ctx context.Context) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		s.scanTimeouts(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		s.runRecovery(ctx)
+	}()
+	wg.Wait()
+}
+
+func (s *TicketCompensationService) scanTimeouts(ctx context.Context) {
+	interval := s.order.scannerInterval
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			scanCtx, cancel := context.WithTimeout(ctx, interval)
+			if err := s.order.CancelExpiredOrders(scanCtx); err != nil {
+				logger.FromContext(ctx).Error("Payment timeout scan failed", zap.Error(err))
+			}
+			cancel()
+		}
+	}
+}
+
+// runRecovery 每 30 秒核查预扣、退款并执行归还，每 5 分钟对账。
+func (s *TicketCompensationService) runRecovery(ctx context.Context) {
 	ticker := time.NewTicker(stockReservationRecoveryInterval)
 	defer ticker.Stop()
 	nextFullReconciliation := time.Now().Add(stockFullReconciliationInterval)
@@ -332,7 +341,9 @@ func (s *TicketCompensationService) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
+
 			if s.order != nil {
+
 				if _, err := s.order.RecoverStaleStockReservations(ctx, now); err != nil {
 					log.Printf("库存单笔恢复失败: %v", err)
 				} else {
@@ -341,6 +352,17 @@ func (s *TicketCompensationService) Start(ctx context.Context) {
 				if err := s.order.observePendingStockReservationMetrics(ctx, now); err != nil {
 					log.Printf("采集库存预扣状态失败: %v", err)
 				}
+				// 重驱动卡在 refunding 的订单（CancelOrder 事务外调网关的崩溃残留）。
+				if recovered, err := s.order.RecoverStuckRefunds(ctx); err != nil {
+					log.Printf("退款悬挂恢复失败: %v", err)
+				} else if recovered > 0 {
+					log.Printf("退款悬挂恢复完成 %d 笔", recovered)
+				}
+				if _, err := s.order.RecoverStockReturns(ctx); err != nil {
+					log.Printf("stock recovery: %v", err)
+				}
+				s.order.observeStockReturns(ctx)
+
 			}
 			if !now.Before(nextFullReconciliation) {
 				if _, err := s.RunCompensation(ctx); err != nil {

@@ -78,6 +78,8 @@ telemetry:
   sample_ratio: 0.05
 
 ratelimit:
+  order_rate: 150
+  order_burst: 50
   global_rate: 1000
   global_burst: 1200
   ip_rate: 10
@@ -92,7 +94,7 @@ ratelimit:
   write_burst: 10
 
 order_consumer:
-  worker_count: 6
+  worker_count: 12
   prefetch_count: 5
   max_retries: 3
 
@@ -114,13 +116,15 @@ inventory:
   min_quota_to_bucket: 64
   bucket_retry: 4
   # 库存桶与 ticket_order 使用同一个主库事务完成扣减。
+  # 库存归还事件由后台 Worker 执行，失败后按退避时间重试。
+  return_retry_max_attempts: 12
+  return_retry_base_delay_ms: 1000
+  return_retry_max_delay_ms: 300000
+  return_dedup_ttl_sec: 604800
 
-# 支付窗口（分钟）。进入 pending_payment 后投递 RabbitMQ 延时关单（消息级 TTL + DLX）；
-# DB 扫描器作兜底（默认约 2 分钟一次）。
+# 支付窗口与到期订单扫描。
 delayed_order:
   timeout_minutes: 15
-  lock_timeout_sec: 10
-  worker_count: 2
 
 cors:
   allow_origins:

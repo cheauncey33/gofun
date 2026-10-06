@@ -230,6 +230,7 @@ type stockReservationRecoveryOutcome string
 const (
 	stockReservationRecoveryConfirmed  stockReservationRecoveryOutcome = "confirmed"
 	stockReservationRecoveryRolledBack stockReservationRecoveryOutcome = "rolled_back"
+	stockReservationRecoveryScheduled  stockReservationRecoveryOutcome = "scheduled"
 )
 
 func stockReservationKey(orderID int64) string {
@@ -321,25 +322,6 @@ func (s *TicketOrderService) confirmStockReservation(parent context.Context, res
 		stockReservationTTLMillis(),
 	)); err != nil {
 		log.Printf("confirm stock reservation order=%d: %v", reservation.OrderID, err)
-	}
-}
-
-func (s *TicketOrderService) rollbackStockReservation(parent context.Context, reservation stockReservationResult) {
-	if reservation.Key == "" || reservation.OrderID <= 0 {
-		return
-	}
-	ctx, cancel := detachedReservationContext(parent)
-	defer cancel()
-	record, err := s.loadStockReservation(ctx, reservation.Key)
-	if err != nil {
-		log.Printf("load stock reservation for rollback order=%d: %v", reservation.OrderID, err)
-		return
-	}
-	if record == nil {
-		return
-	}
-	if err := s.rollbackLoadedStockReservation(ctx, *record); err != nil {
-		log.Printf("rollback stock reservation order=%d: %v", reservation.OrderID, err)
 	}
 }
 
@@ -437,58 +419,46 @@ func (s *TicketOrderService) rollbackLoadedStockReservation(ctx context.Context,
 	))
 }
 
-// claimStockReservationRecovery 只在一次查库未命中后调用。
-// 恢复任务插入 recovery 栅栏；订单事务插入 order 栅栏。order_id 唯一键会让后到者
-// 等待先到事务提交，从而消除“扫描未命中后原事务又提交”的回滚竞态。
-func (s *TicketOrderService) claimStockReservationRecovery(
-	ctx context.Context,
-	reservation stockReservation,
-) (stockReservationRecoveryOutcome, error) {
-	fence := models.TicketStockRecoveryFence{
-		OrderID: reservation.OrderID,
-		Owner:   models.TicketStockRecoveryFenceRecovery,
+// claimStockReservationRecovery competes with order creation through the order primary key.
+func (s *TicketOrderService) claimStockReservationRecovery(ctx context.Context, reservation stockReservation) (stockReservationRecoveryOutcome, error) {
+	now := time.Now()
+	tombstone := models.TicketOrder{
+		Base:         models.Base{ID: reservation.OrderID, DeleteTime: gorm.DeletedAt{Time: now, Valid: true}},
+		RecoveryOnly: true, OrderNo: "REC" + strconv.FormatInt(reservation.OrderID, 10),
+		UserID: reservation.UserID, OrderSource: models.TicketOrderSourceNormal,
+		Status: models.TicketOrderStatusFailed, PaymentStatus: models.PaymentStatusUnpaid,
+		IdempotencyKey: "recovery:" + strconv.FormatInt(reservation.OrderID, 10), ExpiresAt: now,
 	}
-	err := s.asyncDB().WithContext(ctx).Create(&fence).Error
-	if err == nil {
-		if err := s.rollbackLoadedStockReservation(ctx, reservation); err != nil {
-			return "", err
+	err := s.asyncDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&tombstone).Error; err != nil {
+			return err
 		}
-		return stockReservationRecoveryRolledBack, nil
+		return s.enqueueStockRecovery(tx, reservation.OrderID, stockRecoveryPayload{Reservation: &reservation})
+	})
+	if err == nil {
+		return stockReservationRecoveryScheduled, nil
 	}
 	if !isDuplicateStorageKeyError(err) {
 		return "", err
 	}
-
-	if err := s.asyncDB().WithContext(ctx).
-		Select("order_id", "owner").First(&fence, "order_id = ?", reservation.OrderID).Error; err != nil {
+	var order models.TicketOrder
+	if err := s.asyncDB().WithContext(ctx).Unscoped().First(&order, reservation.OrderID).Error; err != nil {
 		return "", err
 	}
-	switch fence.Owner {
-	case models.TicketStockRecoveryFenceOrder:
-		// order 栅栏与订单、Outbox 同事务提交。再次查单是数据完整性校验，
-		// 若人工改坏了栅栏，不允许猜测性归还库存。
-		var order models.TicketOrder
-		if err := s.asyncDB().WithContext(ctx).
-			Select("id").Where("id = ? AND user_id = ?", reservation.OrderID, reservation.UserID).
-			First(&order).Error; err != nil {
-			return "", fmt.Errorf("order 栅栏存在但订单不可见: %w", err)
-		}
-		if err := reservationMutationResult(confirmStockReservationScript.Run(
-			ctx, s.rdb, []string{reservation.Key, stockReservationPendingKey},
-			strconv.FormatInt(reservation.OrderID, 10), stockReservationTTLMillis(),
-		)); err != nil {
-			return "", err
-		}
-		return stockReservationRecoveryConfirmed, nil
-	case models.TicketStockRecoveryFenceRecovery:
-		// 上一次恢复可能在写入栅栏后、修改 Redis 前中断；重复执行 Lua 是幂等的。
-		if err := s.rollbackLoadedStockReservation(ctx, reservation); err != nil {
-			return "", err
-		}
-		return stockReservationRecoveryRolledBack, nil
-	default:
-		return "", fmt.Errorf("未知的库存恢复栅栏 owner %q", fence.Owner)
+	if order.RecoveryOnly {
+		err := s.asyncDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			return s.enqueueStockRecovery(tx, reservation.OrderID, stockRecoveryPayload{Reservation: &reservation})
+		})
+		return stockReservationRecoveryScheduled, err
 	}
+	if order.UserID != reservation.UserID {
+		return "", fmt.Errorf("reservation order %d user mismatch", order.ID)
+	}
+	if err := reservationMutationResult(confirmStockReservationScript.Run(ctx, s.rdb,
+		[]string{reservation.Key, stockReservationPendingKey}, strconv.FormatInt(reservation.OrderID, 10), stockReservationTTLMillis())); err != nil {
+		return "", err
+	}
+	return stockReservationRecoveryConfirmed, nil
 }
 
 func (s *TicketOrderService) resolveMissingOrderStockReservation(
@@ -512,7 +482,7 @@ func (s *TicketOrderService) resolveMissingOrderStockReservation(
 }
 
 // pendingStockReservationKeys 返回仍有在途预扣影响的库存 key。
-// 全量对账遇到这些 key 时不做缺失重建或偏少上调，避免覆盖正在执行的下单。
+// 全量对账使用这些 key 区分在途预扣与库存差异。
 func (s *TicketOrderService) pendingStockReservationKeys(ctx context.Context) (map[string]struct{}, error) {
 	reservationKeys, err := s.rdb.ZRange(ctx, stockReservationPendingKey, 0, -1).Result()
 	if err != nil {

@@ -8,12 +8,20 @@ services:
       - "80:80"
     depends_on:
       - backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://127.0.0.1/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     restart: unless-stopped
+    expose:
+      - "8080"
     environment:
       TZ: Asia/Shanghai
       SERVER_HOST: 0.0.0.0
@@ -28,7 +36,7 @@ services:
       TICKET_QR_SECRET: ${TICKET_QR_SECRET}
       PAYMENT_SANDBOX_SECRET: ${PAYMENT_SANDBOX_SECRET}
       CORS_ALLOW_ORIGINS: ${APP_ORIGIN}
-      ORDER_CONSUMER_WORKER_COUNT: "6"
+      ORDER_CONSUMER_WORKER_COUNT: "12"
       ORDER_CONSUMER_PREFETCH_COUNT: "5"
       ORDER_OUTBOX_PUBLISH_WORKERS: "4"
       INVENTORY_BUCKETS_ENABLED: "true"
@@ -36,6 +44,12 @@ services:
       SERVER_UPLOAD_DIR: /app/uploads
     volumes:
       - upload_data:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     depends_on:
       mysql:
         condition: service_healthy
@@ -49,7 +63,8 @@ services:
     restart: unless-stopped
     command: ["mysqld", "--max-connections=${MYSQL_MAX_CONNECTIONS:-300}"]
     ports:
-      - "3307:3306"
+      # 中间件只对宿主机本机暴露；跨主机访问请走 SSH 隧道或编排网络。
+      - "127.0.0.1:3307:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: gofun
@@ -68,7 +83,7 @@ services:
     image: redis:7.4-alpine
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
@@ -84,8 +99,9 @@ services:
     image: rabbitmq:3-management-alpine
     restart: unless-stopped
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "127.0.0.1:5672:5672"
+      # 15672 是未做额外鉴权加固的管理台，只对本机开放。
+      - "127.0.0.1:15672:15672"
     environment:
       RABBITMQ_DEFAULT_USER: fuchang
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}

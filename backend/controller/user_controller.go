@@ -39,11 +39,12 @@ func NewUserController(userSvc *service.UserService) *UserController {
 func (ctrl *UserController) Register(c *gin.Context) {
 	var req RegisterReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	if err := ctrl.userSvc.Register(req.Username, req.Password); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeUserExists, err.Error())
+		// 不回传具体原因，避免把「用户名已存在」之类的信息用于账户枚举。
+		writeBizError(c, err, http.StatusBadRequest, response.CodeUserExists, "注册失败，用户名可能已被占用")
 		return
 	}
 	response.Success(c, nil)
@@ -52,12 +53,13 @@ func (ctrl *UserController) Register(c *gin.Context) {
 func (ctrl *UserController) Login(c *gin.Context) {
 	var req LoginReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	tokens, err := ctrl.userSvc.Login(req.Username, req.Password)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, err.Error())
+		// 登录失败一律同一句文案：区分具体原因会让用户名可被枚举。
+		writeBizError(c, err, http.StatusUnauthorized, response.CodeUnauthorized, "用户名或密码错误")
 		return
 	}
 	response.Success(c, tokens)
@@ -66,12 +68,12 @@ func (ctrl *UserController) Login(c *gin.Context) {
 func (ctrl *UserController) Refresh(c *gin.Context) {
 	var req RefreshReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	tokens, err := ctrl.userSvc.Refresh(req.RefreshToken)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, err.Error())
+		writeBizError(c, err, http.StatusUnauthorized, response.CodeUnauthorized, "登录状态已失效，请重新登录")
 		return
 	}
 	response.Success(c, tokens)
@@ -109,11 +111,11 @@ func (ctrl *UserController) UpdateUserInfo(c *gin.Context) {
 	}
 	var req service.UpdateUserInfoReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	if err := ctrl.userSvc.UpdateUserInfo(userID, req); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	response.Success(c, nil)
@@ -127,11 +129,11 @@ func (ctrl *UserController) ChangePassword(c *gin.Context) {
 	}
 	var req service.ChangePasswordReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "参数错误: "+err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	if err := ctrl.userSvc.ChangePassword(userID, req); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	response.Success(c, nil)
@@ -164,7 +166,7 @@ func (ctrl *UserController) CreateAttendee(c *gin.Context) {
 	}
 	row, err := ctrl.userSvc.CreateAttendee(userID, req)
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	response.Success(c, row)
@@ -182,7 +184,7 @@ func (ctrl *UserController) DeleteAttendee(c *gin.Context) {
 		return
 	}
 	if err := ctrl.userSvc.DeleteAttendee(userID, attendeeID); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	response.Success(c, nil)
@@ -215,7 +217,7 @@ func (ctrl *UserController) AddFavorite(c *gin.Context) {
 	}
 	row, err := ctrl.userSvc.AddFavorite(userID, req)
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	response.Success(c, row)
@@ -233,7 +235,7 @@ func (ctrl *UserController) DeleteFavorite(c *gin.Context) {
 		return
 	}
 	if err := ctrl.userSvc.RemoveFavorite(userID, favoriteID); err != nil {
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, err.Error())
+		badRequest(c, err, "参数错误")
 		return
 	}
 	response.Success(c, nil)

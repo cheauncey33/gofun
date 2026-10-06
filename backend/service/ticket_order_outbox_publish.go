@@ -5,11 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"go.uber.org/zap"
 	"gofun/config"
 	"gofun/metrics"
 	"gofun/models"
+	"gofun/pkg/logger"
 	apptelemetry "gofun/pkg/telemetry"
-	"log"
 	"strconv"
 	"sync"
 	"time"
@@ -36,7 +37,7 @@ func (s *TicketOrderService) StartOutboxPublisher(ctx context.Context, cfg confi
 	}
 
 	if err := s.resetStuckOutboxPublishing(ctx); err != nil {
-		log.Printf("ticket outbox reset publishing rows: %v", err)
+		logger.FromContext(ctx).Error("Outbox reset failed", zap.Error(err))
 	}
 
 	var wg sync.WaitGroup
@@ -74,19 +75,19 @@ func (s *TicketOrderService) runOutboxPublisher(
 			return err
 		}
 		ch = opened
-		log.Printf("ticket outbox publisher %d channel ready", workerID)
+		logger.FromContext(ctx).Info("Outbox channel ready", zap.Int("worker_id", workerID))
 		return nil
 	}
 
 	drain := func() {
 		if err := ensureChannel(); err != nil {
-			log.Printf("ticket outbox publisher %d open channel: %v", workerID, err)
+			logger.FromContext(ctx).Error("Outbox channel failed", zap.Int("worker_id", workerID), zap.Error(err))
 			return
 		}
 		for ctx.Err() == nil {
 			n, err := s.publishClaimedOutboxBatch(ctx, ch, batch)
 			if err != nil {
-				log.Printf("ticket outbox publisher %d: %v", workerID, err)
+				logger.FromContext(ctx).Error("Outbox batch failed", zap.Int("worker_id", workerID), zap.Error(err))
 				_ = ch.Close()
 				ch = nil
 				return
@@ -127,7 +128,7 @@ func (s *TicketOrderService) newOutboxPublishChannel() (*amqp.Channel, error) {
 
 func (s *TicketOrderService) resetStuckOutboxPublishing(ctx context.Context) error {
 	return s.asyncDB().WithContext(ctx).Model(&models.TicketOrderOutbox{}).
-		Where("status = ?", models.TicketOrderOutboxPublishing).
+		Where("status = ? AND event_type = ?", models.TicketOrderOutboxPublishing, ticketOrderFinalizeEventType).
 		Update("status", models.TicketOrderOutboxPending).Error
 }
 
@@ -138,7 +139,7 @@ func (s *TicketOrderService) claimOutboxBatch(
 	var rows []models.TicketOrderOutbox
 	err := s.asyncDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("status = ?", models.TicketOrderOutboxPending).
+			Where("status = ? AND event_type = ?", models.TicketOrderOutboxPending, ticketOrderFinalizeEventType).
 			Order("create_time ASC").
 			Limit(batch).
 			Find(&rows).Error; err != nil {
@@ -225,6 +226,7 @@ func (s *TicketOrderService) publishClaimedOutboxBatch(
 		pending = append(pending, pendingConfirm{row: row, confirm: confirm})
 	}
 
+	publishedIDs := make([]int64, 0, len(pending))
 	for _, item := range pending {
 		waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		acked, waitErr := item.confirm.WaitContext(waitCtx)
@@ -235,16 +237,32 @@ func (s *TicketOrderService) publishClaimedOutboxBatch(
 		} else if !acked {
 			publishErr = fmt.Errorf("rabbitMQ publish not acknowledged")
 		}
-		if err := s.markOutboxPublishResult(ctx, item.row, publishErr); err != nil {
-			return 0, err
-		}
 		if publishErr != nil {
+			if err := s.markOutboxPublishResult(ctx, item.row, publishErr); err != nil {
+				return 0, err
+			}
 			_ = s.releaseClaimedOutboxRows(ctx, rows)
 			return 0, publishErr
 		}
+		publishedIDs = append(publishedIDs, item.row.ID)
 		metrics.MQMessagesPublished.Inc()
 	}
+	if err := s.markOutboxPublishedBatch(ctx, publishedIDs); err != nil {
+		_ = s.releaseClaimedOutboxRows(ctx, rows)
+		return 0, err
+	}
 	return len(rows), nil
+}
+
+func (s *TicketOrderService) markOutboxPublishedBatch(ctx context.Context, ids []int64) error {
+	return s.asyncDB().WithContext(ctx).Model(&models.TicketOrderOutbox{}).
+		Where("id IN ? AND status = ?", ids, models.TicketOrderOutboxPublishing).
+		Updates(map[string]interface{}{
+			"status":       models.TicketOrderOutboxPublished,
+			"attempts":     gorm.Expr("attempts + 1"),
+			"last_error":   "",
+			"published_at": time.Now(),
+		}).Error
 }
 
 func (s *TicketOrderService) releaseClaimedOutboxRows(
@@ -269,16 +287,14 @@ func (s *TicketOrderService) markOutboxPublishResult(
 	publishErr error,
 ) error {
 	attempts := row.Attempts + 1
-	if publishErr == nil {
-		now := time.Now()
-		return s.asyncDB().WithContext(ctx).Model(&models.TicketOrderOutbox{}).
-			Where("id = ? AND status = ?", row.ID, models.TicketOrderOutboxPublishing).
-			Updates(map[string]interface{}{
-				"status":       models.TicketOrderOutboxPublished,
-				"attempts":     attempts,
-				"last_error":   "",
-				"published_at": &now,
-			}).Error
+	var message TicketOrderMessage
+	_ = json.Unmarshal([]byte(row.Payload), &message)
+	ctx = logger.WithRequestID(apptelemetry.ExtractMap(ctx, message.TraceContext), message.RequestID)
+	log := logger.FromContext(ctx).With(zap.Int64("order_id", row.OrderID), zap.Int64("event_id", row.ID), zap.Int("attempt", attempts), zap.String("stage", "outbox_publish"))
+	if attempts >= ticketOutboxMaxAttempts {
+		log.Error("Outbox retries exhausted", zap.Error(publishErr))
+	} else {
+		log.Warn("Outbox publish retry pending", zap.Error(publishErr))
 	}
 	lastError := publishErr.Error()
 	if utf8.RuneCountInString(lastError) > 512 {
@@ -292,16 +308,19 @@ func (s *TicketOrderService) markOutboxPublishResult(
 	if attempts >= ticketOutboxMaxAttempts {
 		updates["status"] = models.TicketOrderOutboxFailed
 	}
-	if err := s.asyncDB().WithContext(ctx).Model(&models.TicketOrderOutbox{}).
-		Where("id = ? AND status = ?", row.ID, models.TicketOrderOutboxPublishing).
-		Updates(updates).Error; err != nil {
-		return err
-	}
-	if attempts >= ticketOutboxMaxAttempts {
-		var failed TicketOrderMessage
-		if err := json.Unmarshal([]byte(row.Payload), &failed); err == nil {
-			s.FinalizeFailedMessage(ctx, failed, "outbox 投递超过最大重试次数: "+lastError)
+	return s.asyncDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&models.TicketOrderOutbox{}).Where("id = ? AND status = ?", row.ID, models.TicketOrderOutboxPublishing).Updates(updates)
+		if result.Error != nil {
+			return result.Error
 		}
-	}
-	return nil
+		if result.RowsAffected == 0 || attempts < ticketOutboxMaxAttempts {
+			return nil
+		}
+		var failed TicketOrderMessage
+		if err := json.Unmarshal([]byte(row.Payload), &failed); err != nil {
+			return err
+		}
+		_, err := s.finalizeFailedMessageTx(tx, failed, "outbox 投递超过最大重试次数: "+lastError)
+		return err
+	})
 }

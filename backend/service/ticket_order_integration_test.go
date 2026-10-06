@@ -16,6 +16,7 @@ import (
 
 	"gofun/config"
 	"gofun/container"
+	"gofun/migrations"
 	"gofun/models"
 
 	"github.com/alicebob/miniredis/v2"
@@ -42,38 +43,6 @@ func testMySQLDSN(t *testing.T) string {
 //
 // 覆盖三条核心保证：不超卖、幂等重试、单笔限购。
 
-var ticketIntegrationModels = []interface{}{
-	&models.User{},
-	&models.Organizer{},
-	&models.OrganizerMember{},
-	&models.Venue{},
-	&models.Event{},
-	&models.EventSession{},
-	&models.TicketTier{},
-	&models.TicketTierBucket{},
-	&models.TicketOrder{},
-	&models.TicketOrderItem{},
-	&models.TicketOrderAttendee{},
-	&models.TicketOrderOutbox{},
-	&models.TicketOrderConsumerInbox{},
-	&models.TicketStockRecoveryFence{},
-	&models.PaymentTransaction{},
-	&models.PaymentCallback{},
-	&models.WaitlistEntry{},
-	&models.WaitlistAttendee{},
-	&models.RushSaleCampaign{},
-	&models.RushCampaignBucket{},
-	&models.AdmissionTicket{},
-	&models.TicketVerificationRecord{},
-	&models.EventComment{},
-	&models.FunnelDaily{},
-	&models.FunnelOrderDaily{},
-	&models.FunnelVisitorDaily{},
-	&models.SeatLayout{},
-	&models.Seat{},
-	&models.SessionSeat{},
-}
-
 type orderIntegrationEnv struct {
 	svc *TicketOrderService
 	db  *gorm.DB
@@ -97,8 +66,8 @@ func newOrderIntegrationEnv(t *testing.T) *orderIntegrationEnv {
 	if err != nil {
 		t.Skipf("MySQL 不可用，跳过集成测试（设置 GOFUN_TEST_MYSQL_DSN）: %v", err)
 	}
-	if err := db.AutoMigrate(ticketIntegrationModels...); err != nil {
-		t.Fatalf("AutoMigrate: %v", err)
+	if err := migrations.Run(db); err != nil {
+		t.Fatalf("数据库迁移: %v", err)
 	}
 
 	mr := miniredis.RunT(t)
@@ -170,6 +139,11 @@ func (e *orderIntegrationEnv) seedPurchasableTier(t *testing.T, totalQuota, purc
 	if err := e.rdb.Set(context.Background(), ticketStockKey(tier.ID), totalQuota, 0).Err(); err != nil {
 		t.Fatalf("warm redis stock: %v", err)
 	}
+
+	t.Cleanup(func() {
+		ids := e.db.Unscoped().Model(&models.TicketOrder{}).Select("id").Where("event_id = ?", event.ID)
+		e.db.Where("event_type = ? AND order_id IN (?)", stockRecoveryEventType, ids).Delete(&models.TicketOrderOutbox{})
+	})
 	return &tier
 }
 
@@ -179,6 +153,11 @@ func (e *orderIntegrationEnv) newUser(t *testing.T, username string) *models.Use
 	if err := e.db.Create(&u).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
+
+	t.Cleanup(func() {
+		ids := e.db.Unscoped().Model(&models.TicketOrder{}).Select("id").Where("user_id = ?", u.ID)
+		e.db.Where("event_type = ? AND order_id IN (?)", stockRecoveryEventType, ids).Delete(&models.TicketOrderOutbox{})
+	})
 	return &u
 }
 
@@ -197,6 +176,7 @@ func TestIntegrationRetryAfterUnknownRedisReserve(t *testing.T) {
 
 	reservation, code, err := env.svc.reserveTicketStock(
 		ctx, user.ID, tier, 1, idempotencyKey, proposedOrderID,
+		orderRequestHash(ticketOrderOperationNormal, CreateTicketOrderInput{TicketTierID: tier.ID, Quantity: 1, PurchaseInfoInput: validPurchaseInfo()}),
 	)
 	if err != nil || code != stockReservationCodeCreated {
 		t.Fatalf("initial Redis reserve code=%d err=%v", code, err)
@@ -213,6 +193,9 @@ func TestIntegrationRetryAfterUnknownRedisReserve(t *testing.T) {
 	if receipt.OrderID != reservation.OrderID {
 		t.Fatalf("retry order ID=%d, want reserved ID=%d", receipt.OrderID, reservation.OrderID)
 	}
+	if _, err := env.svc.RecoverStockReturns(ctx); err != nil {
+		t.Fatal(err)
+	}
 	stock, err := env.rdb.Get(ctx, ticketStockKey(tier.ID)).Int()
 	if err != nil || stock != 2 {
 		t.Fatalf("Redis stock after retry=%d err=%v, want 2", stock, err)
@@ -220,13 +203,14 @@ func TestIntegrationRetryAfterUnknownRedisReserve(t *testing.T) {
 	if state := env.mr.HGet(reservation.Key, "state"); state != stockReservationStateCommitted {
 		t.Fatalf("reservation state=%q, want committed", state)
 	}
-	var orderFence models.TicketStockRecoveryFence
-	if err := env.db.First(&orderFence, "order_id = ?", reservation.OrderID).Error; err != nil {
-		t.Fatalf("read order fence: %v", err)
+	var order models.TicketOrder
+	if err := env.db.First(&order, reservation.OrderID).Error; err != nil {
+		t.Fatal(err)
 	}
-	if orderFence.Owner != models.TicketStockRecoveryFenceOrder {
-		t.Fatalf("fence owner=%q, want order", orderFence.Owner)
+	if order.RecoveryOnly {
+		t.Fatal("created order marked recovery-only")
 	}
+
 }
 
 // 无 MySQL 订单的超时 pending 凭证必须归还库存，并且重复恢复不能多归还。
@@ -249,6 +233,9 @@ func TestIntegrationRecoverOrphanStockReservation(t *testing.T) {
 	if err != nil || recovered != 1 {
 		t.Fatalf("recover orphan recovered=%d err=%v", recovered, err)
 	}
+	if _, err := env.svc.RecoverStockReturns(ctx); err != nil {
+		t.Fatal(err)
+	}
 	stock, err := env.rdb.Get(ctx, ticketStockKey(tier.ID)).Int()
 	if err != nil || stock != 2 {
 		t.Fatalf("Redis stock after recovery=%d err=%v, want 2", stock, err)
@@ -256,13 +243,14 @@ func TestIntegrationRecoverOrphanStockReservation(t *testing.T) {
 	if env.mr.Exists(reservation.Key) {
 		t.Fatal("orphan reservation should be deleted")
 	}
-	var recoveryFence models.TicketStockRecoveryFence
-	if err := env.db.First(&recoveryFence, "order_id = ?", reservation.OrderID).Error; err != nil {
-		t.Fatalf("read recovery fence: %v", err)
+	var marker models.TicketOrder
+	if err := env.db.Unscoped().First(&marker, reservation.OrderID).Error; err != nil {
+		t.Fatal(err)
 	}
-	if recoveryFence.Owner != models.TicketStockRecoveryFenceRecovery {
-		t.Fatalf("fence owner=%q, want recovery", recoveryFence.Owner)
+	if !marker.RecoveryOnly || !marker.DeleteTime.Valid {
+		t.Fatal("missing hidden recovery marker")
 	}
+
 	recovered, err = env.svc.RecoverStaleStockReservations(
 		ctx, time.Now().Add(stockReservationRecoveryGrace),
 	)
@@ -271,14 +259,14 @@ func TestIntegrationRecoverOrphanStockReservation(t *testing.T) {
 	}
 }
 
-// 恢复任务在未提交订单上查不到记录时，会阻塞在同一个 order_id 栅栏上；
+// 恢复任务在未提交订单上查不到记录时，会阻塞在同一个订单主键上；
 // 原事务提交后只能确认 Redis 预扣，不能再把库存加回。
-func TestIntegrationRecoveryFenceWaitsForOrderCommit(t *testing.T) {
+func TestIntegrationRecoveryWaitsForOrderCommit(t *testing.T) {
 	env := newOrderIntegrationEnv(t)
 	ctx := context.Background()
 	tier := env.seedPurchasableTier(t, 2, 2)
-	user := env.newUser(t, fmt.Sprintf("fence-race-%d", tier.ID))
-	idempotencyKey := fmt.Sprintf("idem-fence-race-%d", tier.ID)
+	user := env.newUser(t, fmt.Sprintf("order-race-%d", tier.ID))
+	idempotencyKey := fmt.Sprintf("idem-order-race-%d", tier.ID)
 
 	reservation, code, err := env.svc.reserveTicketStock(
 		ctx, user.ID, tier, 1, idempotencyKey, env.svc.node.Generate().Int64(),
@@ -324,12 +312,7 @@ func TestIntegrationRecoveryFenceWaitsForOrderCommit(t *testing.T) {
 		t.Fatalf("begin order tx: %v", tx.Error)
 	}
 	defer tx.Rollback()
-	if err := tx.Create(&models.TicketStockRecoveryFence{
-		OrderID: reservation.OrderID,
-		Owner:   models.TicketStockRecoveryFenceOrder,
-	}).Error; err != nil {
-		t.Fatalf("insert uncommitted order fence: %v", err)
-	}
+
 	if err := tx.Create(order).Error; err != nil {
 		t.Fatalf("insert uncommitted order: %v", err)
 	}
@@ -399,6 +382,9 @@ func TestIntegrationFaultAfterRedisReserveIsRolledBack(t *testing.T) {
 		ctx, time.Now().Add(stockReservationRecoveryGrace),
 	); err != nil || recovered != 1 {
 		t.Fatalf("recover interrupted reserve=%d err=%v", recovered, err)
+	}
+	if _, err := env.svc.RecoverStockReturns(ctx); err != nil {
+		t.Fatal(err)
 	}
 	if stock, _ := env.rdb.Get(ctx, ticketStockKey(tier.ID)).Int(); stock != 2 {
 		t.Fatalf("stock after recovery=%d, want 2", stock)
@@ -724,6 +710,7 @@ func TestIntegrationTransactionalOutboxCommitAndRollback(t *testing.T) {
 			PaymentStatus:    models.PaymentStatusUnpaid,
 			TotalAmountCents: tier.PriceCents,
 			IdempotencyKey:   fmt.Sprintf("outbox-%d", id),
+			ExpiresAt:        time.Now().Add(time.Hour),
 		}
 	}
 	message := func(order *models.TicketOrder) TicketOrderMessage {
@@ -754,9 +741,23 @@ func TestIntegrationTransactionalOutboxCommitAndRollback(t *testing.T) {
 	}
 
 	committed := newOrder()
-	if err := env.svc.createOrderAndOutbox(ctx, committed, message(committed)); err != nil {
+	if err := env.svc.createOrderAndOutbox(ctx, committed, message(committed), nil); err != nil {
 		t.Fatalf("订单和 outbox 同事务提交失败: %v", err)
 	}
+	var reportRows int64
+	if err := env.db.Model(&models.FunnelOrderDaily{}).Where("event_id = ?", event.ID).Count(&reportRows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if reportRows != 0 {
+		t.Fatalf("report rows=%d", reportRows)
+	}
+	if err := env.db.Model(&models.FunnelVisitorDaily{}).Where("event_id = ? AND stage = ?", event.ID, models.FunnelStageSubmitted).Count(&reportRows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if reportRows != 0 {
+		t.Fatalf("submitted visitor rows=%d", reportRows)
+	}
+
 	env.db.Model(&models.TicketOrder{}).Where("id = ?", committed.ID).Count(&count)
 	if count != 1 {
 		t.Fatalf("提交后订单数 = %d，应为 1", count)
@@ -817,6 +818,7 @@ func TestIntegrationConsumerReservesBeforePendingPayment(t *testing.T) {
 	if failure == nil {
 		t.Fatal("库存不足时消费者应返回错误")
 	}
+	order = models.TicketOrder{}
 	if err := env.db.First(&order, failedReceipt.OrderID).Error; err != nil {
 		t.Fatalf("读取失败订单: %v", err)
 	}

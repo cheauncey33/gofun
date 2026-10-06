@@ -51,6 +51,7 @@ func (s TicketOrderStatus) HasBeenPaid() bool {
 
 type TicketOrder struct {
 	Base
+	RecoveryOnly          bool                  `gorm:"not null;default:false" json:"-"`
 	OrderNo               string                `gorm:"size:32;uniqueIndex;not null" json:"order_no"`
 	UserID                int64                 `gorm:"not null;index;uniqueIndex:uk_ticket_order_idempotency,priority:1" json:"user_id,string"`
 	OrganizerID           int64                 `gorm:"not null;index" json:"organizer_id,string"`
@@ -183,15 +184,16 @@ const (
 
 // TicketOrderOutbox 将订单消息先落库，再由后台转发到 MQ，避免创建成功却投递失败。
 type TicketOrderOutbox struct {
-	ID          int64                   `gorm:"primaryKey" json:"id,string"`
-	OrderID     int64                   `gorm:"not null;index:idx_outbox_order" json:"order_id,string"`
-	EventType   string                  `gorm:"size:64;not null" json:"event_type"`
-	Payload     string                  `gorm:"type:json;not null" json:"payload"`
-	Status      TicketOrderOutboxStatus `gorm:"size:16;not null;default:pending;index:idx_outbox_status_create,priority:1" json:"status"`
-	Attempts    int                     `gorm:"not null;default:0" json:"attempts"`
-	LastError   string                  `gorm:"size:512;not null;default:''" json:"last_error"`
-	CreateTime  time.Time               `gorm:"not null;autoCreateTime;index:idx_outbox_status_create,priority:2" json:"create_time"`
-	PublishedAt *time.Time              `json:"published_at,omitempty"`
+	ID            int64                   `gorm:"primaryKey" json:"id,string"`
+	OrderID       int64                   `gorm:"not null;index:idx_outbox_order;uniqueIndex:uk_outbox_order_event,priority:1" json:"order_id,string"`
+	EventType     string                  `gorm:"size:64;not null;uniqueIndex:uk_outbox_order_event,priority:2" json:"event_type"`
+	Payload       string                  `gorm:"type:json;not null" json:"payload"`
+	Status        TicketOrderOutboxStatus `gorm:"size:16;not null;default:pending;index:idx_outbox_status_create,priority:1" json:"status"`
+	Attempts      int                     `gorm:"not null;default:0" json:"attempts"`
+	LastError     string                  `gorm:"size:512;not null;default:''" json:"last_error"`
+	CreateTime    time.Time               `gorm:"not null;autoCreateTime;index:idx_outbox_status_create,priority:2" json:"create_time"`
+	NextAttemptAt time.Time               `gorm:"not null;default:CURRENT_TIMESTAMP(3)" json:"next_attempt_at"`
+	PublishedAt   *time.Time              `json:"published_at,omitempty"`
 }
 
 func (TicketOrderOutbox) TableName() string {
@@ -209,25 +211,6 @@ type TicketOrderConsumerInbox struct {
 
 func (TicketOrderConsumerInbox) TableName() string {
 	return "ticket_order_consumer_inbox"
-}
-
-type TicketStockRecoveryFenceOwner string
-
-const (
-	TicketStockRecoveryFenceOrder    TicketStockRecoveryFenceOwner = "order"
-	TicketStockRecoveryFenceRecovery TicketStockRecoveryFenceOwner = "recovery"
-)
-
-// TicketStockRecoveryFence 让订单事务与库存恢复任务竞争同一个 order_id。
-// order 表示订单和 Outbox 已在同一事务提交；recovery 表示恢复任务已取得 Redis 回滚权。
-type TicketStockRecoveryFence struct {
-	OrderID    int64                         `gorm:"primaryKey" json:"order_id,string"`
-	Owner      TicketStockRecoveryFenceOwner `gorm:"size:16;not null" json:"owner"`
-	CreateTime time.Time                     `gorm:"not null;autoCreateTime" json:"create_time"`
-}
-
-func (TicketStockRecoveryFence) TableName() string {
-	return "ticket_stock_recovery_fence"
 }
 
 type RushSaleStatus string

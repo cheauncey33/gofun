@@ -314,7 +314,7 @@ func createPublishedEvent(db *gorm.DB, organizerID int64, item seedEvent) error 
 			vip := models.TicketTier{
 				SessionID:          session.ID,
 				Name:               "VIP",
-				Description:        "第一排，视野最好",
+				Description:        "舞台正中前区",
 				PriceCents:         item.PriceCents + 8000,
 				OriginalPriceCents: &vipOrig,
 				PurchaseLimit:      2,
@@ -324,7 +324,7 @@ func createPublishedEvent(db *gorm.DB, organizerID int64, item seedEvent) error 
 			front := models.TicketTier{
 				SessionID:          session.ID,
 				Name:               "前排",
-				Description:        "靠近舞台的第二排",
+				Description:        "VIP 两侧前排",
 				PriceCents:         item.PriceCents + 3000,
 				OriginalPriceCents: &frontOrig,
 				PurchaseLimit:      4,
@@ -438,12 +438,18 @@ const (
 	theaterRows = 6
 	theaterCols = 10
 	aisleCol    = 6
-	vipRows     = 1
 	frontRows   = 2
 )
 
-func layoutTierForRow(row int, vipTierID, frontTierID, regularTierID int64) int64 {
-	if row <= vipRows {
+func isVIPCell(row, col int) bool {
+	if row < 1 || row > 2 {
+		return false
+	}
+	return col == 4 || col == 5 || col == 7 || col == 8
+}
+
+func layoutTierForCell(row, col int, vipTierID, frontTierID, regularTierID int64) int64 {
+	if isVIPCell(row, col) {
 		return vipTierID
 	}
 	if row <= frontRows {
@@ -468,11 +474,16 @@ func attachSmallTheaterLayout(tx *gorm.DB, eventID, sessionID, vipTierID, frontT
 			if col == aisleCol {
 				continue
 			}
-			tierID := layoutTierForRow(row, vipTierID, frontTierID, regularTierID)
+			tierID := layoutTierForCell(row, col, vipTierID, frontTierID, regularTierID)
 			seatTierID := tierID
+			zone := "general"
+			if isVIPCell(row, col) {
+				zone = "vip"
+			}
 			seats = append(seats, models.Seat{
 				LayoutID:     layout.ID,
 				TicketTierID: &seatTierID,
+				ZoneKey:      zone,
 				RowNo:        row,
 				ColNo:        col,
 				Label:        fmt.Sprintf("%c%d", 'A'+row-1, col),

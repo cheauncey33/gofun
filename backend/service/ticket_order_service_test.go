@@ -106,7 +106,7 @@ func TestAttendeeSnapshotDoesNotExposeRawIdentityNumber(t *testing.T) {
 	}
 }
 
-func TestPaymentDeadlineIgnoresSkewedExpiresAt(t *testing.T) {
+func TestPaymentDeadlineUsesPersistedExpiresAt(t *testing.T) {
 	node, err := snowflake.NewNode(1)
 	if err != nil {
 		t.Fatal(err)
@@ -118,11 +118,15 @@ func TestPaymentDeadlineIgnoresSkewedExpiresAt(t *testing.T) {
 		Status:    models.TicketOrderStatusPendingPayment,
 		ExpiresAt: time.Now().Add(-8 * time.Hour),
 	}
-	if !s.paymentWindowOpen(order) {
-		t.Fatal("payment window must stay open when snowflake id is recent")
+	if s.paymentWindowOpen(order) {
+		t.Fatal("expired order must have a closed payment window")
 	}
 	s.stampOrderExpiry(order)
-	if order.ExpiresAtUnix < time.Now().Unix()+10*60 {
-		t.Fatalf("expires_at_unix = %d, want at least 10 minutes remaining", order.ExpiresAtUnix)
+	if order.ExpiresAtUnix != order.ExpiresAt.Unix() {
+		t.Fatalf("expires_at_unix = %d, want %d", order.ExpiresAtUnix, order.ExpiresAt.Unix())
+	}
+	order.ExpiresAt = time.Now().Add(time.Minute)
+	if !s.paymentWindowOpen(order) {
+		t.Fatal("unexpired order must have an open payment window")
 	}
 }

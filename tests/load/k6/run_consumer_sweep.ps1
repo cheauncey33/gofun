@@ -9,7 +9,6 @@ param(
   [double]$StabilizeRelTol = 0.12,
   [int]$InventoryBucketCount = 32,
   [int]$OutboxPublishWorkers = 4,
-  [int]$PaymentTimeoutWorkers = 2,
   [int]$InnoDBFlushLogAtTrxCommit = 1,
   [switch]$SkipLogBin,
   [string]$BackendPort = "18590",
@@ -346,7 +345,6 @@ function Set-CommonEnv([int]$Workers) {
   $env:ORDER_CONSUMER_WORKER_COUNT = [string]$Workers
   $env:ORDER_CONSUMER_PREFETCH_COUNT = "5"
   $env:ORDER_CONSUMER_MAX_RETRIES = "3"
-  $env:DELAYED_ORDER_WORKER_COUNT = [string]$PaymentTimeoutWorkers
   $env:ORDER_OUTBOX_PUBLISH_WORKERS = [string]$OutboxPublishWorkers
   $env:ORDER_OUTBOX_PUBLISH_BATCH = "200"
   $env:MYSQL_MAX_OPEN_CONNS = "100"

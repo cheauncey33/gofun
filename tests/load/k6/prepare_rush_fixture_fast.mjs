@@ -11,7 +11,7 @@ const totalQuota = Number(process.env.RUSH_TOTAL_QUOTA || 50000);
 const perUserLimit = 20;
 const mysqlContainer = process.env.MYSQL_CONTAINER;
 const jwtSecret = process.env.K6_JWT_SECRET || "fuchang-integration-test-secret-only";
-const userPrefix = process.env.K6_FAST_USER_PREFIX || `fastk6_${Date.now()}_`;
+const userPrefix = process.env.K6_FAST_USER_PREFIX || `fk_${Date.now().toString(36)}_`;
 const outPath =
   process.env.K6_FIXTURE || join(root, "tests", "load", "k6", "fixtures", "rush_execute.json");
 
@@ -58,7 +58,7 @@ const rows = execFileSync(
     "-e",
     `SELECT id,username FROM user WHERE username LIKE '${userPrefix}%' ORDER BY id`,
   ],
-  { encoding: "utf8" },
+  { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 },
 )
   .trim()
   .split(/\r?\n/)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"gofun/models"
+	"gofun/pkg/logger"
 	apptelemetry "gofun/pkg/telemetry"
 	"log"
 	"strconv"
@@ -155,6 +156,7 @@ func (s *TicketOrderService) enqueueOutboxInTx(
 	defer span.End()
 	message.EventID = s.node.Generate().Int64()
 	message.EventType = ticketOrderFinalizeEventType
+	message.RequestID = logger.RequestID(ctx)
 	message.TraceContext = apptelemetry.InjectMap(ctx)
 	payload, err := json.Marshal(message)
 	if err != nil {
@@ -181,37 +183,23 @@ func (s *TicketOrderService) createOrderAndOutbox(
 	ctx context.Context,
 	order *models.TicketOrder,
 	message TicketOrderMessage,
+	preCommit func(tx *gorm.DB) error,
 ) error {
 	seated := len(message.SeatIDs) > 0
 	for attempt := 1; attempt <= ticketOrderTxMaxAttempts; attempt++ {
 		err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if !seated {
-				// 恢复任务也会尝试插入同一个 order_id。唯一键冲突会等待对方事务结束，
-				// 从而保证“订单提交”和“Redis 回滚”只能有一方取得执行权。
-				if err := tx.Create(&models.TicketStockRecoveryFence{
-					OrderID: order.ID,
-					Owner:   models.TicketStockRecoveryFenceOrder,
-				}).Error; err != nil {
+			// preCommit 在任何写入前执行：典型用途是「用户行锁 + 已购数量」的权威限购校验。
+			// 行锁在其他锁之前获取，保证同一用户的并发下单在此串行化且不引入锁环。
+			if preCommit != nil {
+				if err := preCommit(tx); err != nil {
 					return err
 				}
 			}
+
 			if err := tx.Create(order).Error; err != nil {
 				return err
 			}
-			if order.OrderSource != models.TicketOrderSourceWaitlist {
-				if err := upsertFunnelVisitorStage(
-					tx, order.EventID, order.OrganizerID, order.FunnelVisitorKey,
-					models.FunnelStageSubmitted, time.Now(),
-				); err != nil {
-					return err
-				}
-				if err := bumpFunnelOrderDaily(
-					tx, order.EventID, order.OrganizerID, string(order.OrderSource),
-					1, 0, 0, time.Now(),
-				); err != nil {
-					return err
-				}
-			}
+
 			if seated {
 				if err := holdSessionSeats(tx, order, message.SeatIDs); err != nil {
 					return err
@@ -221,9 +209,7 @@ func (s *TicketOrderService) createOrderAndOutbox(
 		})
 		if err == nil || !isRetryableMySQLTransactionError(err) ||
 			attempt == ticketOrderTxMaxAttempts {
-			if err == nil && order.OrderSource != models.TicketOrderSourceWaitlist {
-				bumpFunnelCacheVersion(ctx, s.rdb, order.OrganizerID)
-			}
+
 			return err
 		}
 		delay := time.Duration(attempt*10+int(order.ID%7)) * time.Millisecond

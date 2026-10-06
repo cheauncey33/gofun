@@ -1,6 +1,8 @@
 param(
   [string]$Project = "gofun-baseline",
   [string]$Vus = "100,200,500",
+  [int]$Rate = 0,
+  [string]$LoadProfile = "",
   [string]$Duration = "20s",
   [int]$DrainSeconds = 240,
   [int]$K6Users = 3000,
@@ -8,8 +10,9 @@ param(
   [int]$PerUserLimit = 20,
   [int]$TotalQuota = 200000,
   [int]$OrderConsumerWorkers = 6,
-  [int]$PaymentTimeoutWorkers = 2,
   [int]$OutboxPublishWorkers = 4,
+  [int]$HttpDBConnections = 100,
+  [int]$WorkerDBConnections = 0,
   [int]$InventoryBucketCount = 32,
   [string]$BackendPort = "18580",
   [string]$ElasticsearchPort = "19602",
@@ -22,10 +25,12 @@ param(
   [int]$SyncBinlog = 1,
   [switch]$SkipLogBin,
   [switch]$KeepStack,
+  [switch]$ReuseStack,
   [switch]$AllowHighPerUserLimit,
   [switch]$FastPrepare,
   [switch]$K6InDocker,
-  [string]$K6Image = "grafana/k6:latest"
+  [string]$K6Image = "grafana/k6:latest",
+  [string]$ResourceCompose = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -47,6 +52,9 @@ New-Item -ItemType Directory -Force -Path $outputPath | Out-Null
 
 $nobinlogCompose = Join-Path $repo "tests\load\docker-compose.nobinlog.yml"
 $composeArgs = @("compose", "-p", $Project, "-f", $baseCompose, "-f", $capacityCompose)
+if ($ResourceCompose) {
+  $composeArgs += @("-f", (Join-Path $repo $ResourceCompose))
+}
 if ($SkipLogBin) {
   $composeArgs += @("-f", $nobinlogCompose)
 }
@@ -69,7 +77,6 @@ function Wait-ForBackend {
       }
     } catch {
       # 数据库迁移初始化期间，HTTP 端口可能尚未可用。
-    }
     }
     Start-Sleep -Milliseconds 500
   } while ([DateTime]::UtcNow -lt $deadline)
@@ -253,6 +260,7 @@ function Invoke-Diagnostic {
   $diagnosticPath = Join-Path $repo "tests\load\k6\run_peak_diagnostic.ps1"
   $diagnosticArgs = @(
     "-Vus", $CurrentVus,
+    "-Rate", $Rate,
     "-Duration", $Duration,
     "-BaseUrl", $(if ($K6InDocker) { $k6BaseUrl } else { $baseUrl }),
     "-MetricsUrl", $metricsUrl,
@@ -260,6 +268,7 @@ function Invoke-Diagnostic {
     "-MysqlContainer", $mysqlContainer,
     "-OutputDir", $RunDir
   )
+  if ($LoadProfile) { $diagnosticArgs += @("-LoadProfile", $LoadProfile) }
   if ($K6InDocker) {
     $diagnosticArgs += @(
       "-K6InDocker",
@@ -360,10 +369,10 @@ $env:INVENTORY_BUCKET_RETRY = "4"
 $env:ORDER_CONSUMER_WORKER_COUNT = [string]$OrderConsumerWorkers
 $env:ORDER_CONSUMER_PREFETCH_COUNT = "5"
 $env:ORDER_CONSUMER_MAX_RETRIES = "3"
-$env:DELAYED_ORDER_WORKER_COUNT = [string]$PaymentTimeoutWorkers
 $env:ORDER_OUTBOX_PUBLISH_WORKERS = [string]$OutboxPublishWorkers
 $env:ORDER_OUTBOX_PUBLISH_BATCH = "200"
-$env:MYSQL_MAX_OPEN_CONNS = "100"
+$env:MYSQL_MAX_OPEN_CONNS = [string]$HttpDBConnections
+$env:MYSQL_WORKER_MAX_OPEN_CONNS = [string]$WorkerDBConnections
 $env:MYSQL_MAX_IDLE_CONNS = "10"
 $env:REDIS_POOL_SIZE = "100"
 $env:RATELIMIT_DISTRIBUTED_WRITE_ENABLED = "true"
@@ -373,8 +382,10 @@ $env:K6_JWT_SECRET = "fuchang-integration-test-secret-only"
 
 $rows = @()
 try {
-  Invoke-Compose @("down", "-v", "--remove-orphans")
-  Invoke-Compose @("up", "-d", "--build", "--wait")
+  if (-not $ReuseStack) {
+    Invoke-Compose @("down", "-v", "--remove-orphans")
+    Invoke-Compose @("up", "-d", "--build", "--wait")
+  }
   Wait-ForBackend
   Enable-MySqlStatementHistory
   if (-not $SkipLogBin) {
@@ -436,7 +447,11 @@ try {
     Save-FailureDiagnostics $campaignId $runDir
     $row = [pscustomobject]@{
       vus = $currentVus
+      target_rate = $Rate
       consumer_workers = $OrderConsumerWorkers
+      outbox_publish_workers = $OutboxPublishWorkers
+      http_db_connections = $HttpDBConnections
+      worker_db_connections = $WorkerDBConnections
       bucket_count = $InventoryBucketCount
       campaign_id = $campaignId
       http_reqs = $k6.http_reqs
@@ -484,7 +499,7 @@ try {
     "",
     "- generated_at: $(Get-Date -Format o)",
     "- topology: one backend + one Redis + one MySQL + one RabbitMQ + Elasticsearch",
-    "- configuration: same-db inventory buckets enabled, transactional outbox, $OrderConsumerWorkers order workers, prefetch 5, $PaymentTimeoutWorkers payment-timeout workers, $OutboxPublishWorkers outbox publisher workers",
+    "- configuration: same-db inventory buckets enabled, transactional outbox, $OrderConsumerWorkers order workers, prefetch 5, database timeout scanner, $OutboxPublishWorkers outbox publisher workers",
     "- durability: innodb_flush_log_at_trx_commit=$InnoDBFlushLogAtTrxCommit sync_binlog=$SyncBinlog skip_log_bin=$SkipLogBin",
     "- duration per VUS: $Duration; drain timeout: ${DrainSeconds}s",
     "",

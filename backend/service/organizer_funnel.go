@@ -352,34 +352,6 @@ func BumpFunnelCacheVersion(ctx context.Context, rdb *redis.Client, organizerID 
 	bumpFunnelCacheVersion(ctx, rdb, organizerID)
 }
 
-func bumpFunnelOrderDaily(
-	tx *gorm.DB,
-	eventID, organizerID int64,
-	source string,
-	submitted, paid, refunded int64,
-	at time.Time,
-) error {
-	if tx == nil || eventID <= 0 || organizerID <= 0 || source == "" {
-		return nil
-	}
-	if submitted == 0 && paid == 0 && refunded == 0 {
-		return nil
-	}
-	if at.IsZero() {
-		at = time.Now()
-	}
-	day := at.In(time.Local).Format("2006-01-02")
-	return tx.Exec(
-		`INSERT INTO funnel_order_daily (event_id, organizer_id, day, source, submitted, paid, refunded)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)
-		 ON DUPLICATE KEY UPDATE
-		   submitted = submitted + VALUES(submitted),
-		   paid = paid + VALUES(paid),
-		   refunded = refunded + VALUES(refunded)`,
-		eventID, organizerID, day, source, submitted, paid, refunded,
-	).Error
-}
-
 func (s *TicketCatalogService) GetOrganizerFunnel(
 	ctx context.Context,
 	userID, organizerID, eventID int64,

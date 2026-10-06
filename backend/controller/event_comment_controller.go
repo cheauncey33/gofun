@@ -97,19 +97,3 @@ func (ctrl *EventCommentController) Like(c *gin.Context) {
 	}
 	response.Success(c, gin.H{"like_count": count, "already_liked": false})
 }
-
-func writeCommentError(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, service.ErrCommentEventNotPublished),
-		errors.Is(err, service.ErrCommentNotFound):
-		response.Error(c, http.StatusNotFound, response.CodeNotFound, err.Error())
-	case errors.Is(err, service.ErrCommentForbidden):
-		response.Error(c, http.StatusForbidden, response.CodeForbidden, err.Error())
-	case errors.Is(err, service.ErrCommentRateLimited):
-		response.Error(c, http.StatusTooManyRequests, response.CodeTooManyRequests, err.Error())
-	case errors.Is(err, service.ErrCommentInvalid):
-		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, err.Error())
-	default:
-		response.Error(c, http.StatusInternalServerError, response.CodeInternalError, err.Error())
-	}
-}

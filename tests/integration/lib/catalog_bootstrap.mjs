@@ -86,8 +86,12 @@ export async function bootstrapRushCampaign({
   assert(tierRes.ok && tierRes.data?.data?.id, `create tier failed: ${JSON.stringify(tierRes.data)}`);
   const tierID = String(tierRes.data.data.id);
 
-  const publishRes = await http("POST", `/organizers/${organizerID}/events/${eventID}/publish`, {
+  const submitRes = await http("POST", `/organizers/${organizerID}/events/${eventID}/submit-review`, {
     token: owner.token,
+  });
+  assert(submitRes.ok, `submit review failed: ${JSON.stringify(submitRes.data)}`);
+  const publishRes = await http("POST", `/admin/events/${eventID}/approve`, {
+    token: adminToken,
   });
   assert(publishRes.ok, `publish failed: ${JSON.stringify(publishRes.data)}`);
 

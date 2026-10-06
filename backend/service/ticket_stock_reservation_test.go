@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log"
 	"strconv"
 	"testing"
 	"time"
@@ -276,5 +277,24 @@ func TestRecoverAllLeavesFreshReservations(t *testing.T) {
 	}
 	if got := mustRedisValue(t, mr, ticketStockKey(tier.ID)); got != "2" {
 		t.Fatalf("stock after recover-all=%s, want 2", got)
+	}
+}
+
+func (s *TicketOrderService) rollbackStockReservation(parent context.Context, reservation stockReservationResult) {
+	if reservation.Key == "" || reservation.OrderID <= 0 {
+		return
+	}
+	ctx, cancel := detachedReservationContext(parent)
+	defer cancel()
+	record, err := s.loadStockReservation(ctx, reservation.Key)
+	if err != nil {
+		log.Printf("load stock reservation for rollback order=%d: %v", reservation.OrderID, err)
+		return
+	}
+	if record == nil {
+		return
+	}
+	if err := s.rollbackLoadedStockReservation(ctx, *record); err != nil {
+		log.Printf("rollback stock reservation order=%d: %v", reservation.OrderID, err)
 	}
 }

@@ -171,16 +171,7 @@ func (s *TicketOrderService) CreateWaitlist(
 		if err := tx.Create(entry).Error; err != nil {
 			return err
 		}
-		if err := upsertFunnelVisitorStage(
-			tx, event.ID, event.OrganizerID, entry.FunnelVisitorKey,
-			models.FunnelStageSubmitted, now,
-		); err != nil {
-			return err
-		}
-		return bumpFunnelOrderDaily(
-			tx, event.ID, event.OrganizerID, string(models.TicketOrderSourceWaitlist),
-			1, 0, 0, now,
-		)
+		return nil
 	})
 	if err != nil {
 		if receipt, lookupErr := s.lookupIdempotentWaitlist(ctx, userID, idempotencyKey); lookupErr == nil && receipt != nil {
@@ -370,12 +361,7 @@ func (s *TicketOrderService) CancelWaitlist(
 			}).Error; err != nil {
 			return err
 		}
-		if queued {
-			return bumpFunnelOrderDaily(
-				tx, entry.EventID, entry.OrganizerID, string(models.TicketOrderSourceWaitlist),
-				0, 0, 1, now,
-			)
-		}
+
 		return nil
 	})
 	if err != nil {
@@ -737,18 +723,7 @@ func (s *TicketOrderService) applyWaitlistPaymentInTx(
 		Update("processed_at", &now).Error; err != nil {
 		return
 	}
-	if err = bumpFunnelOrderDaily(
-		tx, entry.EventID, entry.OrganizerID, string(models.TicketOrderSourceWaitlist),
-		0, 1, 0, now,
-	); err != nil {
-		return
-	}
-	if err = upsertFunnelVisitorStage(
-		tx, entry.EventID, entry.OrganizerID, entry.FunnelVisitorKey,
-		models.FunnelStagePaid, now,
-	); err != nil {
-		return
-	}
+
 	queued = true
 	userID, waitlistID, tierID, organizerID = entry.UserID, entry.ID, entry.TicketTierID, entry.OrganizerID
 	eventName, eventMessage = "waitlist_queued", "候补已付款，按付款成功顺序排队，有退票将派给你"
@@ -836,10 +811,7 @@ func (s *TicketOrderService) expireQueuedWaitlist(ctx context.Context, entry *mo
 			}).Error; err != nil {
 			return err
 		}
-		return bumpFunnelOrderDaily(
-			tx, entry.EventID, entry.OrganizerID, string(models.TicketOrderSourceWaitlist),
-			0, 0, 1, now,
-		)
+		return nil
 	})
 	if err != nil {
 		return err

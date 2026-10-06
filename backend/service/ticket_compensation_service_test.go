@@ -1,74 +1,58 @@
 package service
 
 import (
-	"testing"
-
+	"context"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+	"testing"
+	"time"
 )
 
-func TestReconcileRedisStockIsConservative(t *testing.T) {
+func TestRecoveryWorkerStopsOnCancellation(t *testing.T) {
+	worker := &TicketCompensationService{order: &TicketOrderService{scannerInterval: 10 * time.Second}}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		worker.Start(ctx)
+		close(done)
+	}()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("recovery worker did not stop")
+	}
+}
+
+func TestReconciliationReportsDrift(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
 	worker := &TicketCompensationService{rdb: rdb}
-	ctx := t.Context()
-
-	missingPendingKey := "stock:missing:pending"
-	anomaly, err := worker.reconcileRedisStock(
-		ctx, missingPendingKey, 5, "pending", true,
-		map[string]struct{}{missingPendingKey: {}},
-	)
-	if err != nil || !anomaly {
-		t.Fatalf("pending missing key anomaly=%v err=%v", anomaly, err)
-	}
-	if mr.Exists(missingPendingKey) {
-		t.Fatal("missing key with pending reservation must not be rebuilt")
-	}
-
-	missingSafeKey := "stock:missing:safe"
-	anomaly, err = worker.reconcileRedisStock(ctx, missingSafeKey, 5, "safe", true, nil)
-	if err != nil || !anomaly {
-		t.Fatalf("safe missing key anomaly=%v err=%v", anomaly, err)
-	}
-	if got, _ := mr.Get(missingSafeKey); got != "5" {
-		t.Fatalf("rebuilt stock=%q, want 5", got)
-	}
-
-	highKey := "stock:high"
-	mr.Set(highKey, "8")
-	anomaly, err = worker.reconcileRedisStock(ctx, highKey, 5, "high", true, nil)
-	if err != nil || !anomaly {
-		t.Fatalf("high stock anomaly=%v err=%v", anomaly, err)
-	}
-	if got, _ := mr.Get(highKey); got != "5" {
-		t.Fatalf("lowered stock=%q, want 5", got)
-	}
-
-	lowKey := "stock:low"
-	mr.Set(lowKey, "3")
-	anomaly, err = worker.reconcileRedisStock(ctx, lowKey, 5, "low", true, nil)
-	if err != nil || !anomaly {
-		t.Fatalf("low stock anomaly=%v err=%v", anomaly, err)
-	}
-	if got, _ := mr.Get(lowKey); got != "3" {
-		t.Fatalf("low stock was guessed upward to %q", got)
-	}
-}
-
-func TestLowerRedisStockIfUnchangedSkipsConcurrentChange(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	ctx := t.Context()
-	key := "stock:cas"
-	mr.Set(key, "4")
-
-	changed, err := lowerRedisStockIfUnchangedScript.Run(ctx, rdb, []string{key}, "8", 5).Int64()
-	if err != nil || changed != 0 {
-		t.Fatalf("cas changed=%d err=%v, want 0", changed, err)
-	}
-	if got, _ := mr.Get(key); got != "4" {
-		t.Fatalf("concurrent stock overwritten to %q", got)
+	for _, tc := range []struct {
+		name, value string
+		anomaly     bool
+	}{
+		{"missing", "", true}, {"high", "8", true}, {"low", "3", true}, {"equal", "5", false}, {"invalid", "bad", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key := "stock:" + tc.name
+			if tc.value != "" {
+				mr.Set(key, tc.value)
+			}
+			anomaly, err := worker.reconcileRedisStock(t.Context(), key, 5, tc.name, true, nil)
+			if err != nil || anomaly != tc.anomaly {
+				t.Fatalf("anomaly=%v err=%v", anomaly, err)
+			}
+			if tc.value == "" {
+				if mr.Exists(key) {
+					t.Fatal("check created stock key")
+				}
+				return
+			}
+			if got, _ := mr.Get(key); got != tc.value {
+				t.Fatalf("stock=%q want=%q", got, tc.value)
+			}
+		})
 	}
 }

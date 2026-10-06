@@ -685,7 +685,8 @@ func (s *TicketOrderService) createRushOrderAfterReservation(
 		StockBucketNo:      bucketNo,
 		RushBucketNo:       bucketNo,
 	}
-	if err := s.createOrderAndOutbox(ctx, order, message); err != nil {
+	// 抢票限购在 Lua 预扣内原子判定，无需 MySQL 行锁校验。
+	if err := s.createOrderAndOutbox(ctx, order, message, nil); err != nil {
 		return nil, err
 	}
 	s.notifyOutboxPublisher()

@@ -1,5 +1,7 @@
 param(
   [int]$Vus = 500,
+  [int]$Rate = 0,
+  [string]$LoadProfile = "",
   [string]$Duration = "20s",
   [string]$BaseUrl = "http://127.0.0.1:18380/api/v1",
   [string]$MetricsUrl = "http://127.0.0.1:18380/metrics",
@@ -193,12 +195,14 @@ if ($K6InDocker) {
     "--env", "BASE_URL=$effectiveBaseUrl",
     "--env", "K6_SUMMARY=/results/k6-summary.json",
     "--env", "VUS=$Vus",
+    "--env", "RATE=$Rate",
+    "--env", "LOAD_PROFILE=$LoadProfile",
     "--env", "DURATION=$Duration",
     $K6Image,
     "run",
     "/work/rush_execute.js"
   )
-  $process = Start-Process -FilePath "docker" -ArgumentList $k6Args -WorkingDirectory $repo -NoNewWindow -PassThru `
+  $process = Start-Process -FilePath "docker" -ArgumentList $k6Args -WorkingDirectory $repo -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput $k6StdoutPath -RedirectStandardError $k6StderrPath
 } else {
   $env:BASE_URL = $effectiveBaseUrl
@@ -206,12 +210,15 @@ if ($K6InDocker) {
   $k6Args = @(
     "run",
     "-e", "VUS=$Vus",
+    "-e", "RATE=$Rate",
+    "-e", "LOAD_PROFILE=$LoadProfile",
     "-e", "DURATION=$Duration",
     "-e", "K6_SUMMARY=$summaryPath",
     "tests/load/k6/rush_execute.js"
   )
-  $process = Start-Process -FilePath "k6" -ArgumentList $k6Args -WorkingDirectory $repo -NoNewWindow -PassThru
+  $process = Start-Process -FilePath "k6" -ArgumentList $k6Args -WorkingDirectory $repo -WindowStyle Hidden -PassThru
 }
+$null = $process.Handle
 while (-not $process.HasExited) {
   $samples.Add([pscustomobject]@{
     timestamp = (Get-Date).ToString("o")
@@ -226,6 +233,7 @@ while (-not $process.HasExited) {
   $process.Refresh()
 }
 
+$process.WaitForExit()
 $process.Refresh()
 $samples | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $outputPath "samples.json")
 $lockWaitRows = @($samples | ForEach-Object { @($_.mysql_lock_waits) })
@@ -247,6 +255,7 @@ $lockTargets = @($lockWaitRows | ForEach-Object {
 
 $diagnostic = [pscustomobject]@{
   vus = $Vus
+  target_rate = $Rate
   duration = $Duration
   base_url = $effectiveBaseUrl
   k6_transport = if ($K6InDocker) { "docker-network" } else { "host-port" }

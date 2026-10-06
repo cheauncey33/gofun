@@ -133,6 +133,46 @@ var (
 		[]string{"type"}, // missing | pending_missing | too_high | too_low | invalid
 	)
 
+	StockReturnTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "ticket_stock_return_total",
+			Help: "Inventory recovery event execution outcomes",
+		},
+		[]string{"result"}, // applied | exhausted | failed
+	)
+
+	StockReturnQueueDepth = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "ticket_stock_return_queue_depth",
+			Help: "Pending Outbox stock return events awaiting execution or retry",
+		},
+	)
+
+	StockReturnExhausted = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "ticket_stock_return_exhausted",
+			Help: "Outbox stock return events that exhausted automatic retries",
+		},
+	)
+
+	// PaymentRefundRecoveryTotal 统计 refunding 悬挂订单的重驱动结果。
+	PaymentRefundRecoveryTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "payment_refund_recovery_total",
+			Help: "Stuck refunding order recovery outcomes by compensation worker",
+		},
+		[]string{"result"}, // recovered | already_done | reverted | error
+	)
+
+	// UnmappedBusinessErrorTotal 用于发现「新增了哨兵却忘了登记翻译表」的退化。
+	UnmappedBusinessErrorTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "unmapped_business_error_total",
+			Help: "Service errors rendered with a generic message because no error spec matched",
+		},
+		[]string{"context"},
+	)
+
 	EventSearchSyncRuns = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "event_search_sync_total",
@@ -149,12 +189,12 @@ var (
 		[]string{"result"}, // allowed | rejected | error_fail_open | error_fail_closed
 	)
 
-	TicketTimeoutMessages = promauto.NewCounterVec(
+	TicketTimeoutOrders = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "ticket_timeout_messages_total",
-			Help: "Total ticket payment timeout messages by handling result",
+			Name: "ticket_timeout_orders_total",
+			Help: "Expired payment orders by processing result",
 		},
-		[]string{"result"}, // success | malformed | retry | permanent_discard
+		[]string{"result"}, // success | permanent | transient
 	)
 
 	MQMessagesPublished = promauto.NewCounter(

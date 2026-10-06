@@ -340,6 +340,9 @@ func TestIntegrationSeatedTimeoutRestoresSeatAndPublishes(t *testing.T) {
 	receipt := env.createSeatedOrder(t, user.ID, fmt.Sprintf("seat-timeout-%d", fx.stdSeatB.ID), fx.stdTier.ID, fx.stdSeatB.ID)
 	env.processSeated(t, user.ID, receipt, fx.stdTier.ID, []int64{fx.stdSeatB.ID})
 	before := env.userCacheVersion(t, user.ID)
+	if err := env.db.Model(&models.TicketOrder{}).Where("id = ?", receipt.OrderID).Update("expires_at", time.Now().Add(-time.Minute)).Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := env.svc.cancelPendingPaymentOnly(context.Background(), user.ID, receipt.OrderID, "支付超时自动取消"); err != nil {
 		t.Fatalf("timeout cancel: %v", err)
 	}

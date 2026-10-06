@@ -69,7 +69,6 @@ function Set-CommonEnv {
   $env:ORDER_CONSUMER_WORKER_COUNT = [string]$ConsumerWorkers
   $env:ORDER_CONSUMER_PREFETCH_COUNT = "5"
   $env:ORDER_CONSUMER_MAX_RETRIES = "3"
-  $env:DELAYED_ORDER_WORKER_COUNT = "2"
   $env:ORDER_OUTBOX_PUBLISH_WORKERS = [string]$OutboxPublishWorkers
   $env:ORDER_OUTBOX_PUBLISH_BATCH = "200"
   $env:MYSQL_MAX_OPEN_CONNS = [string]$HttpMaxOpenConns

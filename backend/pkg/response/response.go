@@ -68,7 +68,9 @@ func getRequestID(c *gin.Context) string {
 	return ""
 }
 
-func mapAppErrToHTTP(bizCode int) int {
+// HTTPStatusFromCode 由业务码的前两位推导 HTTP 状态码。
+// 业务码体系刻意让 4xxxx 与 HTTP 4xx 对齐，因此这里不需要额外的映射表。
+func HTTPStatusFromCode(bizCode int) int {
 	switch bizCode / 100 {
 	case 400:
 		return http.StatusBadRequest
@@ -85,4 +87,8 @@ func mapAppErrToHTTP(bizCode int) int {
 	default:
 		return http.StatusInternalServerError
 	}
+}
+
+func mapAppErrToHTTP(bizCode int) int {
+	return HTTPStatusFromCode(bizCode)
 }

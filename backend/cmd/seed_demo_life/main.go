@@ -444,7 +444,7 @@ func ensureEventVIPZone(db *gorm.DB, event *models.Event) error {
 		created := models.TicketTier{
 			SessionID:          session.ID,
 			Name:               "VIP",
-			Description:        "第一排，视野最好",
+			Description:        "舞台正中前区",
 			PriceCents:         base + 5000,
 			OriginalPriceCents: &orig,
 			PurchaseLimit:      2,
@@ -456,39 +456,16 @@ func ensureEventVIPZone(db *gorm.DB, event *models.Event) error {
 		}
 		vip = &created
 	}
-	if err := db.Exec(`
-		UPDATE session_seat ss
-		INNER JOIN seat s ON s.id = ss.seat_id
-		SET ss.ticket_tier_id = ?
-		WHERE ss.session_id = ? AND s.row_no = 1
-	`, vip.ID, session.ID).Error; err != nil {
-		return err
-	}
-	if err := db.Exec(`
-		UPDATE seat s
-		INNER JOIN session_seat ss ON ss.seat_id = s.id
-		SET s.ticket_tier_id = ?
-		WHERE ss.session_id = ? AND s.row_no = 1
-	`, vip.ID, session.ID).Error; err != nil {
+	if err := remapSessionSeats(db, session.ID, regular.ID, "s.row_no >= 3"); err != nil {
 		return err
 	}
 	if front != nil {
-		if err := db.Exec(`
-			UPDATE session_seat ss
-			INNER JOIN seat s ON s.id = ss.seat_id
-			SET ss.ticket_tier_id = ?
-			WHERE ss.session_id = ? AND s.row_no = 2
-		`, front.ID, session.ID).Error; err != nil {
+		if err := remapSessionSeats(db, session.ID, front.ID, "s.row_no <= 2"); err != nil {
 			return err
 		}
-		if err := db.Exec(`
-			UPDATE seat s
-			INNER JOIN session_seat ss ON ss.seat_id = s.id
-			SET s.ticket_tier_id = ?
-			WHERE ss.session_id = ? AND s.row_no = 2
-		`, front.ID, session.ID).Error; err != nil {
-			return err
-		}
+	}
+	if err := remapSessionSeats(db, session.ID, vip.ID, "s.row_no <= 2 AND s.col_no IN (4,5,7,8)"); err != nil {
+		return err
 	}
 	for _, tier := range []*models.TicketTier{vip, front, regular} {
 		if tier == nil {
@@ -561,20 +538,53 @@ func occupySessionMap(db *gorm.DB, sessionID int64) error {
 	return nil
 }
 
-func mockSeatStatus(row, col int) models.SessionSeatStatus {
-	if row == 1 {
-		switch col {
-		case 4, 5, 8:
-			return models.SessionSeatAvailable
-		case 10:
-			return models.SessionSeatHeld
-		default:
-			return models.SessionSeatSold
-		}
+func remapSessionSeats(db *gorm.DB, sessionID, tierID int64, seatWhere string) error {
+	if err := db.Exec(`
+		UPDATE session_seat ss
+		INNER JOIN seat s ON s.id = ss.seat_id
+		SET ss.ticket_tier_id = ?
+		WHERE ss.session_id = ? AND (`+seatWhere+`)
+	`, tierID, sessionID).Error; err != nil {
+		return err
 	}
-	if row == 2 {
+	return db.Exec(`
+		UPDATE seat s
+		INNER JOIN session_seat ss ON ss.seat_id = s.id
+		SET s.ticket_tier_id = ?, s.zone_key = ?
+		WHERE ss.session_id = ? AND (`+seatWhere+`)
+	`, tierID, zoneKeyForTierWhere(seatWhere), sessionID).Error
+}
+
+func zoneKeyForTierWhere(seatWhere string) string {
+	if strings.Contains(seatWhere, "col_no IN (4,5,7,8)") {
+		return "vip"
+	}
+	return "general"
+}
+
+func isVIPCell(row, col int) bool {
+	if row < 1 || row > 2 {
+		return false
+	}
+	return col == 4 || col == 5 || col == 7 || col == 8
+}
+
+func mockSeatStatus(row, col int) models.SessionSeatStatus {
+	if isVIPCell(row, col) {
+		if row == 1 && col == 5 {
+			return models.SessionSeatAvailable
+		}
+		if row == 2 && col == 5 {
+			return models.SessionSeatAvailable
+		}
+		if row == 2 && col == 7 {
+			return models.SessionSeatHeld
+		}
+		return models.SessionSeatSold
+	}
+	if row <= 2 {
 		switch col {
-		case 2, 5, 8:
+		case 2, 10:
 			return models.SessionSeatAvailable
 		case 1:
 			return models.SessionSeatHeld
